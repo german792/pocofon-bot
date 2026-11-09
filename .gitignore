@@ -1,0 +1,48 @@
+# Environment & Secrets (НИКОГДА не заливать)
+.env
+.env.*
+!.env.example
+.session_cookie
+.davinci_token
+.davinci_refresh_token
+cookies.txt
+data/
+
+# Python cache & virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# Media & Temp files
+videos/
+*.mp4
+*.mp3
+*.wav
+*.png
+*.jpg
+*.jpeg
+*.gif
+!Watermark.gif
+!Watermark.webm
+
+# Temporary research & probe scripts/dumps
+*.csv
+found_api_chunk.js
+script_main.js
+save_full_cfg.py
+seedance_probed.txt
+site_apis.txt
+test_video.mp4
+zoomeye_search.py
+zoomeye_seedance_found.json
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+.agents/

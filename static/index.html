@@ -1,0 +1,3597 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>POCO AI Studio — Генерация Видео и Фото (MOGGED AI)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* Telegram & MOGGED AI Brand Palette */
+      --tg-bg: #0e1621;
+      --tg-surface: #17212b;
+      --tg-bubble: #182533;
+      --tg-bubble-user: #2b5278;
+      --tg-btn: #242f3d;
+      --tg-btn-hover: #2b394a;
+      --tg-btn-active: #2b5278;
+      --tg-border: rgba(255, 255, 255, 0.08);
+      --tg-border-active: #6cb6f5;
+
+      /* Brand Accents */
+      --cyan: #6cb6f5;
+      --cyan-glow: rgba(108, 182, 245, 0.35);
+      --neon: #27fe78;
+      --neon-glow: rgba(39, 254, 120, 0.45);
+      --user-green: #22c55e;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+
+      /* Typography */
+      --text-white: #ffffff;
+      --text-main: #e4ecf2;
+      --text-muted: #7f91a4;
+      --text-dim: #546575;
+
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 18px;
+      --radius-pill: 9999px;
+      --transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      background-color: var(--tg-bg);
+      color: var(--text-main);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+      background-image: 
+        radial-gradient(circle at 10% 5%, rgba(39, 254, 120, 0.06) 0%, transparent 40%),
+        radial-gradient(circle at 90% 15%, rgba(108, 182, 245, 0.08) 0%, transparent 45%),
+        radial-gradient(circle at 50% 90%, rgba(39, 254, 120, 0.04) 0%, transparent 50%);
+      background-attachment: fixed;
+    }
+
+    /* Ambient Subtle Grid */
+    .ambient-grid {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background-size: 40px 40px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 16px 20px 60px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 20px;
+      background: rgba(23, 33, 43, 0.85);
+      backdrop-filter: blur(14px);
+      border: 1px solid var(--tg-border);
+      border-radius: var(--radius-lg);
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      text-decoration: none;
+    }
+
+    .brand-badge-video {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1.5px solid rgba(39, 254, 120, 0.5);
+      box-shadow: 0 0 16px var(--neon-glow);
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+
+    .brand-badge-video video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .brand-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .brand-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-title {
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--cyan);
+      letter-spacing: 0.5px;
+      text-shadow: 0 0 16px var(--cyan-glow);
+    }
+
+    .mogged-pill {
+      font-size: 11px;
+      font-weight: 800;
+      color: #0b1510;
+      background: var(--neon);
+      padding: 2px 8px;
+      border-radius: var(--radius-pill);
+      letter-spacing: 0.8px;
+      box-shadow: 0 0 12px var(--neon-glow);
+      text-transform: uppercase;
+    }
+
+    .brand-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(36, 47, 61, 0.6);
+      border: 1px solid var(--tg-border);
+      padding: 6px 14px;
+      border-radius: var(--radius-pill);
+      font-size: 12px;
+      color: var(--text-main);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--neon);
+      box-shadow: 0 0 8px var(--neon);
+      animation: pulse-dot 2s infinite;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.25); opacity: 0.7; }
+    }
+
+    .tg-bot-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: linear-gradient(135deg, #2b5278, #1e3a56);
+      color: var(--text-white);
+      padding: 8px 16px;
+      border-radius: var(--radius-pill);
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: none;
+      border: 1px solid rgba(108, 182, 245, 0.4);
+      box-shadow: 0 0 12px rgba(108, 182, 245, 0.2);
+      transition: var(--transition);
+    }
+
+    .tg-bot-link:hover {
+      background: linear-gradient(135deg, #376694, #244463);
+      border-color: var(--cyan);
+      box-shadow: 0 0 20px var(--cyan-glow);
+      transform: translateY(-1px);
+    }
+
+    /* Main Studio Grid */
+    .studio-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 24px;
+      align-items: start;
+    }
+
+    @media (max-width: 1080px) {
+      .studio-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Panel Card */
+    .panel {
+      background: var(--tg-surface);
+      border: 1px solid var(--tg-border);
+      border-radius: var(--radius-lg);
+      padding: 22px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+    }
+
+    /* Frutiger Aero Category Switcher */
+    .category-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      background: linear-gradient(180deg, rgba(14, 22, 33, 0.95) 0%, rgba(8, 13, 20, 0.95) 100%);
+      border-radius: var(--radius-md);
+      padding: 6px;
+      gap: 8px;
+      margin-bottom: 22px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.6), 0 1px 0 rgba(255, 255, 255, 0.05);
+      position: relative;
+    }
+
+    .cat-btn {
+      position: relative;
+      padding: 10px 18px;
+      background: linear-gradient(180deg, rgba(36, 47, 61, 0.5) 0%, rgba(24, 33, 44, 0.7) 100%);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 10px;
+      color: var(--text-muted);
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      overflow: hidden;
+    }
+
+    /* Frutiger Aero Glass Top Highlight for inactive button */
+    .cat-btn::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 48%;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.01) 100%);
+      border-radius: 9px 9px 40px 40px / 9px 9px 12px 12px;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+
+    .cat-btn:hover:not(.active) {
+      color: var(--text-white);
+      background: linear-gradient(180deg, rgba(43, 82, 120, 0.4) 0%, rgba(30, 48, 68, 0.6) 100%);
+      border-color: rgba(108, 182, 245, 0.3);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    /* Active Frutiger Aero Glass Pill */
+    .cat-btn.active {
+      background: linear-gradient(180deg, 
+        rgba(56, 189, 248, 0.35) 0%, 
+        rgba(14, 165, 233, 0.22) 48%, 
+        rgba(15, 35, 55, 0.85) 50%, 
+        rgba(20, 45, 70, 0.95) 100%);
+      color: #ffffff;
+      border: 1.5px solid rgba(108, 182, 245, 0.65);
+      border-top-color: rgba(255, 255, 255, 0.85);
+      border-bottom-color: rgba(14, 28, 44, 0.9);
+      box-shadow: 
+        inset 0 1px 1px rgba(255, 255, 255, 0.85),
+        inset 0 -2px 4px rgba(0, 0, 0, 0.4),
+        0 4px 18px rgba(56, 189, 248, 0.35),
+        0 0 10px rgba(39, 254, 120, 0.2);
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6), 0 0 10px rgba(108, 182, 245, 0.5);
+    }
+
+    /* Active Specular Arc */
+    .cat-btn.active::before {
+      background: linear-gradient(180deg, 
+        rgba(255, 255, 255, 0.65) 0%, 
+        rgba(255, 255, 255, 0.18) 75%, 
+        transparent 100%);
+      border-radius: 9px 9px 50px 50px / 9px 9px 14px 14px;
+    }
+
+    /* Shimmer sweep effect on hover */
+    .cat-btn::after {
+      content: "";
+      position: absolute;
+      top: -50%; left: -60%;
+      width: 40%; height: 200%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent);
+      transform: rotate(25deg);
+      pointer-events: none;
+      transition: transform 0.6s ease;
+      opacity: 0;
+    }
+
+    .cat-btn:hover::after {
+      opacity: 1;
+      transform: rotate(25deg) translateX(450%);
+    }
+
+    .aero-icon-wrap {
+      position: relative;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
+      transition: transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      flex-shrink: 0;
+    }
+
+    .cat-btn:hover .aero-icon-wrap {
+      transform: translateY(-2px) scale(1.1);
+      filter: drop-shadow(0 4px 12px rgba(108, 182, 245, 0.6));
+    }
+
+    .aero-img-icon {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+
+    .aero-tab-label {
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: 0.8px;
+    }
+
+    /* Mini aero icons inside model cards and card header */
+    .mini-aero-model-icon {
+      width: 18px;
+      height: 18px;
+      object-fit: contain;
+      vertical-align: middle;
+      filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+      flex-shrink: 0;
+    }
+
+    .card-aero-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      filter: drop-shadow(0 2px 6px rgba(108, 182, 245, 0.5));
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+
+    .card-aero-icon img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    /* 3D Frutiger Aero Play Orb for Player Placeholder */
+    .aero-play-orb {
+      position: relative;
+      width: 68px;
+      height: 68px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.35), rgba(39, 254, 120, 0.3));
+      border: 1.5px solid rgba(255, 255, 255, 0.65);
+      box-shadow: 
+        inset 0 2px 4px rgba(255, 255, 255, 0.85),
+        inset 0 -2px 6px rgba(0, 0, 0, 0.5),
+        0 8px 24px rgba(56, 189, 248, 0.4),
+        0 0 16px rgba(39, 254, 120, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 12px;
+      backdrop-filter: blur(8px);
+      cursor: pointer;
+      transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    .aero-play-orb:hover {
+      transform: scale(1.1);
+      box-shadow: 
+        inset 0 2px 6px rgba(255, 255, 255, 0.95),
+        0 12px 30px rgba(56, 189, 248, 0.6),
+        0 0 24px rgba(39, 254, 120, 0.5);
+    }
+
+    .aero-orb-shine {
+      position: absolute;
+      top: 3px; left: 8px; right: 8px;
+      height: 26px;
+      border-radius: 50% 50% 40% 40% / 60% 60% 40% 40%;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.1) 100%);
+      pointer-events: none;
+    }
+
+    .aero-play-arrow {
+      width: 24px;
+      height: 24px;
+      color: #ffffff;
+      filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+      margin-left: 3px;
+      position: relative;
+      z-index: 2;
+    }
+
+    .aero-placeholder-text {
+      font-size: 13px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .aero-badge-inline {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-weight: 600;
+      color: var(--cyan);
+    }
+
+    .aero-badge-inline img {
+      width: 14px;
+      height: 14px;
+      object-fit: contain;
+    }
+
+    /* Form Section */
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+
+    .section-title span.badge {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--neon);
+      background: rgba(39, 254, 120, 0.12);
+      border: 1px solid rgba(39, 254, 120, 0.3);
+      padding: 2px 8px;
+      border-radius: var(--radius-pill);
+      text-transform: none;
+    }
+
+    /* Prompt Input */
+    .prompt-box {
+      position: relative;
+    }
+
+    textarea#promptInput {
+      width: 100%;
+      height: 100px;
+      background: var(--tg-bg);
+      border: 1.5px solid var(--tg-border);
+      border-radius: var(--radius-md);
+      padding: 14px;
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--text-white);
+      font-family: inherit;
+      resize: vertical;
+      transition: var(--transition);
+    }
+
+    textarea#promptInput:focus {
+      outline: none;
+      border-color: var(--cyan);
+      box-shadow: 0 0 16px var(--cyan-glow);
+      background: rgba(14, 22, 33, 0.95);
+    }
+
+    .prompt-suggestions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .pill-suggest {
+      background: var(--tg-btn);
+      border: 1px solid var(--tg-border);
+      color: var(--text-muted);
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: var(--radius-pill);
+      cursor: pointer;
+      transition: var(--transition);
+    }
+
+    .pill-suggest:hover {
+      color: var(--text-white);
+      border-color: var(--cyan);
+      background: var(--tg-btn-hover);
+    }
+
+    /* Telegram Inline Buttons Grid (2 per row) */
+    .tg-keyboard-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      max-height: 380px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    @media (max-width: 640px) {
+      .tg-keyboard-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Custom Scrollbar for Telegram grid */
+    .tg-keyboard-grid::-webkit-scrollbar {
+      width: 5px;
+    }
+    .tg-keyboard-grid::-webkit-scrollbar-track {
+      background: var(--tg-bg);
+      border-radius: 4px;
+    }
+    .tg-keyboard-grid::-webkit-scrollbar-thumb {
+      background: var(--tg-btn);
+      border-radius: 4px;
+    }
+
+    .tg-inline-btn {
+      background: var(--tg-btn);
+      border: 1px solid var(--tg-border);
+      border-radius: var(--radius-md);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      cursor: pointer;
+      transition: var(--transition);
+      position: relative;
+      text-align: left;
+    }
+
+    .tg-inline-btn:hover {
+      background: var(--tg-btn-hover);
+      border-color: rgba(108, 182, 245, 0.3);
+      transform: translateY(-1px);
+    }
+
+    .tg-inline-btn.active {
+      background: linear-gradient(135deg, rgba(43, 82, 120, 0.8), rgba(24, 37, 51, 0.95));
+      border: 1.5px solid var(--cyan);
+      box-shadow: 0 0 14px var(--cyan-glow);
+    }
+
+    .tg-inline-btn.active::after {
+      content: "✓";
+      position: absolute;
+      top: 10px;
+      right: 12px;
+      font-weight: 800;
+      color: var(--neon);
+      text-shadow: 0 0 8px var(--neon);
+      font-size: 13px;
+    }
+
+    .model-btn-top {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-white);
+    }
+
+    .tg-inline-btn.active .model-btn-top {
+      color: var(--cyan);
+    }
+
+    .model-btn-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.3;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .model-btn-tags {
+      display: flex;
+      gap: 4px;
+      margin-top: 4px;
+    }
+
+    .mini-badge {
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .mini-badge.ref {
+      background: rgba(39, 254, 120, 0.15);
+      color: var(--neon);
+      border: 1px solid rgba(39, 254, 120, 0.3);
+    }
+
+    .mini-badge.audio {
+      background: rgba(108, 182, 245, 0.15);
+      color: var(--cyan);
+      border: 1px solid rgba(108, 182, 245, 0.3);
+    }
+
+    /* Parameters Selector Row */
+    .params-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .param-block {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .param-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      letter-spacing: 0.5px;
+    }
+
+    .param-pills {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+
+    .pill-btn {
+      flex: 1;
+      min-width: 44px;
+      padding: 8px 10px;
+      background: var(--tg-bg);
+      border: 1px solid var(--tg-border);
+      border-radius: var(--radius-sm);
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      transition: var(--transition);
+    }
+
+    .pill-btn:hover {
+      background: var(--tg-btn);
+      color: var(--text-white);
+    }
+
+    .pill-btn.active {
+      background: var(--tg-bubble-user);
+      color: var(--text-white);
+      border-color: var(--cyan);
+      box-shadow: 0 0 10px var(--cyan-glow);
+    }
+
+    /* Audio & Options Toggles */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--tg-bg);
+      padding: 12px 14px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--tg-border);
+      margin-top: 12px;
+    }
+
+    .toggle-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 46px;
+      height: 24px;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: var(--tg-btn);
+      transition: .3s;
+      border-radius: 24px;
+      border: 1px solid var(--tg-border);
+    }
+
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 2px;
+      bottom: 2px;
+      background-color: var(--text-muted);
+      transition: .3s;
+      border-radius: 50%;
+    }
+
+    input:checked + .slider {
+      background-color: var(--tg-bubble-user);
+      border-color: var(--neon);
+    }
+
+    input:checked + .slider:before {
+      transform: translateX(22px);
+      background-color: var(--neon);
+      box-shadow: 0 0 8px var(--neon);
+    }
+
+    /* References Zone */
+    .ref-zone {
+      margin-top: 16px;
+      background: var(--tg-bg);
+      border: 1.5px dashed var(--tg-border);
+      border-radius: var(--radius-md);
+      padding: 14px;
+      transition: var(--transition);
+    }
+
+    .ref-zone.dragover {
+      border-color: var(--neon);
+      background: rgba(39, 254, 120, 0.05);
+    }
+
+    .ref-zone-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .ref-count-text {
+      font-size: 12px;
+      color: var(--cyan);
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .ref-preview-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .ref-item {
+      position: relative;
+      width: 70px;
+      height: 70px;
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      border: 1px solid var(--tg-border);
+      background: #000;
+    }
+
+    .ref-item img, .ref-item video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .ref-remove-btn {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      width: 18px;
+      height: 18px;
+      background: rgba(0, 0, 0, 0.7);
+      color: #fff;
+      border: none;
+      border-radius: 50%;
+      font-size: 11px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .ref-badge-num {
+      position: absolute;
+      bottom: 2px;
+      left: 2px;
+      background: rgba(0,0,0,0.6);
+      font-size: 9px;
+      padding: 1px 4px;
+      border-radius: 3px;
+      color: var(--neon);
+      font-family: monospace;
+    }
+
+    .drop-trigger {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px;
+      background: var(--tg-btn);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-main);
+      transition: var(--transition);
+    }
+
+    .drop-trigger:hover {
+      background: var(--tg-btn-hover);
+      color: var(--cyan);
+    }
+
+    /* Launch Bar */
+    .launch-bar {
+      margin-top: 24px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .cost-display {
+      flex: 1;
+      background: var(--tg-bg);
+      border: 1px solid var(--tg-border);
+      border-radius: var(--radius-md);
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .cost-icon {
+      font-size: 20px;
+    }
+
+    .cost-meta {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .cost-title {
+      font-size: 11px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+
+    .cost-val {
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--neon);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .btn-submit {
+      flex: 1.6;
+      background: linear-gradient(135deg, #27fe78, #18b552);
+      color: #05140b;
+      border: none;
+      border-radius: var(--radius-md);
+      padding: 15px 24px;
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      box-shadow: 0 0 24px var(--neon-glow);
+      transition: var(--transition);
+    }
+
+    .btn-submit:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 0 34px rgba(39, 254, 120, 0.7);
+      filter: brightness(1.08);
+    }
+
+    .btn-submit:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      filter: grayscale(0.5);
+    }
+
+    /* RIGHT COLUMN: Authentic Telegram Chat Card Replica */
+    .preview-column {
+      position: sticky;
+      top: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .tg-chat-frame {
+      background: #0e1621;
+      border: 1px solid var(--tg-border);
+      border-radius: var(--radius-lg);
+      padding: 18px 16px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+      position: relative;
+      overflow: hidden;
+      background-image: radial-gradient(circle at 50% 50%, rgba(24, 37, 51, 0.4) 0%, transparent 100%);
+    }
+
+    /* User Message Bubble */
+    .tg-msg-user {
+      align-self: flex-end;
+      background: var(--tg-bubble-user);
+      border-radius: 14px 14px 4px 14px;
+      padding: 10px 14px;
+      max-width: 85%;
+      margin-left: auto;
+      margin-bottom: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      position: relative;
+    }
+
+    .tg-msg-user .user-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+
+    .tg-msg-user .user-name {
+      font-size: 12px;
+      font-weight: 700;
+      color: #9cd3ff;
+    }
+
+    .tg-msg-user .user-prompt-text {
+      font-size: 13px;
+      color: #fff;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+
+    .tg-msg-user .msg-time {
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.6);
+      text-align: right;
+      margin-top: 4px;
+    }
+
+    /* Bot Replica Bubble */
+    .tg-bubble-card {
+      background: var(--tg-bubble);
+      border-radius: 14px 14px 14px 4px;
+      padding: 14px 16px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      position: relative;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    }
+
+    .tg-bubble-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .tg-bubble-author {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--cyan);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .tg-bubble-mogged {
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--neon);
+      text-shadow: 0 0 10px var(--neon-glow);
+      letter-spacing: 0.6px;
+    }
+
+    /* Telegram Quoted Reply Box */
+    .tg-quote-box {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(36, 47, 61, 0.5);
+      border-left: 3px solid var(--user-green);
+      border-radius: 4px 8px 8px 4px;
+      padding: 6px 10px;
+      margin-bottom: 12px;
+    }
+
+    .tg-quote-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      background: #2a3c4e;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .tg-quote-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .tg-quote-content {
+      overflow: hidden;
+    }
+
+    .tg-quote-user {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--user-green);
+    }
+
+    .tg-quote-text {
+      font-size: 12px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Menu Text List */
+    .tg-menu-list {
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text-white);
+      font-family: inherit;
+    }
+
+    .tg-menu-list .menu-heading {
+      font-weight: 700;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #fff;
+    }
+
+    .tg-menu-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      margin-bottom: 4px;
+      word-break: break-word;
+    }
+
+    .tg-menu-item b {
+      color: var(--text-main);
+      font-weight: 600;
+    }
+
+    .tg-menu-item span.highlight {
+      color: #fff;
+    }
+
+    .tg-menu-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 12px;
+      line-height: 1.4;
+      background: rgba(0, 0, 0, 0.2);
+      padding: 8px 10px;
+      border-radius: 6px;
+    }
+
+    .tg-menu-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      font-size: 10px;
+      color: var(--text-dim);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .tg-time-checks {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      color: var(--cyan);
+    }
+
+    /* Live Output & Video Player Container */
+    .output-frame {
+      background: var(--tg-surface);
+      border: 1px solid var(--tg-border);
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .output-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .output-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Progress Stage */
+    .progress-box {
+      background: var(--tg-bg);
+      border: 1px solid var(--tg-border);
+      border-radius: var(--radius-md);
+      padding: 16px;
+      display: none;
+    }
+
+    .progress-bar-wrap {
+      width: 100%;
+      height: 8px;
+      background: var(--tg-btn);
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 10px 0 6px;
+      position: relative;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      width: 15%;
+      background: linear-gradient(90deg, #27fe78, #6cb6f5);
+      border-radius: 4px;
+      transition: width 0.3s ease;
+      box-shadow: 0 0 10px var(--neon-glow);
+    }
+
+    .progress-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Player Area */
+    .player-area {
+      position: relative;
+      width: 100%;
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      background: #000;
+      min-height: 240px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--tg-border);
+    }
+
+    .player-area video, .player-area img {
+      width: 100%;
+      max-height: 480px;
+      object-fit: contain;
+      display: block;
+    }
+
+    .player-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      color: var(--text-dim);
+      padding: 30px 20px;
+      text-align: center;
+    }
+
+    .player-placeholder svg {
+      width: 48px;
+      height: 48px;
+      opacity: 0.3;
+    }
+
+    /* Result Action Buttons */
+    .result-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .btn-action {
+      flex: 1;
+      background: var(--tg-btn);
+      border: 1px solid var(--tg-border);
+      color: var(--text-main);
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      text-decoration: none;
+      transition: var(--transition);
+    }
+
+    .btn-action:hover {
+      background: var(--tg-btn-hover);
+      border-color: var(--cyan);
+      color: var(--cyan);
+    }
+
+    /* Gallery Section */
+    .gallery-section {
+      margin-top: 40px;
+    }
+
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .gallery-card {
+      background: var(--tg-surface);
+      border: 1px solid var(--tg-border);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      cursor: pointer;
+      transition: var(--transition);
+      position: relative;
+    }
+
+    .gallery-card:hover {
+      transform: translateY(-4px);
+      border-color: var(--cyan);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    }
+
+    .gallery-card-thumb {
+      width: 100%;
+      height: 150px;
+      background: #000;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .gallery-card-thumb img, .gallery-card-thumb video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .gallery-card-info {
+      padding: 10px 12px;
+    }
+
+    .gallery-card-title {
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--text-white);
+    }
+
+    .gallery-card-date {
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-top: 4px;
+      font-family: monospace;
+    }
+
+    /* Notification Toast */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--tg-surface);
+      border: 1px solid var(--tg-border);
+      border-radius: var(--radius-md);
+      padding: 12px 18px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      z-index: 1000;
+      transform: translateY(100px);
+      opacity: 0;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .toast.show {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    .toast.error {
+      border-color: var(--danger);
+      color: #fca5a5;
+    }
+
+    .toast.success {
+      border-color: var(--neon);
+      color: #a7f3d0;
+    }
+
+    /* --- FRUTIGER AERO ACCESS MODAL & ADMIN STYLES --- */
+    .aero-admin-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 14px;
+      background: linear-gradient(180deg, rgba(255, 215, 0, 0.22) 0%, rgba(217, 119, 6, 0.15) 100%);
+      border: 1px solid rgba(251, 191, 36, 0.45);
+      border-radius: 30px;
+      color: #fef3c7;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(245, 158, 11, 0.15), inset 0 1px 1px rgba(255, 255, 255, 0.4);
+      transition: all 0.25s ease;
+      backdrop-filter: blur(8px);
+    }
+    .aero-admin-pill:hover {
+      background: linear-gradient(180deg, rgba(255, 215, 0, 0.35) 0%, rgba(217, 119, 6, 0.25) 100%);
+      box-shadow: 0 6px 20px rgba(245, 158, 11, 0.3), inset 0 1px 1px rgba(255, 255, 255, 0.6);
+      transform: translateY(-1px);
+    }
+    .aero-admin-pill.active {
+      border-color: #f59e0b;
+      box-shadow: 0 0 16px rgba(245, 158, 11, 0.5);
+    }
+
+    .aero-user-key-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-radius: 30px;
+      color: #7dd3fc;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: monospace;
+    }
+
+    .aero-modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(3, 8, 18, 0.85);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      animation: aeroFadeIn 0.25s ease-out;
+    }
+    @keyframes aeroFadeIn {
+      from { opacity: 0; transform: scale(0.98); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    .aero-modal-dialog {
+      background: linear-gradient(145deg, rgba(17, 30, 52, 0.96) 0%, rgba(8, 16, 29, 0.98) 100%);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      border-radius: 22px;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.7), 0 0 45px rgba(56, 189, 248, 0.18), inset 0 1px 1px rgba(255, 255, 255, 0.35);
+      position: relative;
+      overflow: hidden;
+      max-height: 92vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .access-dialog {
+      max-width: 480px;
+      width: 100%;
+      padding: 32px 28px;
+      text-align: center;
+    }
+
+    .access-glow-sphere {
+      position: absolute;
+      top: -70px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 200px;
+      height: 200px;
+      background: radial-gradient(circle, rgba(56, 189, 248, 0.3) 0%, rgba(56, 189, 248, 0) 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .aero-access-badge {
+      width: 72px;
+      height: 72px;
+      margin: 0 auto 16px;
+      border-radius: 20px;
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.25), rgba(14, 165, 233, 0.08));
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 8px 24px rgba(56, 189, 248, 0.25), inset 0 1px 2px rgba(255, 255, 255, 0.5);
+    }
+    .aero-access-icon {
+      width: 46px;
+      height: 46px;
+      filter: drop-shadow(0 4px 10px rgba(56, 189, 248, 0.5));
+    }
+
+    .access-title {
+      font-size: 22px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 6px;
+      text-shadow: 0 2px 10px rgba(56, 189, 248, 0.4);
+    }
+    .access-subtitle {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 22px;
+    }
+
+    .access-info-card {
+      background: rgba(15, 27, 45, 0.7);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 20px;
+      text-align: left;
+    }
+    .access-info-text {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+      margin-bottom: 12px;
+    }
+
+    .aero-tg-creator-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      padding: 12px 18px;
+      background: linear-gradient(180deg, #2aabee 0%, #1783c5 100%);
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      border-radius: 12px;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      box-shadow: 0 6px 18px rgba(34, 158, 226, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.6);
+      transition: all 0.25s ease;
+    }
+    .aero-tg-creator-btn:hover {
+      background: linear-gradient(180deg, #3bb5f7 0%, #1e92d8 100%);
+      box-shadow: 0 8px 24px rgba(34, 158, 226, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.8);
+      transform: translateY(-1px);
+    }
+
+    .access-input-group {
+      margin-bottom: 18px;
+      text-align: left;
+    }
+    .access-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-secondary);
+      margin-bottom: 8px;
+    }
+
+    .input-with-button {
+      display: flex;
+      gap: 8px;
+    }
+    .aero-input {
+      flex: 1;
+      padding: 11px 14px;
+      background: rgba(9, 18, 32, 0.8);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-radius: 10px;
+      color: #fff;
+      font-size: 14px;
+      outline: none;
+      transition: all 0.2s ease;
+    }
+    .aero-input:focus {
+      border-color: #38bdf8;
+      box-shadow: 0 0 14px rgba(56, 189, 248, 0.35);
+    }
+    .key-field {
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-family: monospace;
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .aero-action-btn {
+      padding: 10px 18px;
+      background: linear-gradient(180deg, #38bdf8 0%, #0284c7 100%);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 10px;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(2, 132, 199, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.5);
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+    .aero-action-btn:hover {
+      background: linear-gradient(180deg, #5ecaff 0%, #0396e3 100%);
+      box-shadow: 0 6px 18px rgba(2, 132, 199, 0.5);
+      transform: translateY(-1px);
+    }
+
+    .access-msg {
+      margin-top: 8px;
+      font-size: 12px;
+      padding: 8px 12px;
+      border-radius: 8px;
+    }
+    .access-msg.error {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #fca5a5;
+    }
+    .access-msg.success {
+      background: rgba(34, 197, 94, 0.15);
+      border: 1px solid rgba(34, 197, 94, 0.4);
+      color: #86efac;
+    }
+
+    .admin-login-toggle-area {
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      margin-top: 14px;
+    }
+    .admin-link-btn {
+      background: none;
+      border: none;
+      color: #94a3b8;
+      font-size: 12px;
+      cursor: pointer;
+      text-decoration: underline;
+      transition: color 0.2s ease;
+    }
+    .admin-link-btn:hover {
+      color: #fbbf24;
+    }
+    .admin-login-box {
+      margin-top: 14px;
+      padding: 14px;
+      background: rgba(245, 158, 11, 0.08);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      border-radius: 12px;
+      text-align: left;
+    }
+
+    /* Admin Modal Dialog */
+    .admin-dialog {
+      max-width: 960px;
+      width: 95%;
+      height: 85vh;
+      padding: 0;
+    }
+    .admin-modal-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 24px;
+      border-bottom: 1px solid rgba(56, 189, 248, 0.2);
+      background: rgba(12, 22, 38, 0.7);
+    }
+    .admin-head-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .admin-badge-icon {
+      font-size: 26px;
+    }
+    .admin-head-title h3 {
+      font-size: 18px;
+      color: #fff;
+      margin: 0;
+    }
+    .admin-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .aero-close-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #fff;
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+    .aero-close-btn:hover {
+      background: rgba(239, 68, 68, 0.3);
+      border-color: #ef4444;
+    }
+
+    .admin-tabs {
+      display: flex;
+      gap: 4px;
+      padding: 12px 24px 0;
+      background: rgba(8, 16, 29, 0.6);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .admin-tab {
+      padding: 10px 18px;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .admin-tab:hover {
+      color: #fff;
+    }
+    .admin-tab.active {
+      color: #38bdf8;
+      border-bottom-color: #38bdf8;
+      background: rgba(56, 189, 248, 0.08);
+      border-radius: 8px 8px 0 0;
+    }
+
+    .admin-tab-pane {
+      display: none;
+      padding: 20px 24px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .admin-tab-pane.active {
+      display: block;
+    }
+
+    .admin-stats-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .stat-box {
+      background: rgba(14, 25, 42, 0.75);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: 12px;
+      padding: 12px 16px;
+      text-align: center;
+    }
+    .stat-num {
+      font-size: 22px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .stat-num.neon { color: var(--neon); }
+    .stat-num.cyan { color: #38bdf8; }
+    .stat-num.magenta { color: #f472b6; }
+    .stat-lbl {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+
+    .history-filter-bar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .filter-search {
+      flex: 2;
+      min-width: 220px;
+    }
+    .filter-select {
+      flex: 1;
+      min-width: 150px;
+      padding: 10px 14px;
+      background: rgba(9, 18, 32, 0.8);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-radius: 10px;
+      color: #fff;
+      font-size: 13px;
+    }
+
+    .history-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .history-card {
+      background: rgba(13, 24, 40, 0.85);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: 14px;
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      transition: all 0.2s;
+    }
+    .history-card:hover {
+      border-color: rgba(56, 189, 248, 0.45);
+      background: rgba(16, 29, 48, 0.95);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    }
+    .history-left {
+      flex: 1;
+      min-width: 0;
+    }
+    .history-meta-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+      font-size: 12px;
+      color: var(--text-muted);
+      flex-wrap: wrap;
+    }
+    .history-model-tag {
+      background: rgba(56, 189, 248, 0.15);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      color: #7dd3fc;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 11px;
+    }
+    .history-source-tag {
+      background: rgba(255, 255, 255, 0.08);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+    }
+    .history-prompt {
+      font-size: 13px;
+      color: #f1f5f9;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 4px;
+    }
+    .history-params {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .history-status-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .history-status-badge.completed {
+      background: rgba(34, 197, 94, 0.18);
+      color: #86efac;
+      border: 1px solid rgba(34, 197, 94, 0.35);
+    }
+    .history-status-badge.failed {
+      background: rgba(239, 68, 68, 0.18);
+      color: #fca5a5;
+      border: 1px solid rgba(239, 68, 68, 0.35);
+    }
+    .history-status-badge.processing, .history-status-badge.pending {
+      background: rgba(56, 189, 248, 0.18);
+      color: #7dd3fc;
+      border: 1px solid rgba(56, 189, 248, 0.35);
+    }
+
+    .history-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .history-play-btn, .history-dl-btn {
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.2s;
+    }
+    .history-play-btn {
+      background: rgba(56, 189, 248, 0.2);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      color: #38bdf8;
+    }
+    .history-play-btn:hover {
+      background: #38bdf8;
+      color: #031428;
+    }
+    .history-dl-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #fff;
+    }
+    .history-dl-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Key Gen Section */
+    .key-gen-card {
+      background: rgba(14, 25, 42, 0.8);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+    .key-gen-card h4 {
+      font-size: 16px;
+      color: #fff;
+      margin-bottom: 6px;
+    }
+    .key-gen-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+    }
+    .key-gen-form {
+      display: flex;
+      gap: 10px;
+    }
+    .key-note-input {
+      flex: 1;
+    }
+    .new-key-display {
+      margin-top: 16px;
+      background: rgba(34, 197, 94, 0.1);
+      border: 1px solid rgba(34, 197, 94, 0.35);
+      border-radius: 12px;
+      padding: 14px 18px;
+    }
+    .new-key-label {
+      font-size: 12px;
+      color: #86efac;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .new-key-code-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .new-key-code-row code {
+      font-size: 18px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: 1.5px;
+      background: rgba(0, 0, 0, 0.4);
+      padding: 6px 14px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    .aero-copy-btn {
+      padding: 7px 14px;
+      background: linear-gradient(180deg, #22c55e 0%, #15803d 100%);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .new-key-hint {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 8px;
+    }
+
+    .keys-table-card {
+      background: rgba(14, 25, 42, 0.8);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: 16px;
+      padding: 20px;
+    }
+    .keys-table-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .keys-table-header h4 {
+      font-size: 16px;
+      color: #fff;
+      margin: 0;
+    }
+    .aero-btn-sm {
+      padding: 6px 12px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .aero-btn-sm:hover {
+      background: rgba(255, 255, 255, 0.16);
+    }
+    .keys-table-wrap {
+      overflow-x: auto;
+    }
+    .aero-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      text-align: left;
+    }
+    .aero-table th {
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--text-muted);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+    .aero-table td {
+      padding: 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      color: #e2e8f0;
+    }
+    .aero-table tr:hover td {
+      background: rgba(56, 189, 248, 0.05);
+    }
+    .key-badge-status {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .key-badge-status.active {
+      background: rgba(34, 197, 94, 0.15);
+      color: #86efac;
+    }
+    .key-badge-status.revoked {
+      background: rgba(239, 68, 68, 0.15);
+      color: #fca5a5;
+    }
+    .key-row-action {
+      padding: 4px 8px;
+      border-radius: 6px;
+      border: none;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .key-row-action.revoke {
+      background: rgba(239, 68, 68, 0.2);
+      color: #fca5a5;
+    }
+    .key-row-action.activate {
+      background: rgba(34, 197, 94, 0.2);
+      color: #86efac;
+    }
+  </style>
+</head>
+<body>
+  <div class="ambient-grid"></div>
+
+  <div class="container">
+    <!-- Header -->
+    <header>
+      <a href="/" class="brand">
+        <div class="brand-badge-video" title="MOGGED AI Brand">
+          <video src="/static/brand/watermark.webm" autoplay loop muted playsinline></video>
+        </div>
+        <div class="brand-info">
+          <div class="brand-title-wrap">
+            <span class="brand-title">POCO AI</span>
+            <span class="mogged-pill">
+              <img src="/static/brand/pack/aero_leaf_64.png" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 3px;" alt="">MOGGED AI
+            </span>
+          </div>
+          <span class="brand-sub">Neural Creative Studio • DaVinci Engine</span>
+        </div>
+      </a>
+
+      <div class="header-actions">
+        <div class="status-pill">
+          <div class="status-dot"></div>
+          <span id="queueStatus">Онлайн: 10 воркеров</span>
+        </div>
+        <div id="userKeyPill" class="aero-user-key-pill" style="display:none;" title="Ваш ключ доступа к студии">
+          <span>🔑</span>
+          <span id="userKeyLabel">POCO-****</span>
+        </div>
+        <a href="https://t.me/+GnpMk7j_aQ8wOTA6" target="_blank" rel="noopener noreferrer" class="tg-bot-link" title="Перейти в Telegram-группу POCOFON AI">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69.01-.03.01-.14-.07-.19-.08-.05-.19-.02-.27 0-.12.03-1.99 1.27-5.61 3.72-.53.36-1.01.54-1.44.53-.47-.01-1.38-.27-2.06-.49-.83-.27-1.49-.42-1.43-.88.03-.24.38-.49 1.03-.74 4.04-1.76 6.74-2.92 8.09-3.5 3.85-1.61 4.65-1.89 5.17-1.9.11 0 .37.03.54.17.14.12.18.28.2.45-.02.07-.02.15-.04.24z"/>
+          </svg>
+          <span>💬 Наша группа</span>
+        </a>
+        <button id="adminHeaderBtn" class="aero-admin-pill" onclick="openAdminModal()" title="Панель создателя & История генераций">
+          <span>👑</span>
+          <span id="adminHeaderLabel">Создатель / История</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace Grid -->
+    <div class="studio-grid">
+      <!-- LEFT: Control Panel -->
+      <div class="panel">
+        <!-- Category Tab (Video vs Image) Frutiger Aero Style -->
+        <div class="category-tabs">
+          <button class="cat-btn aero-btn active" id="tabVideo" onclick="switchCategory('video')">
+            <div class="aero-icon-wrap video">
+              <img src="/static/brand/pack/aero_video_player_128.png" class="aero-img-icon" alt="Video">
+            </div>
+            <span class="aero-tab-label">ВИДЕО</span>
+          </button>
+          <button class="cat-btn aero-btn" id="tabImage" onclick="switchCategory('image')">
+            <div class="aero-icon-wrap photo">
+              <img src="/static/brand/pack/aero_camera_128.png" class="aero-img-icon" alt="Photo">
+            </div>
+            <span class="aero-tab-label">ФОТО</span>
+          </button>
+        </div>
+
+        <!-- Prompt Field -->
+        <div class="form-group">
+          <div class="section-title">
+            <span>📝 Описание сцены (Промпт)</span>
+            <span class="badge" id="promptCharCount">12 симв.</span>
+          </div>
+          <div class="prompt-box">
+            <textarea id="promptInput" placeholder="Опишите сцену, движение камеры или персонажей... (например: они дерутся)" oninput="updateLiveCard()">они дерутся</textarea>
+          </div>
+          <div class="prompt-suggestions">
+            <button class="pill-suggest" onclick="insertPrompt('кинематографичная битва в неоновом дожде, 8k')">⚡ Экшен-битва</button>
+            <button class="pill-suggest" onclick="insertPrompt('кинематографичный свет, гиперреализм, медленное приближение камеры')">🎬 Кинематограф</button>
+            <button class="pill-suggest" onclick="insertPrompt('аниме стиль, высокая детализация, динамичный ракурс')">✨ Аниме</button>
+            <button class="pill-suggest" onclick="insertPrompt('милый пушистый персонаж в костюме горничной, 3D рендер')">🐾 Фурри / 3D</button>
+          </div>
+        </div>
+
+        <!-- Model Selection Grid (Telegram Inline Buttons) -->
+        <div class="form-group">
+          <div class="section-title">
+            <span>🤖 Выберите модель</span>
+            <span class="badge" id="currentModelBadge">Seedance 2.5</span>
+          </div>
+          <div class="tg-keyboard-grid" id="modelKeyboard">
+            <!-- Populated via JS with 2-per-row Telegram inline buttons -->
+          </div>
+        </div>
+
+        <!-- Generation Parameters -->
+        <div class="params-grid">
+          <!-- Duration (Video only) -->
+          <div class="param-block" id="blockDuration">
+            <span class="param-label">⏱ Длительность</span>
+            <div class="param-pills" id="durationPills">
+              <button class="pill-btn active" onclick="setDuration(5)">5с</button>
+              <button class="pill-btn" onclick="setDuration(10)">10с</button>
+              <button class="pill-btn" onclick="setDuration(15)">15с</button>
+            </div>
+          </div>
+
+          <!-- Resolution -->
+          <div class="param-block" id="blockResolution">
+            <span class="param-label">📐 Разрешение</span>
+            <div class="param-pills" id="resolutionPills">
+              <button class="pill-btn" onclick="setResolution('480p')">480p</button>
+              <button class="pill-btn active" onclick="setResolution('720p')">720p</button>
+              <button class="pill-btn" onclick="setResolution('1080p')">1080p</button>
+            </div>
+          </div>
+
+          <!-- Aspect Ratio -->
+          <div class="param-block">
+            <span class="param-label">📐 Формат кадра</span>
+            <div class="param-pills" id="ratioPills">
+              <button class="pill-btn active" onclick="setRatio('16:9')">16:9</button>
+              <button class="pill-btn" onclick="setRatio('9:16')">9:16</button>
+              <button class="pill-btn" onclick="setRatio('1:1')">1:1</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Audio Toggle (Video only) -->
+        <div class="toggle-row" id="blockAudio">
+          <div class="toggle-info">
+            <img src="/static/brand/pack/aero_audio_64.png" class="mini-aero-model-icon" alt="Audio">
+            <span id="audioLabel">Генерация звука (AI Sound FX & Voice)</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="audioToggle" checked onchange="updateLiveCard()">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <!-- Image 3x3 Grid (Image only) -->
+        <div class="toggle-row" id="blockGrid" style="display: none;">
+          <div class="toggle-info">
+            <span>⊞</span>
+            <span>Сетка 3x3 (Генерация 9 вариантов)</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="gridToggle" onchange="updateLiveCard()">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <!-- Reference Images & Video Upload Zone -->
+        <div class="ref-zone" id="refDropZone">
+          <div class="ref-zone-header">
+            <span class="ref-count-text" id="refCountBadge">
+              📎 Прикреплено: 0 из 30 фото
+            </span>
+            <span style="font-size: 11px; color: var(--text-dim);" id="refLimitHint">Макс. 30 референсов</span>
+          </div>
+
+          <div class="drop-trigger" onclick="document.getElementById('refFileInput').click()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            <span>Загрузить референс (фото или видео)</span>
+          </div>
+          <input type="file" id="refFileInput" multiple accept="image/*,video/*" style="display: none;" onchange="handleFileSelect(event)">
+
+          <div class="ref-preview-grid" id="refPreviewGrid">
+            <!-- Previews injected here -->
+          </div>
+        </div>
+
+        <!-- Cost & Launch Bar -->
+        <div class="launch-bar">
+          <div class="cost-display">
+            <div class="cost-icon">💳</div>
+            <div class="cost-meta">
+              <span class="cost-title">Стоимость</span>
+              <span class="cost-val" id="creditCostDisplay">~507 кредитов</span>
+            </div>
+          </div>
+          <button class="btn-submit" id="btnLaunch" onclick="launchGeneration()">
+            <span>🚀 СГЕНЕРИРОВАТЬ</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- RIGHT: Telegram Message Replica & Player -->
+      <div class="preview-column">
+        <!-- Replica of Telegram Chat Card -->
+        <div class="tg-chat-frame">
+          <!-- User Quoted Request -->
+          <div class="tg-msg-user">
+            <div class="user-header">
+              <span class="user-name">Poco</span>
+              <span style="font-size: 9px; opacity: 0.6;">Вы</span>
+            </div>
+            <div class="user-prompt-text" id="userCardPrompt">/video они дерутся</div>
+            <div class="msg-time" id="userMsgTime">21:50 ✓✓</div>
+          </div>
+
+          <!-- Telegram Bot Response Bubble -->
+          <div class="tg-bubble-card">
+            <div class="tg-bubble-top">
+              <div class="tg-bubble-author">POCO AI</div>
+              <div class="tg-bubble-mogged">MOGGED AI</div>
+            </div>
+
+            <!-- Quoted Prompt Box -->
+            <div class="tg-quote-box">
+              <div class="tg-quote-avatar">
+                <img src="/static/brand/watermark_frame.png" alt="Avatar" onerror="this.src='https://api.dicebear.com/7.x/bottts/svg?seed=Poco'">
+              </div>
+              <div class="tg-quote-content">
+                <div class="tg-quote-user">Poco</div>
+                <div class="tg-quote-text" id="cardQuoteText">/video они дерутся</div>
+              </div>
+            </div>
+
+            <!-- Authentic Menu List -->
+            <div class="tg-menu-list">
+              <div class="menu-heading" id="cardMenuHeader">
+                <span class="card-aero-icon">
+                  <img src="/static/brand/pack/aero_video_player_64.png" id="cardAeroIcon" alt="Aero">
+                </span>
+                <span id="cardAeroTitle">Меню генерации видео</span>
+              </div>
+              <div class="tg-menu-item">
+                <span>👤</span>
+                <div><b>Заказчик:</b> <span class="highlight">Poco</span></div>
+              </div>
+              <div class="tg-menu-item">
+                <span>🤖</span>
+                <div><b>Модель:</b> <span class="highlight" id="cardModelName">Seedance 2.5 — Флагман Seedance 2.5 (до 30с, 1080p, звук и мульти-референсы)</span></div>
+              </div>
+              <div class="tg-menu-item">
+                <span>📝</span>
+                <div><b>Промпт:</b> <span class="highlight" id="cardPromptText">они дерутся</span></div>
+              </div>
+              <div class="tg-menu-item">
+                <span>📌</span>
+                <div><b>Референсы:</b> <span class="highlight" id="cardRefsText">📎 Прикреплено: 0 из 30 фото (Референс персонажа/сцены)</span></div>
+              </div>
+              <div class="tg-menu-item" id="cardDurationRow">
+                <span>⏱</span>
+                <div><b>Длительность:</b> <span class="highlight" id="cardDurationText">5 сек</span></div>
+              </div>
+              <div class="tg-menu-item" id="cardResFormatTextRow">
+                <span>📐</span>
+                <div><b>Разрешение и формат:</b> <span class="highlight" id="cardResFormatText">720p | 16:9</span></div>
+              </div>
+              <div class="tg-menu-item" id="cardAudioRow">
+                <span>🔊</span>
+                <div><b>Звук:</b> <span class="highlight" id="cardAudioText">Включен ✅</span></div>
+              </div>
+              <div class="tg-menu-item">
+                <span>💳</span>
+                <div><b>Стоимость:</b> <span class="highlight" id="cardCostText">~507 кредитов</span></div>
+              </div>
+            </div>
+
+            <div class="tg-menu-hint" id="cardHintText">
+              💡 Вы можете прислать еще фото прямо в чат, чтобы прикрепить их как референс!
+            </div>
+
+            <div class="tg-menu-footer">
+              <span>build: multiref-v3-2026-11-09</span>
+              <div class="tg-time-checks">
+                <span id="botMsgTime">21:50</span>
+                <span>✓✓</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Output Frame (Live Task / Video Player) -->
+        <div class="output-frame" id="outputFrame">
+          <div class="output-header">
+            <span class="output-title">
+              <img src="/static/brand/pack/aero_monitor_64.png" class="mini-aero-model-icon" alt="Monitor">
+              <span>Результат генерации</span>
+            </span>
+            <span class="badge" id="taskStatusBadge" style="font-size: 11px; padding: 2px 8px; border-radius: 9999px; background: rgba(255,255,255,0.06); color: var(--text-muted);">
+              Ожидание
+            </span>
+          </div>
+
+          <!-- Progress Bar Box -->
+          <div class="progress-box" id="progressBox">
+            <div style="font-size: 12px; font-weight: 600; color: var(--neon);" id="progressStage">
+              Создание задачи в DaVinci...
+            </div>
+            <div class="progress-bar-wrap">
+              <div class="progress-bar-fill" id="progressBarFill"></div>
+            </div>
+            <div class="progress-meta">
+              <span id="progressPercent">10%</span>
+              <span id="progressTimer">0s</span>
+            </div>
+          </div>
+
+          <!-- Player Container -->
+          <div class="player-area" id="playerArea">
+            <div class="player-placeholder" id="playerPlaceholder">
+              <div class="aero-play-orb">
+                <div class="aero-orb-shine"></div>
+                <svg class="aero-play-arrow" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="6 3 20 12 6 21"></polygon>
+                </svg>
+              </div>
+              <div class="aero-placeholder-text">Здесь появится ваше сгенерированное видео или арт</div>
+            </div>
+          </div>
+
+          <!-- Action buttons for completed generation -->
+          <div class="result-actions" id="resultActions" style="display: none;">
+            <a href="#" id="downloadLink" download class="btn-action">
+              <span>📥 Скачать</span>
+            </a>
+            <button class="btn-action" onclick="copyResultPrompt()">
+              <span>📋 Копия промпта</span>
+            </button>
+            <a href="https://t.me/POCOFONAIbot" target="_blank" class="btn-action">
+              <span>✈️ В Telegram</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gallery Section -->
+    <div class="gallery-section">
+      <div class="section-title">
+        <span>📂 Недавние генерации (Галерея студии)</span>
+        <button class="pill-suggest" onclick="loadGallery()">🔄 Обновить</button>
+      </div>
+      <div class="gallery-grid" id="galleryGrid">
+        <!-- Gallery cards injected via JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // State
+    let currentCategory = 'video';
+    let modelsData = null;
+    let selectedModelKey = 's2_5';
+    let selectedDuration = 5;
+    let selectedResolution = '720p';
+    let selectedRatio = '16:9';
+    let uploadedFiles = [];
+    let currentTaskId = null;
+    let pollInterval = null;
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', async () => {
+      updateTimes();
+      await fetchModels();
+      await fetchQueueStatus();
+      loadGallery();
+      setInterval(updateTimes, 30000);
+      setInterval(fetchQueueStatus, 15000);
+    });
+
+    function updateTimes() {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      const timeStr = `${hh}:${mm}`;
+      const userTime = document.getElementById('userMsgTime');
+      const botTime = document.getElementById('botMsgTime');
+      if (userTime) userTime.textContent = `${timeStr} ✓✓`;
+      if (botTime) botTime.textContent = timeStr;
+    }
+
+    async function fetchQueueStatus() {
+      try {
+        const res = await fetch('/api/status');
+        if (res.ok) {
+          const data = await res.json();
+          const el = document.getElementById('queueStatus');
+          if (el) {
+            el.textContent = `Онлайн: ${data.active_workers || 10} воркеров (в очереди: ${data.pending_tasks || 0})`;
+          }
+        }
+      } catch (e) {
+        // quiet ignore
+      }
+    }
+
+    async function fetchModels() {
+      try {
+        const res = await fetch('/api/models');
+        if (!res.ok) throw new Error('Failed to load models');
+        modelsData = await res.json();
+        renderModelButtons();
+        updateLiveCard();
+      } catch (err) {
+        showToast('Ошибка загрузки моделей: ' + err.message, 'error');
+      }
+    }
+
+    function switchCategory(cat) {
+      currentCategory = cat;
+      document.getElementById('tabVideo').classList.toggle('active', cat === 'video');
+      document.getElementById('tabImage').classList.toggle('active', cat === 'image');
+
+      document.getElementById('blockDuration').style.display = cat === 'video' ? 'flex' : 'none';
+      document.getElementById('blockAudio').style.display = cat === 'video' ? 'flex' : 'none';
+      document.getElementById('blockGrid').style.display = cat === 'image' ? 'flex' : 'none';
+
+      document.getElementById('cardDurationRow').style.display = cat === 'video' ? 'flex' : 'none';
+      document.getElementById('cardAudioRow').style.display = cat === 'video' ? 'flex' : 'none';
+      
+      const aeroIcon = document.getElementById('cardAeroIcon');
+      const aeroTitle = document.getElementById('cardAeroTitle');
+      if (cat === 'video') {
+        if (aeroIcon) aeroIcon.src = '/static/brand/pack/aero_video_player_64.png';
+        if (aeroTitle) aeroTitle.textContent = 'Меню генерации видео';
+      } else {
+        if (aeroIcon) aeroIcon.src = '/static/brand/pack/aero_camera_64.png';
+        if (aeroTitle) aeroTitle.textContent = 'Меню генерации изображений';
+      }
+
+      // Pick default model for category
+      if (cat === 'video') {
+        selectedModelKey = modelsData ? modelsData.default_video : 's2_5';
+      } else {
+        selectedModelKey = modelsData ? modelsData.default_image : 'nano_banana_2_1';
+      }
+
+      renderModelButtons();
+      updateLiveCard();
+    }
+
+    function renderModelButtons() {
+      if (!modelsData) return;
+      const list = currentCategory === 'video' ? modelsData.video_models : modelsData.image_models;
+      const container = document.getElementById('modelKeyboard');
+      container.innerHTML = '';
+
+      list.forEach(model => {
+        const isActive = model.key === selectedModelKey;
+        const btn = document.createElement('div');
+        btn.className = `tg-inline-btn ${isActive ? 'active' : ''}`;
+        btn.onclick = () => selectModel(model.key);
+
+        let badges = '';
+        if (model.multi_ref) {
+          badges += `<span class="mini-badge ref">${model.ref_limit} refs</span>`;
+        } else if (model.ref_limit === 1) {
+          badges += `<span class="mini-badge ref">1 ref</span>`;
+        }
+        if (model.has_audio) {
+          badges += `<span class="mini-badge audio">audio</span>`;
+        }
+
+        const iconSrc = currentCategory === 'video' ? '/static/brand/pack/aero_video_player_64.png' : '/static/brand/pack/aero_camera_64.png';
+        btn.innerHTML = `
+          <div class="model-btn-top">
+            <img src="${iconSrc}" class="mini-aero-model-icon" alt="">
+            <span>${model.short || model.name}</span>
+          </div>
+          <div class="model-btn-sub" title="${model.desc || ''}">${model.desc || model.name}</div>
+          <div class="model-btn-tags">${badges}</div>
+        `;
+        container.appendChild(btn);
+      });
+
+      // Update current model badge
+      const activeObj = getActiveModel();
+      if (activeObj) {
+        document.getElementById('currentModelBadge').textContent = activeObj.name;
+      }
+    }
+
+    function getActiveModel() {
+      if (!modelsData) return null;
+      const list = currentCategory === 'video' ? modelsData.video_models : modelsData.image_models;
+      return list.find(m => m.key === selectedModelKey) || list[0];
+    }
+
+    function selectModel(key) {
+      selectedModelKey = key;
+      renderModelButtons();
+      checkRefLimits();
+      updateLiveCard();
+    }
+
+    function setDuration(dur) {
+      selectedDuration = dur;
+      document.querySelectorAll('#durationPills .pill-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.textContent.includes(dur + 'с'));
+      });
+      updateLiveCard();
+    }
+
+    function setResolution(res) {
+      selectedResolution = res;
+      document.querySelectorAll('#resolutionPills .pill-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.textContent.includes(res));
+      });
+      updateLiveCard();
+    }
+
+    function setRatio(r) {
+      selectedRatio = r;
+      document.querySelectorAll('#ratioPills .pill-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.textContent.includes(r));
+      });
+      updateLiveCard();
+    }
+
+    function insertPrompt(text) {
+      const el = document.getElementById('promptInput');
+      el.value = text;
+      updateLiveCard();
+    }
+
+    // Reference files handling
+    function handleFileSelect(e) {
+      const files = Array.from(e.target.files);
+      addFiles(files);
+      e.target.value = '';
+    }
+
+    function addFiles(files) {
+      const active = getActiveModel();
+      const maxRefs = active ? (active.ref_limit || 1) : 30;
+
+      for (const f of files) {
+        if (uploadedFiles.length >= maxRefs) {
+          showToast(`Лимит для модели ${active ? active.name : ''}: макс. ${maxRefs} референсов!`, 'error');
+          break;
+        }
+        uploadedFiles.push(f);
+      }
+
+      renderRefPreviews();
+      updateLiveCard();
+    }
+
+    function removeFile(index) {
+      uploadedFiles.splice(index, 1);
+      renderRefPreviews();
+      updateLiveCard();
+    }
+
+    function checkRefLimits() {
+      const active = getActiveModel();
+      const maxRefs = active ? (active.ref_limit || 1) : 30;
+      if (uploadedFiles.length > maxRefs) {
+        uploadedFiles = uploadedFiles.slice(0, maxRefs);
+        showToast(`Оставлено ${maxRefs} референса(ов) под лимит модели`, 'warning');
+        renderRefPreviews();
+      }
+    }
+
+    function renderRefPreviews() {
+      const grid = document.getElementById('refPreviewGrid');
+      grid.innerHTML = '';
+
+      uploadedFiles.forEach((file, idx) => {
+        const item = document.createElement('div');
+        item.className = 'ref-item';
+
+        const isVid = file.type.startsWith('video');
+        const url = URL.createObjectURL(file);
+
+        if (isVid) {
+          item.innerHTML = `
+            <video src="${url}" muted></video>
+            <button class="ref-remove-btn" onclick="removeFile(${idx})">×</button>
+            <span class="ref-badge-num">#${idx + 1} vid</span>
+          `;
+        } else {
+          item.innerHTML = `
+            <img src="${url}" alt="Ref">
+            <button class="ref-remove-btn" onclick="removeFile(${idx})">×</button>
+            <span class="ref-badge-num">#${idx + 1}</span>
+          `;
+        }
+        grid.appendChild(item);
+      });
+    }
+
+    // Drag and drop zone
+    const dropZone = document.getElementById('refDropZone');
+    ['dragenter', 'dragover'].forEach(name => {
+      dropZone.addEventListener(name, (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+      });
+    });
+    ['dragleave', 'drop'].forEach(name => {
+      dropZone.addEventListener(name, (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+      });
+    });
+    dropZone.addEventListener('drop', (e) => {
+      const files = Array.from(e.dataTransfer.files);
+      if (files && files.length > 0) {
+        addFiles(files);
+      }
+    });
+
+    // Update Live Telegram Card Replica & Cost
+    let costDebounce = null;
+    function updateLiveCard() {
+      const prompt = document.getElementById('promptInput').value.trim() || 'они дерутся';
+      const promptChars = document.getElementById('promptInput').value.length;
+      document.getElementById('promptCharCount').textContent = `${promptChars} симв.`;
+
+      const active = getActiveModel();
+      const modelName = active ? active.name : 'Seedance 2.5';
+      const modelDesc = active ? active.desc : 'Флагман Seedance 2.5';
+      const maxRefs = active ? (active.ref_limit || 1) : 30;
+
+      // Update Quoted prompt
+      const cmdPrefix = currentCategory === 'video' ? '/video ' : '/imagine ';
+      document.getElementById('userCardPrompt').textContent = cmdPrefix + prompt;
+      document.getElementById('cardQuoteText').textContent = cmdPrefix + prompt;
+
+      // Model display
+      document.getElementById('cardModelName').textContent = `${modelName} — ${modelDesc}`;
+      document.getElementById('cardPromptText').textContent = prompt;
+
+      // Reference text
+      const refCount = uploadedFiles.length;
+      let refText = '';
+      if (maxRefs === 1) {
+        refText = refCount > 0 ? `📎 Прикреплено: 1 фото (Image-to-Video)` : `0 фото (Text-to-Video)`;
+        document.getElementById('refLimitHint').textContent = 'Только 1 референс (Image-to-Video)';
+      } else {
+        refText = `📎 Прикреплено: ${refCount} из ${maxRefs} фото (Референс персонажа/сцены)`;
+        document.getElementById('refLimitHint').textContent = `Мульти-референс: до ${maxRefs} фото/видео`;
+      }
+      document.getElementById('cardRefsText').textContent = refText;
+      document.getElementById('refCountBadge').textContent = refText;
+
+      // Params
+      document.getElementById('cardDurationText').textContent = `${selectedDuration} сек`;
+      document.getElementById('cardResFormatText').textContent = `${selectedResolution} | ${selectedRatio}`;
+
+      const audioEnabled = document.getElementById('audioToggle').checked;
+      document.getElementById('cardAudioText').textContent = audioEnabled ? 'Включен ✅' : 'Выключен ❌';
+
+      // Live fetch Cost
+      clearTimeout(costDebounce);
+      costDebounce = setTimeout(fetchCost, 120);
+    }
+
+    async function fetchCost() {
+      try {
+        const res = await fetch(`/api/cost?model_key=${selectedModelKey}&duration=${selectedDuration}&resolution=${selectedResolution}`);
+        if (res.ok) {
+          const data = await res.json();
+          const costStr = `~${data.cost} кредитов`;
+          document.getElementById('cardCostText').textContent = costStr;
+          document.getElementById('creditCostDisplay').textContent = costStr;
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    // Launch Generation
+    async function launchGeneration() {
+      const prompt = document.getElementById('promptInput').value.trim();
+      if (!prompt) {
+        showToast('Пожалуйста, напишите промпт для генерации!', 'error');
+        return;
+      }
+
+      const launchBtn = document.getElementById('btnLaunch');
+      launchBtn.disabled = true;
+
+      const progressBox = document.getElementById('progressBox');
+      const progressBar = document.getElementById('progressBarFill');
+      const progressStage = document.getElementById('progressStage');
+      const progressPercent = document.getElementById('progressPercent');
+      const progressTimer = document.getElementById('progressTimer');
+      const playerPlaceholder = document.getElementById('playerPlaceholder');
+      const resultActions = document.getElementById('resultActions');
+      const statusBadge = document.getElementById('taskStatusBadge');
+
+      progressBox.style.display = 'block';
+      progressBar.style.width = '10%';
+      progressPercent.textContent = '10%';
+      progressStage.textContent = 'Подготовка запроса...';
+      progressTimer.textContent = '0s';
+      statusBadge.textContent = 'Генерация...';
+      statusBadge.style.background = 'rgba(39, 254, 120, 0.15)';
+      statusBadge.style.color = 'var(--neon)';
+      resultActions.style.display = 'none';
+
+      // Build FormData
+      const formData = new FormData();
+      formData.append('model_key', selectedModelKey);
+      formData.append('prompt', prompt);
+      formData.append('duration', selectedDuration);
+      formData.append('resolution', selectedResolution);
+      formData.append('ratio', selectedRatio);
+      formData.append('audio', document.getElementById('audioToggle').checked);
+      formData.append('has_grid', document.getElementById('gridToggle').checked);
+
+      // Append references
+      uploadedFiles.forEach(file => {
+        if (file.type.startsWith('video')) {
+          formData.append('ref_video', file);
+        } else {
+          formData.append('ref_images', file);
+        }
+      });
+
+      // Build Auth Headers
+      const authHeaders = {};
+      const curAdminToken = localStorage.getItem('poco_admin_token');
+      const curAccessKey = localStorage.getItem('poco_access_key');
+      if (curAdminToken) {
+        authHeaders['X-Admin-Token'] = curAdminToken;
+      } else if (curAccessKey) {
+        authHeaders['X-Access-Key'] = curAccessKey;
+      } else {
+        showAccessLockModal('Для генерации введите ключ доступа или запросите у @GermanUstinf');
+        throw new Error('Требуется ключ доступа для генерации');
+      }
+
+      try {
+        const response = await fetch('/api/generate', {
+          method: 'POST',
+          headers: authHeaders,
+          body: formData
+        });
+
+        if (!response.ok) {
+          const errData = await response.json();
+          if (response.status === 401) {
+            showAccessLockModal(errData.detail || 'Ключ доступа недействителен. Запросите у @GermanUstinf');
+          }
+          throw new Error(errData.detail || 'Ошибка запуска генерации');
+        }
+
+        const data = await response.json();
+        currentTaskId = data.task_id;
+        showToast(`Задача #${currentTaskId} отправлена в очередь POCO AI!`, 'success');
+
+        // Start polling
+        let elapsedSec = 0;
+        clearInterval(pollInterval);
+        pollInterval = setInterval(async () => {
+          elapsedSec += 2;
+          progressTimer.textContent = `${elapsedSec}s`;
+
+          try {
+            const taskRes = await fetch(`/api/tasks/${currentTaskId}`);
+            if (taskRes.ok) {
+              const task = await taskRes.json();
+              progressBar.style.width = `${task.progress || Math.min(15 + elapsedSec * 2, 95)}%`;
+              progressPercent.textContent = `${task.progress || Math.min(15 + elapsedSec * 2, 95)}%`;
+              progressStage.textContent = task.stage || 'Обработка нейросетью...';
+
+              const isFinished = task.status === 'completed' || 
+                                 task.status === 'succeeded' || 
+                                 (task.media_url && (task.progress >= 95 || (task.stage && task.stage.includes('Готово'))));
+
+              if (isFinished) {
+                clearInterval(pollInterval);
+                launchBtn.disabled = false;
+                progressBar.style.width = '100%';
+                progressPercent.textContent = '100%';
+                progressStage.textContent = 'Готово!';
+                statusBadge.textContent = 'Завершено';
+                statusBadge.style.color = 'var(--neon)';
+                statusBadge.style.background = 'rgba(39, 254, 120, 0.15)';
+
+                showTaskResult(task);
+                loadGallery();
+                showToast('Генерация успешно завершена!', 'success');
+              } else if (task.status === 'failed') {
+                clearInterval(pollInterval);
+                launchBtn.disabled = false;
+                progressStage.textContent = 'Ошибка: ' + (task.error || 'Сбой генерации');
+                statusBadge.textContent = 'Ошибка';
+                statusBadge.style.color = 'var(--danger)';
+                showToast(`Генерация не удалась: ${task.error}`, 'error');
+              }
+            }
+          } catch (pollErr) {
+            console.error('Poll error', pollErr);
+          }
+        }, 2000);
+
+      } catch (err) {
+        launchBtn.disabled = false;
+        progressBox.style.display = 'none';
+        statusBadge.textContent = 'Ошибка';
+        statusBadge.style.color = 'var(--danger)';
+        showToast(err.message, 'error');
+      }
+    }
+
+    function showTaskResult(task) {
+      const playerArea = document.getElementById('playerArea');
+      const resultActions = document.getElementById('resultActions');
+      const downloadLink = document.getElementById('downloadLink');
+
+      const isVideo = task.media_type === 'video' || (task.media_url && task.media_url.endsWith('.mp4'));
+      const isAudio = task.media_type === 'audio' || (task.media_url && task.media_url.endsWith('.mp3'));
+
+      if (isVideo) {
+        playerArea.innerHTML = `
+          <video src="${task.media_url}" controls autoplay loop playsinline style="width: 100%; max-height: 480px; object-fit: contain; border-radius: var(--radius-md); background: #000; box-shadow: 0 10px 30px rgba(0,0,0,0.6); display: block;"></video>
+        `;
+      } else if (isAudio) {
+        playerArea.innerHTML = `
+          <div style="padding: 50px 20px; text-align: center; background: rgba(0,0,0,0.3); border-radius: var(--radius-md);">
+            <audio src="${task.media_url}" controls autoplay style="width: 100%; max-width: 440px;"></audio>
+          </div>
+        `;
+      } else {
+        playerArea.innerHTML = `
+          <img src="${task.media_url}" alt="Generated Media" style="width: 100%; max-height: 480px; object-fit: contain; border-radius: var(--radius-md); background: #000; box-shadow: 0 10px 30px rgba(0,0,0,0.6); display: block;">
+        `;
+      }
+
+      downloadLink.href = task.media_url;
+      downloadLink.setAttribute('download', (task.media_url || '').split('/').pop() || 'poco_result');
+      resultActions.style.display = 'flex';
+
+      const outFrame = document.getElementById('outputFrame');
+      if (outFrame) {
+        outFrame.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+
+    function copyResultPrompt() {
+      const prompt = document.getElementById('promptInput').value;
+      navigator.clipboard.writeText(prompt);
+      showToast('Промпт скопирован в буфер обмена!', 'success');
+    }
+
+    async function loadGallery() {
+      try {
+        const res = await fetch('/api/gallery');
+        if (!res.ok) return;
+        const items = await res.json();
+        const grid = document.getElementById('galleryGrid');
+        grid.innerHTML = '';
+
+        if (!items || items.length === 0) {
+          grid.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color: var(--text-dim); padding: 20px;">Нет недавних генераций</div>`;
+          return;
+        }
+
+        items.forEach(item => {
+          const card = document.createElement('div');
+          card.className = 'gallery-card';
+
+          const isVid = item.type === 'video';
+          const mediaEl = isVid
+            ? `<video src="${item.url}" muted onmouseover="this.play()" onmouseout="this.pause()"></video>`
+            : `<img src="${item.url}" alt="${item.filename}">`;
+
+          const badgeImg = isVid ? '/static/brand/pack/aero_video_player_64.png' : '/static/brand/pack/aero_camera_64.png';
+          const badgeText = isVid ? 'Видео' : 'Фото';
+          card.innerHTML = `
+            <div class="gallery-card-thumb">${mediaEl}</div>
+            <div class="gallery-card-info">
+              <div class="gallery-card-title">${item.filename}</div>
+              <div class="gallery-card-date">${item.date || ''} • <span class="aero-badge-inline"><img src="${badgeImg}" alt=""> ${badgeText}</span></div>
+            </div>
+          `;
+
+          card.onclick = () => {
+            const playerArea = document.getElementById('playerArea');
+            if (isVid) {
+              playerArea.innerHTML = `<video src="${item.url}" controls autoplay loop playsinline></video>`;
+            } else {
+              playerArea.innerHTML = `<img src="${item.url}" alt="${item.filename}" style="width: 100%; max-height: 480px; object-fit: contain;">`;
+            }
+            document.getElementById('downloadLink').href = item.url;
+            document.getElementById('resultActions').style.display = 'flex';
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          };
+
+          grid.appendChild(card);
+        });
+      } catch (e) {
+        console.error('Gallery load err', e);
+      }
+    }
+
+    function showToast(msg, type = 'info') {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.className = `toast show ${type}`;
+      setTimeout(() => {
+        toast.className = 'toast';
+      }, 4000);
+    }
+
+    // --- ACCESS & ADMIN AUTHENTICATION ---
+    let currentUserRole = 'guest';
+    let filterHistoryTimeout = null;
+
+    async function checkAuthOnLoad() {
+      const adminToken = localStorage.getItem('poco_admin_token');
+      const accessKey = localStorage.getItem('poco_access_key');
+
+      const headers = {};
+      if (adminToken) headers['X-Admin-Token'] = adminToken;
+      if (accessKey) headers['X-Access-Key'] = accessKey;
+
+      if (!adminToken && !accessKey) {
+        showAccessLockModal();
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/auth/check', { headers });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.authenticated) {
+            currentUserRole = data.role;
+            hideAccessLockModal();
+
+            if (data.role === 'admin') {
+              const adminBtn = document.getElementById('adminHeaderBtn');
+              if (adminBtn) adminBtn.style.display = 'inline-flex';
+              const userPill = document.getElementById('userKeyPill');
+              if (userPill) {
+                userPill.style.display = 'inline-flex';
+                document.getElementById('userKeyLabel').textContent = '👑 Администратор';
+              }
+            } else if (data.role === 'user') {
+              const userPill = document.getElementById('userKeyPill');
+              if (userPill) {
+                userPill.style.display = 'inline-flex';
+                document.getElementById('userKeyLabel').textContent = data.user_id || 'POCO-KEY';
+              }
+            }
+            return;
+          }
+        }
+        // Auth check failed
+        showAccessLockModal();
+      } catch (err) {
+        console.warn('Auth check err:', err);
+        showAccessLockModal();
+      }
+    }
+
+    function showAccessLockModal(errMsg = '') {
+      const modal = document.getElementById('accessLockModal');
+      if (modal) modal.style.display = 'flex';
+      const msgBox = document.getElementById('accessKeyMsg');
+      if (msgBox) {
+        if (errMsg) {
+          msgBox.textContent = errMsg;
+          msgBox.className = 'access-msg error';
+          msgBox.style.display = 'block';
+        } else {
+          msgBox.style.display = 'none';
+        }
+      }
+    }
+
+    function hideAccessLockModal() {
+      const modal = document.getElementById('accessLockModal');
+      if (modal) modal.style.display = 'none';
+    }
+
+    async function submitAccessKey() {
+      const input = document.getElementById('accessKeyInput');
+      const msg = document.getElementById('accessKeyMsg');
+      const keyVal = (input.value || '').trim().toUpperCase();
+
+      if (!keyVal) {
+        msg.textContent = 'Пожалуйста, введите ключ доступа (например, POCO-XXXX-XXXX).';
+        msg.className = 'access-msg error';
+        msg.style.display = 'block';
+        return;
+      }
+
+      msg.textContent = 'Проверка ключа доступа...';
+      msg.className = 'access-msg';
+      msg.style.display = 'block';
+
+      try {
+        const res = await fetch('/api/auth/verify-key', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: keyVal })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.valid) {
+          localStorage.setItem('poco_access_key', data.key);
+          currentUserRole = 'user';
+          msg.textContent = '✅ Доступ подтвержден! Добро пожаловать.';
+          msg.className = 'access-msg success';
+
+          const userPill = document.getElementById('userKeyPill');
+          if (userPill) {
+            userPill.style.display = 'inline-flex';
+            document.getElementById('userKeyLabel').textContent = data.key;
+          }
+
+          setTimeout(() => {
+            hideAccessLockModal();
+            showToast('Доступ к POCO AI Studio предоставлен!', 'success');
+          }, 600);
+        } else {
+          msg.textContent = data.detail || 'Неверный ключ доступа. Напишите создателю: @GermanUstinf';
+          msg.className = 'access-msg error';
+        }
+      } catch (e) {
+        msg.textContent = 'Ошибка проверки ключа. Проверьте интернет-соединение.';
+        msg.className = 'access-msg error';
+      }
+    }
+
+    function toggleAdminSection() {
+      const sec = document.getElementById('adminLoginSection');
+      if (!sec) return;
+      sec.style.display = sec.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function submitAdminLogin() {
+      const pwdInput = document.getElementById('adminPasswordInput');
+      const msg = document.getElementById('adminLoginMsg');
+      const pwdVal = (pwdInput.value || '').trim();
+
+      if (!pwdVal) {
+        msg.textContent = 'Введите пароль администратора.';
+        msg.className = 'access-msg error';
+        msg.style.display = 'block';
+        return;
+      }
+
+      msg.textContent = 'Авторизация создателя...';
+      msg.className = 'access-msg';
+      msg.style.display = 'block';
+
+      try {
+        const res = await fetch('/api/auth/admin-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pwdVal })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.valid) {
+          localStorage.setItem('poco_admin_token', data.token);
+          currentUserRole = 'admin';
+          msg.textContent = '✅ Авторизован создатель @GermanUstinf!';
+          msg.className = 'access-msg success';
+
+          const adminBtn = document.getElementById('adminHeaderBtn');
+          if (adminBtn) adminBtn.style.display = 'inline-flex';
+          const userPill = document.getElementById('userKeyPill');
+          if (userPill) {
+            userPill.style.display = 'inline-flex';
+            document.getElementById('userKeyLabel').textContent = '👑 Создатель';
+          }
+
+          setTimeout(() => {
+            hideAccessLockModal();
+            showToast('Вход создателя выполнен! Доступ к панели открыт.', 'success');
+            openAdminModal();
+          }, 600);
+        } else {
+          msg.textContent = data.detail || 'Неверный пароль администратора.';
+          msg.className = 'access-msg error';
+        }
+      } catch (e) {
+        msg.textContent = 'Ошибка подключения к серверу.';
+        msg.className = 'access-msg error';
+      }
+    }
+
+    // --- ADMIN DASHBOARD MODAL LOGIC ---
+    function openAdminModal() {
+      const adminToken = localStorage.getItem('poco_admin_token');
+      if (!adminToken) {
+        showAccessLockModal('Для доступа к панели истории генераций и ключей выполните вход как создатель.');
+        toggleAdminSection();
+        return;
+      }
+      const modal = document.getElementById('adminModal');
+      if (modal) {
+        modal.style.display = 'flex';
+        loadAdminHistory();
+      }
+    }
+
+    function closeAdminModal() {
+      const modal = document.getElementById('adminModal');
+      if (modal) modal.style.display = 'none';
+    }
+
+    function switchAdminTab(tab) {
+      document.getElementById('tabAdminHistory').classList.toggle('active', tab === 'history');
+      document.getElementById('tabAdminKeys').classList.toggle('active', tab === 'keys');
+      document.getElementById('adminTabContentHistory').classList.toggle('active', tab === 'history');
+      document.getElementById('adminTabContentKeys').classList.toggle('active', tab === 'keys');
+
+      if (tab === 'history') loadAdminHistory();
+      if (tab === 'keys') loadAdminKeys();
+    }
+
+    function debounceFilterHistory() {
+      clearTimeout(filterHistoryTimeout);
+      filterHistoryTimeout = setTimeout(loadAdminHistory, 350);
+    }
+
+    async function loadAdminHistory() {
+      const adminToken = localStorage.getItem('poco_admin_token');
+      const listEl = document.getElementById('adminHistoryList');
+      const search = (document.getElementById('historySearchInput').value || '').trim();
+      const status = document.getElementById('historyStatusFilter').value;
+
+      listEl.innerHTML = '<div class="history-loading" style="text-align:center; padding: 30px; color: var(--text-muted);">🔄 Загрузка истории генераций...</div>';
+
+      try {
+        let url = `/api/admin/history?limit=100`;
+        if (search) url += `&search=${encodeURIComponent(search)}`;
+        if (status) url += `&status=${encodeURIComponent(status)}`;
+
+        const res = await fetch(url, {
+          headers: { 'X-Admin-Token': adminToken }
+        });
+        if (!res.ok) {
+          listEl.innerHTML = '<div style="color:var(--danger); text-align:center; padding:20px;">Ошибка доступа к истории. Авторизуйтесь снова.</div>';
+          return;
+        }
+
+        const data = await res.json();
+        const history = data.history || [];
+        const stats = data.stats || {};
+
+        // Update stats bar
+        document.getElementById('statTotal').textContent = stats.total || 0;
+        document.getElementById('statCompleted').textContent = stats.completed || 0;
+        document.getElementById('statVideos').textContent = stats.videos || 0;
+        document.getElementById('statImages').textContent = stats.images || 0;
+
+        if (history.length === 0) {
+          listEl.innerHTML = '<div style="text-align:center; padding: 30px; color: var(--text-dim);">История генераций пуста или нет результатов по фильтру.</div>';
+          return;
+        }
+
+        listEl.innerHTML = '';
+        history.forEach(item => {
+          const card = document.createElement('div');
+          card.className = 'history-card';
+
+          const dateStr = item.created_at ? new Date(item.created_at * 1000).toLocaleString('ru-RU') : '';
+          const statusClass = item.status === 'completed' ? 'completed' : (item.status === 'failed' ? 'failed' : 'processing');
+          const statusText = item.status === 'completed' ? 'Готово' : (item.status === 'failed' ? 'Ошибка' : 'Обработка');
+
+          let mediaActions = '';
+          if (item.media_url) {
+            mediaActions = `
+              <button class="history-play-btn" onclick="playHistoryMedia('${item.media_url}', '${item.category}')">▶ Воспроизвести</button>
+              <a href="${item.media_url}" download class="history-dl-btn">📥 Скачать</a>
+            `;
+          }
+
+          card.innerHTML = `
+            <div class="history-left">
+              <div class="history-meta-line">
+                <span class="history-model-tag">${item.model_name || item.model_key}</span>
+                <span class="history-source-tag">${item.source === 'telegram' ? '🤖 Telegram' : '🌐 Web'}</span>
+                <span>${dateStr}</span>
+                <span>• Пользователь: <code>${item.user_id || 'web'}</code></span>
+                ${item.elapsed ? `<span>• Время: ${item.elapsed}с</span>` : ''}
+              </div>
+              <div class="history-prompt" title="${item.prompt || ''}">${item.prompt || 'Без промпта'}</div>
+              <div class="history-params">
+                Параметры: ${item.duration || 5}с | ${item.resolution || '720p'} | ${item.ratio || '16:9'} ${item.has_audio ? '| 🔊 Аудио' : ''}
+                ${item.error ? `<span style="color:var(--danger); margin-left:8px;">[${item.error}]</span>` : ''}
+              </div>
+            </div>
+            <div class="history-actions">
+              <span class="history-status-badge ${statusClass}">${statusText}</span>
+              ${mediaActions}
+            </div>
+          `;
+          listEl.appendChild(card);
+        });
+
+      } catch (err) {
+        listEl.innerHTML = `<div style="color:var(--danger); text-align:center; padding:20px;">Ошибка загрузки: ${err.message}</div>`;
+      }
+    }
+
+    function playHistoryMedia(mediaUrl, category) {
+      closeAdminModal();
+      const playerArea = document.getElementById('playerArea');
+      const resultActions = document.getElementById('resultActions');
+      const downloadLink = document.getElementById('downloadLink');
+
+      const isVideo = category === 'video' || mediaUrl.endsWith('.mp4');
+      const isAudio = category === 'voice' || mediaUrl.endsWith('.mp3');
+
+      if (isVideo) {
+        playerArea.innerHTML = `<video src="${mediaUrl}" controls autoplay loop playsinline style="width: 100%; max-height: 480px; object-fit: contain; border-radius: var(--radius-md); background: #000; display: block;"></video>`;
+      } else if (isAudio) {
+        playerArea.innerHTML = `<div style="padding: 40px; text-align: center;"><audio src="${mediaUrl}" controls autoplay style="width: 100%; max-width: 440px;"></audio></div>`;
+      } else {
+        playerArea.innerHTML = `<img src="${mediaUrl}" alt="Media" style="width: 100%; max-height: 480px; object-fit: contain; border-radius: var(--radius-md); background: #000; display: block;">`;
+      }
+
+      downloadLink.href = mediaUrl;
+      downloadLink.setAttribute('download', mediaUrl.split('/').pop());
+      resultActions.style.display = 'flex';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      showToast('Медиа загружено в плеер студии', 'info');
+    }
+
+    async function loadAdminKeys() {
+      const adminToken = localStorage.getItem('poco_admin_token');
+      const tbody = document.getElementById('adminKeysTableBody');
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:16px;">🔄 Загрузка ключей доступа...</td></tr>';
+
+      try {
+        const res = await fetch('/api/admin/keys', {
+          headers: { 'X-Admin-Token': adminToken }
+        });
+        if (!res.ok) {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--danger);">Ошибка авторизации администратора.</td></tr>';
+          return;
+        }
+
+        const data = await res.json();
+        const keys = data.keys || [];
+
+        if (keys.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-dim); padding:16px;">Выданных ключей пока нет. Создайте первый ключ выше!</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = '';
+        keys.forEach(k => {
+          const tr = document.createElement('tr');
+          const isActive = k.active !== false;
+          const statusBadge = isActive
+            ? '<span class="key-badge-status active">🟢 Активен</span>'
+            : '<span class="key-badge-status revoked">🔴 Отозван</span>';
+
+          const actionBtn = isActive
+            ? `<button class="key-row-action revoke" onclick="revokeKey('${k.key}')">Отозвать</button>`
+            : `<button class="key-row-action activate" onclick="activateKey('${k.key}')">Активировать</button>`;
+
+          const lastUsed = k.last_used_at ? new Date(k.last_used_at * 1000).toLocaleDateString('ru-RU') : 'Никогда';
+
+          tr.innerHTML = `
+            <td><code><b>${k.key}</b></code></td>
+            <td>${statusBadge}</td>
+            <td>${k.note || 'Без заметки'}</td>
+            <td>${k.used_count || 0}</td>
+            <td>${lastUsed}</td>
+            <td>
+              <button class="key-row-action" style="background:rgba(255,255,255,0.1); margin-right:4px;" onclick="copyKeyText('${k.key}')">📋</button>
+              ${actionBtn}
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--danger);">${err.message}</td></tr>`;
+      }
+    }
+
+    async function generateNewAccessKey() {
+      const adminToken = localStorage.getItem('poco_admin_token');
+      const noteInput = document.getElementById('newKeyNoteInput');
+      const note = (noteInput.value || '').trim();
+
+      try {
+        const res = await fetch('/api/admin/keys/generate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Token': adminToken
+          },
+          body: JSON.stringify({ note })
+        });
+
+        if (!res.ok) throw new Error('Ошибка генерации ключа');
+        const data = await res.json();
+
+        document.getElementById('newGeneratedKeyCode').textContent = data.key;
+        document.getElementById('newKeyDisplayBox').style.display = 'block';
+        noteInput.value = '';
+
+        loadAdminKeys();
+        showToast(`Создан новый ключ: ${data.key}`, 'success');
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    }
+
+    function copyGeneratedKey() {
+      const key = document.getElementById('newGeneratedKeyCode').textContent;
+      navigator.clipboard.writeText(key);
+      showToast('Ключ скопирован в буфер обмена!', 'success');
+    }
+
+    function copyKeyText(key) {
+      navigator.clipboard.writeText(key);
+      showToast(`Ключ ${key} скопирован!`, 'success');
+    }
+
+    async function revokeKey(key) {
+      const adminToken = localStorage.getItem('poco_admin_token');
+      try {
+        const res = await fetch('/api/admin/keys/revoke', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken },
+          body: JSON.stringify({ key })
+        });
+        if (res.ok) {
+          showToast(`Ключ ${key} отозван!`, 'info');
+          loadAdminKeys();
+        }
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    }
+
+    async function activateKey(key) {
+      const adminToken = localStorage.getItem('poco_admin_token');
+      try {
+        const res = await fetch('/api/admin/keys/activate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken },
+          body: JSON.stringify({ key })
+        });
+        if (res.ok) {
+          showToast(`Ключ ${key} вновь активирован!`, 'success');
+          loadAdminKeys();
+        }
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    }
+
+    // Run auth check automatically on startup
+    window.addEventListener('DOMContentLoaded', () => {
+      checkAuthOnLoad();
+    });
+  </script>
+
+  <!-- ACCESS LOCK SCREEN MODAL -->
+  <div id="accessLockModal" class="aero-modal-overlay" style="display: none;">
+    <div class="aero-modal-dialog access-dialog">
+      <div class="access-glow-sphere"></div>
+
+      <div class="aero-modal-header text-center">
+        <div class="aero-access-badge">
+          <img src="/static/brand/pack/aero_monitor_64.png" alt="Lock" class="aero-access-icon">
+        </div>
+        <h2 class="access-title">🔐 Вход в POCO AI Studio</h2>
+        <p class="access-subtitle">Приватная нейросетевая студия видео и графики</p>
+      </div>
+
+      <div class="aero-modal-body">
+        <div class="access-info-card">
+          <p class="access-info-text">
+            Чтобы войти на сайт и использовать генерацию нейросетей, запросите персональный ключ доступа у создателя:
+          </p>
+          <a href="https://t.me/GermanUstinf" target="_blank" rel="noopener noreferrer" class="aero-tg-creator-btn">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69.01-.03.01-.14-.07-.19-.08-.05-.19-.02-.27 0-.12.03-1.99 1.27-5.61 3.72-.53.36-1.01.54-1.44.53-.47-.01-1.38-.27-2.06-.49-.83-.27-1.49-.42-1.43-.88.03-.24.38-.49 1.03-.74 4.04-1.76 6.74-2.92 8.09-3.5 3.85-1.61 4.65-1.89 5.17-1.9.11 0 .37.03.54.17.14.12.18.28.2.45-.02.07-.02.15-.04.24z"/>
+            </svg>
+            <span>👉 Запросить ключ у @GermanUstinf</span>
+          </a>
+        </div>
+
+        <div class="access-input-group">
+          <label class="access-label">🔑 Введите ваш ключ доступа:</label>
+          <div class="input-with-button">
+            <input type="text" id="accessKeyInput" class="aero-input key-field" placeholder="POCO-XXXX-XXXX" maxlength="24" onkeydown="if(event.key==='Enter') submitAccessKey()">
+            <button class="aero-action-btn" onclick="submitAccessKey()">✨ Войти</button>
+          </div>
+          <div id="accessKeyMsg" class="access-msg" style="display:none;"></div>
+        </div>
+
+        <div class="admin-login-toggle-area">
+          <button type="button" class="admin-link-btn" onclick="toggleAdminSection()">
+            👑 Вход для создателя (@GermanUstinf)
+          </button>
+        </div>
+
+        <div id="adminLoginSection" class="admin-login-box" style="display:none;">
+          <label class="access-label">🔒 Пароль администратора:</label>
+          <div class="input-with-button">
+            <input type="password" id="adminPasswordInput" class="aero-input" placeholder="Пароль администратора" onkeydown="if(event.key==='Enter') submitAdminLogin()">
+            <button class="aero-action-btn" onclick="submitAdminLogin()">Войти</button>
+          </div>
+          <div id="adminLoginMsg" class="access-msg" style="display:none;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADMIN DASHBOARD MODAL -->
+  <div id="adminModal" class="aero-modal-overlay" style="display: none;">
+    <div class="aero-modal-dialog admin-dialog">
+      <div class="admin-modal-head">
+        <div class="admin-head-title">
+          <span class="admin-badge-icon">👑</span>
+          <div>
+            <h3>Панель создателя & История генераций</h3>
+            <span class="admin-sub">POCO AI Studio • Управление ключами доступа и аудит</span>
+          </div>
+        </div>
+        <button class="aero-close-btn" onclick="closeAdminModal()">✕</button>
+      </div>
+
+      <!-- Admin Tabs -->
+      <div class="admin-tabs">
+        <button class="admin-tab active" id="tabAdminHistory" onclick="switchAdminTab('history')">
+          📜 История всех генераций
+        </button>
+        <button class="admin-tab" id="tabAdminKeys" onclick="switchAdminTab('keys')">
+          🔑 Генератор ключей доступа
+        </button>
+      </div>
+
+      <!-- Tab Content 1: History -->
+      <div id="adminTabContentHistory" class="admin-tab-pane active">
+        <!-- Stats Bar -->
+        <div class="admin-stats-bar" id="adminStatsBar">
+          <div class="stat-box">
+            <div class="stat-num" id="statTotal">0</div>
+            <div class="stat-lbl">Всего задач</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-num neon" id="statCompleted">0</div>
+            <div class="stat-lbl">Успешно</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-num cyan" id="statVideos">0</div>
+            <div class="stat-lbl">Видео</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-num magenta" id="statImages">0</div>
+            <div class="stat-lbl">Фото / Арт</div>
+          </div>
+        </div>
+
+        <!-- History Filter Bar -->
+        <div class="history-filter-bar">
+          <input type="text" id="historySearchInput" class="aero-input filter-search" placeholder="Поиск по промпту, модели или ключу..." oninput="debounceFilterHistory()">
+          <select id="historyStatusFilter" class="filter-select" onchange="loadAdminHistory()">
+            <option value="">Все статусы</option>
+            <option value="completed">Успешные (completed)</option>
+            <option value="processing">В обработке</option>
+            <option value="failed">Ошибки (failed)</option>
+          </select>
+          <button class="aero-action-btn" onclick="loadAdminHistory()">
+            🔄 Обновить
+          </button>
+        </div>
+
+        <!-- History Items Container -->
+        <div class="history-list" id="adminHistoryList">
+          <div class="history-loading" style="text-align:center; padding:30px; color:var(--text-muted);">Загрузка истории генераций...</div>
+        </div>
+      </div>
+
+      <!-- Tab Content 2: Keys -->
+      <div id="adminTabContentKeys" class="admin-tab-pane">
+        <!-- Generate Key Card -->
+        <div class="key-gen-card">
+          <h4>⚡ Сгенерировать новый ключ доступа</h4>
+          <p class="key-gen-desc">Ключ будет уникальным, случайным и сохранится в базе. Передайте его человеку для входа на сайт.</p>
+          <div class="key-gen-form">
+            <input type="text" id="newKeyNoteInput" class="aero-input key-note-input" placeholder="Для кого ключ? (например: Друг, Тестировщик, @username)">
+            <button class="aero-action-btn" onclick="generateNewAccessKey()">
+              ✨ Создать ключ
+            </button>
+          </div>
+          <div id="newKeyDisplayBox" class="new-key-display" style="display:none;">
+            <div class="new-key-label">Ключ успешно создан!</div>
+            <div class="new-key-code-row">
+              <code id="newGeneratedKeyCode">POCO-XXXX-XXXX</code>
+              <button class="aero-copy-btn" onclick="copyGeneratedKey()">📋 Скопировать</button>
+            </div>
+            <div class="new-key-hint">Отправьте этот код человеку — при вводе на сайте его сразу пустит в студию.</div>
+          </div>
+        </div>
+
+        <!-- Keys Table Card -->
+        <div class="keys-table-card">
+          <div class="keys-table-header">
+            <h4>Активные и архивные ключи</h4>
+            <button class="aero-btn-sm" onclick="loadAdminKeys()">🔄 Обновить список</button>
+          </div>
+          <div class="keys-table-wrap">
+            <table class="aero-table" id="adminKeysTable">
+              <thead>
+                <tr>
+                  <th>Ключ</th>
+                  <th>Статус</th>
+                  <th>Для кого / Заметка</th>
+                  <th>Входов</th>
+                  <th>Последний вход</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody id="adminKeysTableBody">
+                <tr><td colspan="6" style="text-align:center;">Загрузка ключей...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>

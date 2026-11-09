@@ -1,0 +1,39 @@
+name: POCO AI Bot 24/7
+
+concurrency:
+  group: poco-ai-bot
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+  schedule:
+    # Автоматический перезапуск каждые 5 часов для непрерывной работы 24/7
+    - cron: '0 */5 * * *'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies & FFmpeg
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          pip install -r requirements.txt
+
+      - name: Run POCO AI Bot
+        run: |
+          python bot.py
