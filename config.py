@@ -24,7 +24,7 @@ DAVINCI_REFRESH_TOKEN = (
 
 # Administration & Access Control
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "GermanUstinf2026!").strip()
-ADMIN_TELEGRAM_USERNAMES = [u.strip().lstrip("@").lower() for u in os.getenv("ADMIN_TELEGRAM_USERNAMES", "GermanUstinf,germanustinf").split(",") if u.strip()]
+ADMIN_TELEGRAM_USERNAMES = [u.strip().lstrip("@").lower() for u in os.getenv("ADMIN_TELEGRAM_USERNAMES", "GermanUstinf,germanustinf,german792,german_ustinf").split(",") if u.strip()]
 ADMIN_TELEGRAM_IDS = [int(x.strip()) for x in os.getenv("ADMIN_TELEGRAM_IDS", "").split(",") if x.strip().isdigit()]
 CREATOR_TG_USERNAME = "@GermanUstinf"
 CREATOR_TG_URL = "https://t.me/GermanUstinf"

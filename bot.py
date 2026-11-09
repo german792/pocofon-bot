@@ -745,26 +745,78 @@ async def handle_set_token(message: Message, command: CommandObject, queue: Gene
     await message.reply("✅ <b>Токен DaVinci AI успешно обновлен и сохранен!</b>", parse_mode="HTML")
 
 
-@router.message(Command("genkey", "key", "createkey", "создатьключ"))
+@router.message(Command("id", "whoami", ignore_case=True, ignore_mention=True))
+async def handle_id_command(message: Message):
+    """Show Telegram user profile, user_id and chat_id."""
+    user_id = message.from_user.id
+    user_un = message.from_user.username
+    chat_id = message.chat.id
+    chat_type = message.chat.type
+    await message.reply(
+        f"👤 <b>Ваш профиль в Telegram:</b>\n"
+        f"• <b>ID:</b> <code>{user_id}</code>\n"
+        f"• <b>Username:</b> @{user_un or 'отсутствует'}\n"
+        f"• <b>Имя:</b> {html.escape(message.from_user.full_name or '')}\n"
+        f"• <b>Чат ID:</b> <code>{chat_id}</code> ({chat_type})",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("admin", "auth", ignore_case=True, ignore_mention=True))
+async def handle_admin_auth_command(message: Message, command: CommandObject):
+    """Authenticate Telegram user as admin with the master password."""
+    raw = (command.args or "").strip()
+    user_id = message.from_user.id
+    user_un = (message.from_user.username or "").lower().strip()
+
+    if raw == config.ADMIN_PASSWORD:
+        if user_id not in config.ADMIN_TELEGRAM_IDS:
+            config.ADMIN_TELEGRAM_IDS.append(user_id)
+        await message.reply(
+            f"👑 <b>Вы успешно авторизованы как Администратор!</b>\n\n"
+            f"👤 <b>Username:</b> @{user_un or 'не задан'}\n"
+            f"🆔 <b>Ваш ID:</b> <code>{user_id}</code>\n\n"
+            f"✨ Теперь вам доступны команды:\n"
+            f"• <code>/genkey [заметка]</code> — генерация ключа доступа\n"
+            f"• <code>/keys</code> — просмотр активных ключей\n"
+            f"• <code>/token [x-token]</code> — обновление токена DaVinci",
+            parse_mode="HTML",
+        )
+    else:
+        await message.reply(
+            f"🔑 <b>Авторизация администратора:</b>\n"
+            f"Отправьте команду с мастер-паролем:\n"
+            f"<code>/admin {config.ADMIN_PASSWORD}</code>\n\n"
+            f"<i>Ваш ID: <code>{user_id}</code>, Username: @{user_un or 'не задан'}</i>",
+            parse_mode="HTML",
+        )
+
+
+@router.message(Command("genkey", "key", "createkey", "создатьключ", ignore_case=True, ignore_mention=True))
 async def handle_genkey_command(message: Message, command: CommandObject):
     """Generate a new random access key for POCO AI Studio (restricted to German / Admins)."""
     user_un = (message.from_user.username or "").lower().strip()
     user_id = message.from_user.id
+    args = (command.args or "").strip()
 
     is_admin = (
-        user_un in [u.lower() for u in getattr(config, "ADMIN_TELEGRAM_USERNAMES", ["germanustinf"])]
+        user_un in [u.lower() for u in getattr(config, "ADMIN_TELEGRAM_USERNAMES", [])]
         or user_id in getattr(config, "ADMIN_TELEGRAM_IDS", [])
+        or args == config.ADMIN_PASSWORD
     )
     if not is_admin:
         await message.reply(
-            "🔒 <b>Доступ запрещен.</b>\n"
-            "Генерация ключей доступна только создателю бота @GermanUstinf.\n"
-            "Для получения ключа напишите создателю в личные сообщения.",
+            f"🔒 <b>Доступ запрещен.</b>\n"
+            f"Генерация ключей доступна только создателю бота @GermanUstinf.\n\n"
+            f"👤 Ваш username: @{user_un or 'отсутствует'}\n"
+            f"🆔 Ваш ID: <code>{user_id}</code>\n\n"
+            f"💡 Чтобы войти с паролем создателя, введите: <code>/admin {config.ADMIN_PASSWORD}</code>",
             parse_mode="HTML",
         )
         return
 
-    note = (command.args or "").strip() or f"Telegram от @{message.from_user.username or user_id}"
+    note = args if args != config.ADMIN_PASSWORD else ""
+    note = note or f"Telegram от @{message.from_user.username or user_id}"
     new_key = access_manager.generate_key(note=note, created_by=f"@{message.from_user.username or user_id}")
 
     await message.reply(
@@ -777,18 +829,22 @@ async def handle_genkey_command(message: Message, command: CommandObject):
     )
 
 
-@router.message(Command("keys", "ключи"))
+@router.message(Command("keys", "ключи", ignore_case=True, ignore_mention=True))
 async def handle_list_keys_command(message: Message):
     """List recent access keys (restricted to German / Admins)."""
     user_un = (message.from_user.username or "").lower().strip()
     user_id = message.from_user.id
 
     is_admin = (
-        user_un in [u.lower() for u in getattr(config, "ADMIN_TELEGRAM_USERNAMES", ["germanustinf"])]
+        user_un in [u.lower() for u in getattr(config, "ADMIN_TELEGRAM_USERNAMES", [])]
         or user_id in getattr(config, "ADMIN_TELEGRAM_IDS", [])
     )
     if not is_admin:
-        await message.reply("🔒 Доступ только для создателя @GermanUstinf.", parse_mode="HTML")
+        await message.reply(
+            f"🔒 Доступ только для создателя @GermanUstinf.\n"
+            f"Авторизация: <code>/admin {config.ADMIN_PASSWORD}</code>",
+            parse_mode="HTML",
+        )
         return
 
     keys = access_manager.get_all_keys()[:15]
