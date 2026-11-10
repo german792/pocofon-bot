@@ -76,7 +76,7 @@ def check_admin_token(token: Optional[str]) -> bool:
     return bool(token and token in admin_sessions)
 
 def get_auth_context(request: Request) -> Dict[str, Any]:
-    admin_token = request.headers.get("x-admin-token") or request.query_params.get("admin_token")
+    admin_token = request.headers.get("x-admin-token")
     if check_admin_token(admin_token):
         return {"authenticated": True, "role": "admin", "user_id": "GermanUstinf", "note": "Создатель"}
 

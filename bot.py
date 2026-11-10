@@ -766,9 +766,20 @@ async def get_all_photos_for_message_or_reply(message: Message, bot: Bot) -> Lis
     return refs
 
 
+def _is_admin_user(message: Message) -> bool:
+    user_un = (message.from_user.username or "").lower().strip()
+    return (
+        (bool(user_un) and user_un in [u.lower() for u in getattr(config, "ADMIN_TELEGRAM_USERNAMES", [])])
+        or message.from_user.id in getattr(config, "ADMIN_TELEGRAM_IDS", [])
+    )
+
+
 @router.message(Command("token", "set_token"))
 async def handle_set_token(message: Message, command: CommandObject, queue: GenerationQueue):
     """Update DaVinci x-token on the fly without restarting the bot."""
+    if not _is_admin_user(message):
+        await message.reply("🔒 Доступ только для создателя @GermanUstinf.", parse_mode="HTML")
+        return
     raw = (command.args or "").strip()
     if not raw:
         await message.reply(
@@ -808,7 +819,7 @@ async def handle_admin_auth_command(message: Message, command: CommandObject):
     user_id = message.from_user.id
     user_un = (message.from_user.username or "").lower().strip()
 
-    if raw == config.ADMIN_PASSWORD:
+    if access_manager.verify_admin_password(raw):
         if user_id not in config.ADMIN_TELEGRAM_IDS:
             config.ADMIN_TELEGRAM_IDS.append(user_id)
         await message.reply(
@@ -825,7 +836,7 @@ async def handle_admin_auth_command(message: Message, command: CommandObject):
         await message.reply(
             f"🔑 <b>Авторизация администратора:</b>\n"
             f"Отправьте команду с мастер-паролем:\n"
-            f"<code>/admin {config.ADMIN_PASSWORD}</code>\n\n"
+            f"<code>/admin ваш_пароль</code>\n\n"
             f"<i>Ваш ID: <code>{user_id}</code>, Username: @{user_un or 'не задан'}</i>",
             parse_mode="HTML",
         )
@@ -841,7 +852,7 @@ async def handle_genkey_command(message: Message, command: CommandObject):
     is_admin = (
         user_un in [u.lower() for u in getattr(config, "ADMIN_TELEGRAM_USERNAMES", [])]
         or user_id in getattr(config, "ADMIN_TELEGRAM_IDS", [])
-        or args == config.ADMIN_PASSWORD
+        or access_manager.verify_admin_password(args)
     )
     if not is_admin:
         await message.reply(
@@ -849,12 +860,12 @@ async def handle_genkey_command(message: Message, command: CommandObject):
             f"Генерация ключей доступна только создателю бота @GermanUstinf.\n\n"
             f"👤 Ваш username: @{user_un or 'отсутствует'}\n"
             f"🆔 Ваш ID: <code>{user_id}</code>\n\n"
-            f"💡 Чтобы войти с паролем создателя, введите: <code>/admin {config.ADMIN_PASSWORD}</code>",
+            f"💡 Чтобы войти с паролем создателя, введите: <code>/admin ваш_пароль</code>",
             parse_mode="HTML",
         )
         return
 
-    note = args if args != config.ADMIN_PASSWORD else ""
+    note = "" if access_manager.verify_admin_password(args) else args
     note = note or f"Telegram от @{message.from_user.username or user_id}"
     new_key = access_manager.generate_key(note=note, created_by=f"@{message.from_user.username or user_id}")
 
@@ -881,7 +892,7 @@ async def handle_list_keys_command(message: Message):
     if not is_admin:
         await message.reply(
             f"🔒 Доступ только для создателя @GermanUstinf.\n"
-            f"Авторизация: <code>/admin {config.ADMIN_PASSWORD}</code>",
+            f"Авторизация: <code>/admin ваш_пароль</code>",
             parse_mode="HTML",
         )
         return
@@ -2111,6 +2122,8 @@ async def on_open_menu_from_button(call: CallbackQuery, state: FSMContext):
     parts = call.data.split(":")
     target_mode = parts[1]
     owner_id = int(parts[2]) if len(parts) > 2 else call.from_user.id
+    if not await verify_callback_owner(call, owner_id):
+        return
 
     data = await state.get_data()
     ref_images: List[bytes] = list(data.get("ref_images") or [])

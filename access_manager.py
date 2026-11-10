@@ -30,7 +30,8 @@ def _load_keys() -> Dict[str, Dict[str, Any]]:
     if not KEYS_FILE.exists():
         _keys_cache = {}
         # Pre-seed one initial master key for creator
-        initial_key = generate_key(note="Master key (GermanUstinf)", created_by="system")
+        if getattr(config, "KEY_SIGNING_SECRET", ""):
+            generate_key(note="Master key (GermanUstinf)", created_by="system")
         return _keys_cache
 
     try:
@@ -70,7 +71,9 @@ _KEY_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 
 def _signing_secret() -> bytes:
     """Shared secret used to sign keys, so the bot and the website agree without shared storage."""
-    seed = os.getenv("KEY_SIGNING_SECRET") or getattr(config, "ADMIN_PASSWORD", "GermanUstinf2026!")
+    seed = getattr(config, "KEY_SIGNING_SECRET", "")
+    if not seed:
+        raise RuntimeError("KEY_SIGNING_SECRET (или ADMIN_PASSWORD) не задан — подписывать ключи нечем")
     return f"poco-access-key:{seed}".encode("utf-8")
 
 
@@ -87,6 +90,8 @@ def _make_signed_key() -> str:
 
 
 def _is_signed_key(key: str) -> bool:
+    if not getattr(config, "KEY_SIGNING_SECRET", ""):
+        return False
     parts = key.split("-")
     if len(parts) != 4 or parts[0] != "POCO" or len(parts[1]) != 4:
         return False
@@ -254,7 +259,7 @@ def delete_key(key: str) -> bool:
 
 def verify_admin_password(password: str) -> bool:
     """Secure constant-time comparison of admin password."""
-    if not password:
+    admin_pwd = getattr(config, "ADMIN_PASSWORD", "")
+    if not password or not admin_pwd:
         return False
-    admin_pwd = getattr(config, "ADMIN_PASSWORD", "GermanUstinf2026!")
     return hmac.compare_digest(password.strip(), admin_pwd.strip())

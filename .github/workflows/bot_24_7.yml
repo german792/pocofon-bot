@@ -43,5 +43,12 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run POCO AI Bot
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          DAVINCI_TOKEN: ${{ secrets.DAVINCI_TOKEN }}
+          DAVINCI_REFRESH_TOKEN: ${{ secrets.DAVINCI_REFRESH_TOKEN }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          KEY_SIGNING_SECRET: ${{ secrets.KEY_SIGNING_SECRET }}
+          API_PASSWORD: ${{ secrets.API_PASSWORD }}
         run: |
           python bot.py
