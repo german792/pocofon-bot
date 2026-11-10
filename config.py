@@ -47,7 +47,7 @@ MODELS = {
         "multi_ref": True,
         "video_ref": True,
         "ref_limit": 30,
-        "durations": [5, 10, 15, 20, 30],
+        "durations": list(range(1, 31)),
         "desc": "Флагман Seedance 2.5 (до 30с, 1080p, звук и мульти-референсы)"
     },
     "s2_pro": {
@@ -60,7 +60,7 @@ MODELS = {
         "multi_ref": True,
         "video_ref": True,
         "ref_limit": 9,
-        "durations": [5, 8, 10, 15],
+        "durations": list(range(1, 16)),
         "desc": "Максимальное качество Seedance 2.0 со звуком и референсами (до 15с)"
     },
     "s2_fast": {
@@ -73,7 +73,7 @@ MODELS = {
         "multi_ref": True,
         "video_ref": True,
         "ref_limit": 9,
-        "durations": [5, 8, 10, 15],
+        "durations": list(range(1, 16)),
         "desc": "Быстрая версия Seedance 2.0 со звуком и референсами (до 15с)"
     },
     "s2_mini": {
@@ -86,7 +86,7 @@ MODELS = {
         "multi_ref": True,
         "video_ref": True,
         "ref_limit": 9,
-        "durations": [5, 8, 10, 15],
+        "durations": list(range(1, 16)),
         "desc": "Ультрабыстрая Seedance 2.0 Mini со звуком и референсами (до 15с)"
     },
     "s1_5_pro": {
@@ -98,7 +98,7 @@ MODELS = {
         "has_audio": True,
         "multi_ref": False,
         "ref_limit": 1,
-        "durations": [5, 8, 10, 12],
+        "durations": list(range(1, 13)),
         "desc": "Классическая модель Seedance 1.5 Pro со звуком (до 12с)"
     },
 
@@ -113,7 +113,7 @@ MODELS = {
         "multi_ref": True,
         "video_ref": True,
         "ref_limit": 10,
-        "durations": [5, 10, 15, 20, 30],
+        "durations": list(range(1, 31)),
         "desc": "Новейший Kling 4.0 (до 30с, 1080p, до 10 фото-референсов)"
     },
     "kling_4_flash": {
@@ -126,7 +126,7 @@ MODELS = {
         "multi_ref": True,
         "video_ref": True,
         "ref_limit": 10,
-        "durations": [5, 10, 15, 20],
+        "durations": list(range(1, 21)),
         "desc": "Быстрый Kling 4.0 Flash со звуком и референсами (до 20с)"
     },
     "flux_3": {
@@ -138,7 +138,7 @@ MODELS = {
         "has_audio": True,
         "multi_ref": False,
         "ref_limit": 1,
-        "durations": [5, 10, 15, 20],
+        "durations": list(range(1, 21)),
         "desc": "Видео-модель Flux 3 (до 20с, высокая детализация + звук + референс)"
     },
     "flux_3_max": {
@@ -150,7 +150,7 @@ MODELS = {
         "has_audio": True,
         "multi_ref": False,
         "ref_limit": 1,
-        "durations": [5, 10, 15, 20],
+        "durations": list(range(1, 21)),
         "desc": "Топовая видео-модель Flux 3 Max со звуком и референсом (до 20с)"
     },
     "ltx_25_pro": {
@@ -162,7 +162,7 @@ MODELS = {
         "has_audio": True,
         "multi_ref": False,
         "ref_limit": 1,
-        "durations": [6, 8, 10],
+        "durations": list(range(1, 11)),
         "desc": "Кинематографичная модель LTX 2.5 Pro со звуком и референсом (до 10с)"
     },
     "gemini_omni_12": {
@@ -175,7 +175,7 @@ MODELS = {
         "multi_ref": True,
         "video_ref": True,
         "ref_limit": 10,
-        "durations": [5, 8, 10, 15],
+        "durations": list(range(1, 16)),
         "desc": "Google Gemini Omni Flash 1.2 (видео до 15с, 4K + мульти-референсы)"
     },
     "minimax_h3": {
@@ -188,7 +188,7 @@ MODELS = {
         "multi_ref": True,
         "video_ref": True,
         "ref_limit": 9,
-        "durations": list(range(1, 31)),
+        "durations": list(range(1, 16)),
         "desc": "Флагман MiniMax H3 (до 15с, 2K/768p, мульти-референсы до 9 фото, от 1с!)"
     },
     "minimax_hailuo": {
@@ -253,7 +253,7 @@ MODELS = {
         "multi_ref": True,
         "video_ref": True,
         "ref_limit": 5,
-        "durations": list(range(1, 31)),
+        "durations": list(range(1, 21)),
         "desc": "Runway Alpha 2.0 (Aleph): кинематографичный рендер Runway с сайта DaVinci (от 1с)"
     },
     "pika_2_2": {
@@ -292,7 +292,7 @@ MODELS = {
         "multi_ref": True,
         "video_ref": True,
         "ref_limit": 5,
-        "durations": list(range(1, 31)),
+        "durations": list(range(1, 16)),
         "desc": "xAI Grok Imagine: сверхбыстрая генерация видео со звуком с сайта DaVinci (от 1с)"
     },
     "grok_15": {

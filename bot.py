@@ -105,132 +105,152 @@ def build_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeybo
 
 
 def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeyboardMarkup:
-    """Video & Voice generation menu."""
+    """Video & Voice 3-step wizard menu:
+    Step 1 (model): Choose video model
+    Step 2 (duration): Choose exact seconds (individual button for each second 1..model_max)
+    Step 3 (quality): Resolution, aspect ratio, audio toggle & launch
+    """
     cur_model = draft.get("model_key", DEFAULT_MODEL)
     if cur_model not in VIDEO_MODEL_KEYS:
         cur_model = DEFAULT_MODEL
         draft["model_key"] = cur_model
 
     minfo = MODELS.get(cur_model, MODELS[DEFAULT_MODEL])
-    dur = draft.get("duration", DEFAULT_DURATION)
-    res = draft.get("resolution", DEFAULT_RESOLUTION)
-    ratio = draft.get("ratio", DEFAULT_RATIO)
-    audio = draft.get("audio", DEFAULT_AUDIO)
-    ref_images: List[bytes] = draft.get("ref_images", [])
-    ref_mode = draft.get("ref_mode", "ref")
+    step = draft.get("step", "model")
 
-    # Top Switcher Row: Video Menu vs Image Menu
-    switcher_row = [
-        InlineKeyboardButton(text="✅ 🎬 Видео / Озвучка", callback_data=f"tab:video:{owner_id}"),
-        InlineKeyboardButton(text="🖼 Генерация Фото", callback_data=f"tab:image:{owner_id}"),
-    ]
+    # If voice model, wizard has model step or voice quality step
+    if minfo.get("backend") == "davinci_voice":
+        if step != "model":
+            cost = calculate_credit_cost(cur_model, 0, "")
+            btn_label = f"🎙 Озвучить (~{cost} кр.)" if cost > 0 else "🎙 Озвучить"
+            rows = [
+                [
+                    InlineKeyboardButton(text="🔄 Сменить модель", callback_data=f"wstep:model:{owner_id}"),
+                    InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}")
+                ],
+                [
+                    InlineKeyboardButton(text=btn_label, callback_data=f"gen:{owner_id}")
+                ]
+            ]
+            return InlineKeyboardMarkup(inline_keyboard=rows)
 
-    # Video Models grid (2 per row)
-    model_rows = []
-    cur_row = []
-    for mkey in VIDEO_MODEL_KEYS:
-        m = MODELS[mkey]
-        lbl = m["short"]
-        if mkey == cur_model:
-            lbl = f"✅ {lbl}"
-        cur_row.append(InlineKeyboardButton(text=lbl, callback_data=f"sm:{mkey}:{owner_id}"))
-        if len(cur_row) == 2:
-            model_rows.append(cur_row)
-            cur_row = []
-    if cur_row:
-        model_rows.append(cur_row)
+    # STEP 1: Model Selection
+    if step == "model":
+        rows = [
+            # Switcher row
+            [
+                InlineKeyboardButton(text="✅ 🎬 Видео / Озвучка", callback_data=f"tab:video:{owner_id}"),
+                InlineKeyboardButton(text="🖼 Генерация Фото", callback_data=f"tab:image:{owner_id}"),
+            ]
+        ]
+        # Video Models grid (2 per row)
+        cur_row = []
+        for mkey in VIDEO_MODEL_KEYS:
+            m = MODELS[mkey]
+            lbl = m["short"]
+            if mkey == cur_model:
+                lbl = f"✅ {lbl}"
+            cur_row.append(InlineKeyboardButton(text=lbl, callback_data=f"sm:{mkey}:{owner_id}"))
+            if len(cur_row) == 2:
+                rows.append(cur_row)
+                cur_row = []
+        if cur_row:
+            rows.append(cur_row)
 
-    rows = [switcher_row, *model_rows]
-
-    # Photo Reference Row (Available for ALL models)
-    ref_count = len(ref_images)
-    ref_limit = minfo.get("ref_limit", 1)
-    if ref_count == 0:
-        rows.append([
-            InlineKeyboardButton(
-                text=f"📎 Добавить фото-референс (до {ref_limit} шт.)",
-                callback_data=f"ref_hint:{owner_id}"
-            )
-        ])
-    else:
-        grid_lbl = "✅ 🔲 Сетка 3×3 (снять)" if draft.get("has_grid") else "🔲 Сетка на референс"
-        if minfo.get("multi_ref"):
-            mode_lbl = (
-                f"🎯 Референс ({ref_count}/{ref_limit} фото)"
-                if ref_mode == "ref"
-                else f"🎬 Старт-кадр ({ref_count} фото)"
-            )
+        # Photo Reference Row
+        ref_images: List[bytes] = draft.get("ref_images", [])
+        ref_count = len(ref_images)
+        ref_limit = minfo.get("ref_limit", 1)
+        ref_mode = draft.get("ref_mode", "ref")
+        if ref_count == 0:
             rows.append([
-                InlineKeyboardButton(text=mode_lbl, callback_data=f"rmode:{owner_id}"),
-                InlineKeyboardButton(text=grid_lbl, callback_data=f"rgrid:{owner_id}"),
-                InlineKeyboardButton(text="🗑 Очистить", callback_data=f"rclear:{owner_id}"),
+                InlineKeyboardButton(
+                    text=f"📎 Добавить фото-референс (до {ref_limit} шт.)",
+                    callback_data=f"ref_hint:{owner_id}"
+                )
+            ])
+        else:
+            grid_lbl = "✅ 🔲 Сетка 3×3 (снять)" if draft.get("has_grid") else "🔲 Сетка на референс"
+            if minfo.get("multi_ref"):
+                mode_lbl = (
+                    f"🎯 Референс ({ref_count}/{ref_limit} фото)"
+                    if ref_mode == "ref"
+                    else f"🎬 Старт-кадр ({ref_count} фото)"
+                )
+                rows.append([
+                    InlineKeyboardButton(text=mode_lbl, callback_data=f"rmode:{owner_id}"),
+                    InlineKeyboardButton(text=grid_lbl, callback_data=f"rgrid:{owner_id}"),
+                    InlineKeyboardButton(text="🗑 Очистить", callback_data=f"rclear:{owner_id}"),
+                ])
+            else:
+                rows.append([
+                    InlineKeyboardButton(text=f"📎 Референс: {ref_count} фото ✅", callback_data=f"ref_hint:{owner_id}"),
+                    InlineKeyboardButton(text=grid_lbl, callback_data=f"rgrid:{owner_id}"),
+                    InlineKeyboardButton(text="🗑 Удалить", callback_data=f"rclear:{owner_id}"),
+                ])
+
+        # Video Reference Row
+        if draft.get("ref_video"):
+            rows.append([
+                InlineKeyboardButton(text="🎞 Видео-референс прикреплен ✅ (Удалить 🗑)", callback_data=f"rclearvideo:{owner_id}")
             ])
         else:
             rows.append([
-                InlineKeyboardButton(text=f"📎 Референс: {ref_count} фото ✅", callback_data=f"ref_hint:{owner_id}"),
-                InlineKeyboardButton(text=grid_lbl, callback_data=f"rgrid:{owner_id}"),
-                InlineKeyboardButton(text="🗑 Удалить", callback_data=f"rclear:{owner_id}"),
+                InlineKeyboardButton(text="🎞 Прикрепить видео (отправьте видеоролик)", callback_data=f"video_hint:{owner_id}")
             ])
 
-    # Video Reference Row (Available for ALL video models)
-    if draft.get("ref_video"):
-        rows.append([
-            InlineKeyboardButton(text="🎞 Видео-референс прикреплен ✅ (Удалить 🗑)", callback_data=f"rclearvideo:{owner_id}")
-        ])
-    else:
-        rows.append([
-            InlineKeyboardButton(text="🎞 Прикрепить видео (отправьте видеоролик)", callback_data=f"video_hint:{owner_id}")
-        ])
+        # Audio Reference Row
+        if draft.get("audio_bytes"):
+            rows.append([
+                InlineKeyboardButton(text="🎵 Аудио-референс прикреплен ✅ (Удалить 🗑)", callback_data=f"rclearaudio:{owner_id}")
+            ])
+        else:
+            rows.append([
+                InlineKeyboardButton(text="🎵 Прикрепить аудио (отправьте голос / mp3)", callback_data=f"audio_hint:{owner_id}")
+            ])
 
-    # Audio Reference Row (Available for ALL video models)
-    if draft.get("audio_bytes"):
+        # Cancel button
         rows.append([
-            InlineKeyboardButton(text="🎵 Аудио-референс прикреплен ✅ (Удалить 🗑)", callback_data=f"rclearaudio:{owner_id}")
-        ])
-    else:
-        rows.append([
-            InlineKeyboardButton(text="🎵 Прикрепить аудио (отправьте голос / mp3)", callback_data=f"audio_hint:{owner_id}")
-        ])
-
-    # For ElevenLabs voice model, hide video duration/resolution/ratio rows
-    if minfo.get("backend") == "davinci_voice":
-        cost = calculate_credit_cost(cur_model, 0, "")
-        btn_label = f"🎙 Озвучить (~{cost} кр.)" if cost > 0 else "🎙 Озвучить"
-        rows.append([
-            InlineKeyboardButton(text=btn_label, callback_data=f"gen:{owner_id}"),
             InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}")
         ])
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
-    # Duration Rows (Exact seconds: stepper, quick buttons 1..6, 7..20, and manual input)
-    dur = max(1, min(30, int(draft.get("duration", DEFAULT_DURATION))))
+    # STEP 2: Duration Selection (every second 1..max_dur is its own button)
+    if step == "duration":
+        model_durs = minfo.get("durations", list(range(1, 31)))
+        max_dur = max(model_durs) if model_durs else 15
+        cur_dur = int(draft.get("duration", DEFAULT_DURATION))
+        if cur_dur > max_dur:
+            cur_dur = max_dur
+            draft["duration"] = max_dur
+
+        rows = []
+        cur_row = []
+        for d in range(1, max_dur + 1):
+            lbl = f"✅ {d}с" if d == cur_dur else f"{d}с"
+            cur_row.append(InlineKeyboardButton(text=lbl, callback_data=f"sd:{d}:{owner_id}"))
+            if len(cur_row) == 5:
+                rows.append(cur_row)
+                cur_row = []
+        if cur_row:
+            rows.append(cur_row)
+
+        rows.append([
+            InlineKeyboardButton(text="⬅️ Назад к выбору модели", callback_data=f"wstep:model:{owner_id}"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}")
+        ])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+
+    # STEP 3: Quality & Launch
+    model_durs = minfo.get("durations", list(range(1, 31)))
+    max_dur = max(model_durs) if model_durs else 15
+    dur = max(1, min(max_dur, int(draft.get("duration", DEFAULT_DURATION))))
     draft["duration"] = dur
+    res = draft.get("resolution", DEFAULT_RESOLUTION)
+    ratio = draft.get("ratio", DEFAULT_RATIO)
+    audio = draft.get("audio", DEFAULT_AUDIO)
 
-    # Stepper Row: [- 1с] [ ⏱ {dur} сек ] [+ 1с]
-    rows.append([
-        InlineKeyboardButton(text="➖ 1с", callback_data=f"sd_dec:{owner_id}"),
-        InlineKeyboardButton(text=f"⏱ {dur} сек", callback_data=f"sd_custom:{owner_id}"),
-        InlineKeyboardButton(text="➕ 1с", callback_data=f"sd_inc:{owner_id}"),
-    ])
-
-    # Quick seconds Row 1 (1s to 6s)
-    row_quick_1 = []
-    for d in [1, 2, 3, 4, 5, 6]:
-        lbl = f"✅ {d}с" if d == dur else f"{d}с"
-        row_quick_1.append(InlineKeyboardButton(text=lbl, callback_data=f"sd:{d}:{owner_id}"))
-    rows.append(row_quick_1)
-
-    # Quick seconds Row 2 (7s, 8s, 10s, 12s, 15s, 20s)
-    row_quick_2 = []
-    for d in [7, 8, 10, 12, 15, 20]:
-        lbl = f"✅ {d}с" if d == dur else f"{d}с"
-        row_quick_2.append(InlineKeyboardButton(text=lbl, callback_data=f"sd:{d}:{owner_id}"))
-    rows.append(row_quick_2)
-
-    # Manual entry button
-    rows.append([
-        InlineKeyboardButton(text="✏️ Ввести секунды вручную (любое число)", callback_data=f"sd_custom:{owner_id}")
-    ])
+    rows = []
 
     # Resolution Row
     res_buttons = []
@@ -253,6 +273,12 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     if minfo.get("has_audio") and minfo.get("backend") != "minimax":
         audio_label = "🔊 Звук: Вкл ✅" if audio else "🔇 Звук: Выкл"
         rows.append([InlineKeyboardButton(text=audio_label, callback_data=f"tg:{'1' if not audio else '0'}:{owner_id}")])
+
+    # Navigation buttons to return to Step 1 or Step 2
+    rows.append([
+        InlineKeyboardButton(text=f"🔄 Модель: {minfo.get('short', cur_model)}", callback_data=f"wstep:model:{owner_id}"),
+        InlineKeyboardButton(text=f"⏱ Длительность: {dur}с", callback_data=f"wstep:duration:{owner_id}")
+    ])
 
     # Action row
     cost = calculate_credit_cost(cur_model, dur, res)
@@ -415,6 +441,7 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
     if cur_model not in VIDEO_MODEL_KEYS:
         cur_model = DEFAULT_MODEL
     minfo = MODELS.get(cur_model, MODELS[DEFAULT_MODEL])
+    step = draft.get("step", "model")
 
     ref_images: List[bytes] = draft.get("ref_images", [])
     ref_count = len(ref_images)
@@ -432,9 +459,7 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
         ref_badge = f"📝 По тексту <i>(отправьте фото в чат, чтобы добавить референс — до {ref_limit} шт.)</i>"
 
     user_line = f"👤 <b>Автор:</b> {draft.get('user_name')}\n" if draft.get("user_name") else ""
-
     video_line = "🎞 <b>Видео-референс:</b> прикреплен к видео ✅\n" if draft.get("ref_video") else ""
-
     audio_ref_line = "🎵 <b>Аудио-референс:</b> прикреплен к видео ✅\n" if draft.get("audio_bytes") else ""
 
     if minfo.get("backend") == "davinci_voice":
@@ -448,11 +473,42 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
             f"📝 <b>Текст для озвучки:</b> <i>{html.escape(str(prompt))}</i>\n"
             f"📌 <b>Референс:</b> {audio_ref}\n"
             f"{cost_line}\n"
-            f"👇 <i>Нажмите «Озвучить» или переключите модель:</i>"
+            f"👇 <i>Нажмите «Озвучить» или переключите модель:</i>\n"
+            f"<code>build: {BUILD_ID}</code>"
         )
 
-    dur = max(1, min(30, int(draft.get("duration", DEFAULT_DURATION))))
+    model_durs = minfo.get("durations", list(range(1, 31)))
+    max_dur = max(model_durs) if model_durs else 15
+    dur = max(1, min(max_dur, int(draft.get("duration", DEFAULT_DURATION))))
     draft["duration"] = dur
+
+    if step == "model":
+        return (
+            f"🎬 <b>Шаг 1 из 3: Выберите модель для видео</b>\n\n"
+            f"{user_line}"
+            f"📝 <b>Промпт:</b> <i>{html.escape(str(prompt))}</i>\n"
+            f"📌 <b>Референсы:</b> {ref_badge}\n"
+            f"{video_line}"
+            f"{audio_ref_line}\n"
+            f"👇 <i>Выберите нейросеть для генерации ниже:</i>\n"
+            f"<code>build: {BUILD_ID}</code>"
+        )
+
+    if step == "duration":
+        return (
+            f"⏱ <b>Шаг 2 из 3: Выберите длительность видео</b>\n\n"
+            f"{user_line}"
+            f"🤖 <b>Модель:</b> {minfo['name']} (максимум {max_dur} сек)\n"
+            f"📝 <b>Промпт:</b> <i>{html.escape(str(prompt))}</i>\n"
+            f"📌 <b>Референсы:</b> {ref_badge}\n"
+            f"{video_line}"
+            f"{audio_ref_line}\n"
+            f"⏱ Выбрано: <b>{dur} сек</b>\n\n"
+            f"👇 <i>Нажмите кнопку с нужным количеством секунд (от 1 до {max_dur}с):</i>\n"
+            f"<code>build: {BUILD_ID}</code>"
+        )
+
+    # step == "quality"
     dur_str = f"{dur} сек"
     res = draft.get("resolution", DEFAULT_RESOLUTION)
     ratio = draft.get("ratio", DEFAULT_RATIO)
@@ -463,18 +519,18 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
     cost_line = f"💳 <b>Стоимость:</b> ~{cost} кредитов\n" if cost > 0 else "💳 <b>Стоимость:</b> Бесплатно\n"
 
     return (
-        f"🎬 <b>Меню генерации видео</b>\n\n"
+        f"⚙️ <b>Шаг 3 из 3: Настройка качества и запуск</b>\n\n"
         f"{user_line}"
-        f"🤖 <b>Модель:</b> {minfo['name']} — <i>{minfo['desc']}</i>\n"
+        f"🤖 <b>Модель:</b> {minfo['name']}\n"
+        f"⏱ <b>Длительность:</b> {dur_str}\n"
         f"📝 <b>Промпт:</b> <i>{html.escape(str(prompt))}</i>\n"
         f"📌 <b>Референсы:</b> {ref_badge}\n"
         f"{video_line}"
         f"{audio_ref_line}"
-        f"⏱ <b>Длительность:</b> {dur_str}\n"
         f"📐 <b>Разрешение и формат:</b> {res} | {ratio}\n"
         f"{audio_line}"
         f"{cost_line}\n"
-        f"💡 <i>Присылайте фото (и одно видео) прямо в чат — они прикрепятся как референсы!</i>\n"
+        f"👇 <i>Выберите настройки качества и нажмите «Сгенерировать видео»:</i>\n"
         f"<code>build: {BUILD_ID}</code>"
     )
 
@@ -550,6 +606,10 @@ def create_draft_for_user(
             active_model = DEFAULT_MODEL
             prefs["model_key"] = DEFAULT_MODEL
 
+    model_durs = MODELS.get(active_model, {}).get("durations", [5])
+    max_d = max(model_durs) if model_durs else 15
+    init_dur = min(max_d, max(1, int(prefs.get("duration", DEFAULT_DURATION))))
+
     draft = {
         "prompt": prompt,
         "image_bytes": refs[0] if refs else None,
@@ -557,8 +617,9 @@ def create_draft_for_user(
         "all_uploaded_refs": list(refs),
         "ref_mode": prefs.get("ref_mode", "ref"),
         "menu_mode": menu_mode,
+        "step": "model" if menu_mode == "video" else "main",
         "model_key": active_model,
-        "duration": prefs["duration"],
+        "duration": init_dur,
         "resolution": prefs["resolution"],
         "image_resolution": prefs.get("image_resolution", DEFAULT_IMAGE_RESOLUTION),
         "ratio": prefs["ratio"],
@@ -1511,9 +1572,13 @@ async def handle_custom_duration_input(message: Message, bot: Bot, state: FSMCon
     m = re.search(r'\b(\d{1,2})\b', text)
     if m:
         val = int(m.group(1))
-        if 1 <= val <= 30:
+        cur_model = draft.get("model_key", DEFAULT_MODEL) if draft else DEFAULT_MODEL
+        model_durs = MODELS.get(cur_model, {}).get("durations", list(range(1, 31)))
+        max_dur = max(model_durs) if model_durs else 30
+        if 1 <= val <= max_dur:
             if draft:
                 draft["duration"] = val
+                draft["step"] = "quality"
                 get_user_prefs(user_id)["duration"] = val
             await state.clear()
             await message.reply(f"✅ <b>Длительность установлена:</b> {val} сек!", parse_mode="HTML")
@@ -1521,7 +1586,10 @@ async def handle_custom_duration_input(message: Message, bot: Bot, state: FSMCon
                 draft["menu_message_id"] = None
                 await show_or_update_menu(message, bot, draft, user_id)
             return
-    await message.reply("⚠️ Пожалуйста, отправьте число от 1 до 30 (например: 1, 2, 3, 4, 7...).")
+        else:
+            await message.reply(f"⚠️ Для модели {MODELS.get(cur_model, {}).get('name', 'видео')} допустимо от 1 до {max_dur} сек.")
+            return
+    await message.reply("⚠️ Пожалуйста, отправьте число секунд (например: 1, 2, 3, 5, 10...).")
 
 
 @router.message(Command("dur", "duration"), ~F.photo, ~F.document)
@@ -1535,9 +1603,13 @@ async def handle_duration_command(message: Message, command: CommandObject, bot:
     m = re.search(r'\b(\d{1,2})\b', arg)
     if m:
         val = int(m.group(1))
-        if 1 <= val <= 30:
+        cur_model = draft.get("model_key", DEFAULT_MODEL) if draft else DEFAULT_MODEL
+        model_durs = MODELS.get(cur_model, {}).get("durations", list(range(1, 31)))
+        max_dur = max(model_durs) if model_durs else 30
+        if 1 <= val <= max_dur:
             if draft:
                 draft["duration"] = val
+                draft["step"] = "quality"
                 get_user_prefs(user_id)["duration"] = val
                 await message.reply(f"✅ <b>Длительность установлена:</b> {val} сек!", parse_mode="HTML")
                 draft["menu_message_id"] = None
@@ -1546,7 +1618,10 @@ async def handle_duration_command(message: Message, command: CommandObject, bot:
                 get_user_prefs(user_id)["duration"] = val
                 await message.reply(f"✅ <b>Длительность сохранена:</b> {val} сек!", parse_mode="HTML")
             return
-    await message.reply("⚠️ Пожалуйста, укажите число от 1 до 30 (например: <code>/dur 4</code>).", parse_mode="HTML")
+        else:
+            await message.reply(f"⚠️ Для модели {MODELS.get(cur_model, {}).get('name', 'видео')} допустимо от 1 до {max_dur} сек.", parse_mode="HTML")
+            return
+    await message.reply("⚠️ Пожалуйста, укажите число (например: <code>/dur 4</code>).", parse_mode="HTML")
 
 
 # --- Command Handlers (Text Only, Photos Handled Above) ---
@@ -2198,6 +2273,7 @@ async def on_open_menu_from_button(call: CallbackQuery, state: FSMContext):
     draft = user_drafts.get(uid)
     if draft:
         draft["menu_mode"] = target_mode
+        draft["step"] = "model" if target_mode == "video" else "main"
         if ref_images:
             draft["ref_images"] = list(ref_images)
             draft["image_bytes"] = ref_images[0]
@@ -2251,6 +2327,7 @@ async def on_switch_menu_tab(call: CallbackQuery):
     draft["menu_message_id"] = call.message.message_id
     draft["menu_chat_id"] = call.message.chat.id
     draft["menu_mode"] = target_mode
+    draft["step"] = "model" if target_mode == "video" else "main"
     prefs = get_user_prefs(owner_id)
     if target_mode == "image":
         draft["model_key"] = prefs.get("image_model_key", DEFAULT_IMAGE_MODEL)
@@ -2452,6 +2529,35 @@ async def on_grid_for_generated_image(call: CallbackQuery, bot: Bot):
     await process_grid_image(call.message, bot, img_bytes, "")
 
 
+@router.callback_query(F.data.startswith("wstep:"))
+async def on_wizard_step(call: CallbackQuery):
+    parts = call.data.split(":")
+    target_step = parts[1]
+    owner_id = int(parts[2])
+
+    if not await verify_callback_owner(call, owner_id):
+        return
+
+    draft = user_drafts.get(owner_id)
+    if not draft:
+        await call.answer("Начните с отправки запроса /video", show_alert=True)
+        return
+
+    draft["menu_message_id"] = call.message.message_id
+    draft["menu_chat_id"] = call.message.chat.id
+    draft["step"] = target_step
+
+    try:
+        await call.message.edit_text(
+            text=format_draft_text(draft),
+            reply_markup=build_settings_keyboard(draft, owner_id),
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+    await call.answer()
+
+
 @router.callback_query(F.data.startswith("sm:"))
 async def on_set_model(call: CallbackQuery):
     parts = call.data.split(":")
@@ -2469,12 +2575,24 @@ async def on_set_model(call: CallbackQuery):
     draft["menu_message_id"] = call.message.message_id
     draft["menu_chat_id"] = call.message.chat.id
     draft["model_key"] = mkey
-    if MODELS[mkey].get("category") == "image":
+    minfo = MODELS[mkey]
+    if minfo.get("category") == "image":
         draft["menu_mode"] = "image"
+        draft["step"] = "main"
         get_user_prefs(owner_id)["image_model_key"] = mkey
     else:
         draft["menu_mode"] = "video"
         get_user_prefs(owner_id)["model_key"] = mkey
+        model_durs = minfo.get("durations", [5])
+        max_dur = max(model_durs) if model_durs else 15
+        if int(draft.get("duration", DEFAULT_DURATION)) > max_dur:
+            draft["duration"] = max_dur
+            get_user_prefs(owner_id)["duration"] = max_dur
+
+        if minfo.get("backend") == "davinci_voice":
+            draft["step"] = "quality"
+        else:
+            draft["step"] = "duration"
 
     sync_draft_references(draft)
 
@@ -2503,9 +2621,15 @@ async def on_set_duration(call: CallbackQuery):
         await call.answer("Начните с отправки запроса /video", show_alert=True)
         return
 
+    cur_model = draft.get("model_key", DEFAULT_MODEL)
+    model_durs = MODELS.get(cur_model, {}).get("durations", list(range(1, 31)))
+    max_dur = max(model_durs) if model_durs else 15
+    dur = max(1, min(max_dur, dur))
+
     draft["menu_message_id"] = call.message.message_id
     draft["menu_chat_id"] = call.message.chat.id
     draft["duration"] = dur
+    draft["step"] = "quality"
     get_user_prefs(owner_id)["duration"] = dur
 
     try:
