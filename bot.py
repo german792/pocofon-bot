@@ -1138,6 +1138,22 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
         draft["model_key"] = DEFAULT_MODEL
         get_user_prefs(user_id)["model_key"] = DEFAULT_MODEL
     sync_draft_references(draft)
+
+    info_parts = []
+    if first_frame:
+        info_parts.append("• 🖼 Извлечен первый кадр (старт-кадр сцены)")
+    if video_audio:
+        info_parts.append("• 🎵 Извлечена звуковая дорожка из видео")
+    hint_text = "\n".join(info_parts)
+    try:
+        await message.reply(
+            f"🎞 <b>Видео принято в работу!</b>\n\n{hint_text}\n\n"
+            f"💡 <i>Модели Seedance 2.5 и Kling 4.0 генерируют анимацию по фото и промпту (Image-to-Video). Опишите в промпте, что должен делать персонаж (например: «персонаж танцует брейк-данс под эту музыку»)!</i>",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+
     draft["menu_message_id"] = None
     await show_or_update_menu(message, bot, draft, user_id)
 

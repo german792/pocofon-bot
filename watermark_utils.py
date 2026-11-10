@@ -460,7 +460,7 @@ async def apply_watermark_image(
 
 
 async def extract_frame_from_video(video_bytes: bytes) -> Optional[bytes]:
-    """Extract the first high-res frame from video bytes using ffmpeg pipe."""
+    """Extract the first high-res frame from video bytes using ffmpeg."""
     if not video_bytes:
         return None
     try:
@@ -478,13 +478,28 @@ async def extract_frame_from_video(video_bytes: bytes) -> Optional[bytes]:
         out, _ = await asyncio.wait_for(proc.communicate(input=video_bytes), timeout=25.0)
         if proc.returncode == 0 and out:
             return out
+    except Exception:
+        pass
+
+    # Robust fallback via temp file
+    temp_in = BASE_DIR / f"tmp_in_{uuid.uuid4().hex[:8]}.mp4"
+    temp_out = BASE_DIR / f"tmp_out_{uuid.uuid4().hex[:8]}.jpg"
+    try:
+        temp_in.write_bytes(video_bytes)
+        cmd = ["ffmpeg", "-y", "-i", str(temp_in), "-vframes", "1", "-q:v", "2", str(temp_out)]
+        rc, _ = await _run_ffmpeg_command(cmd, timeout=30.0)
+        if rc == 0 and temp_out.exists() and temp_out.stat().st_size > 0:
+            return temp_out.read_bytes()
     except Exception as e:
-        logger.debug(f"Failed to extract frame from video: {e}")
+        logger.debug(f"Temp file frame extraction failed: {e}")
+    finally:
+        temp_in.unlink(missing_ok=True)
+        temp_out.unlink(missing_ok=True)
     return None
 
 
 async def extract_audio_from_video(video_bytes: bytes) -> Optional[bytes]:
-    """Extract audio track from video bytes using ffmpeg pipe."""
+    """Extract audio track from video bytes using ffmpeg."""
     if not video_bytes:
         return None
     try:
@@ -503,7 +518,22 @@ async def extract_audio_from_video(video_bytes: bytes) -> Optional[bytes]:
         out, _ = await asyncio.wait_for(proc.communicate(input=video_bytes), timeout=25.0)
         if proc.returncode == 0 and out and len(out) > 500:
             return out
+    except Exception:
+        pass
+
+    # Robust fallback via temp file
+    temp_in = BASE_DIR / f"tmp_in_{uuid.uuid4().hex[:8]}.mp4"
+    temp_out = BASE_DIR / f"tmp_out_{uuid.uuid4().hex[:8]}.mp3"
+    try:
+        temp_in.write_bytes(video_bytes)
+        cmd = ["ffmpeg", "-y", "-i", str(temp_in), "-vn", "-c:a", "libmp3lame", "-b:a", "192k", str(temp_out)]
+        rc, _ = await _run_ffmpeg_command(cmd, timeout=30.0)
+        if rc == 0 and temp_out.exists() and temp_out.stat().st_size > 500:
+            return temp_out.read_bytes()
     except Exception as e:
-        logger.debug(f"Failed to extract audio from video: {e}")
+        logger.debug(f"Temp file audio extraction failed: {e}")
+    finally:
+        temp_in.unlink(missing_ok=True)
+        temp_out.unlink(missing_ok=True)
     return None
 
