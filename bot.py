@@ -22,6 +22,7 @@ from aiogram.types import (
 )
 import image_utils
 import access_manager
+import config
 import history_manager
 
 from config import (
