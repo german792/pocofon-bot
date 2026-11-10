@@ -30,6 +30,46 @@ def get_watermark_src() -> Path:
 WATERMARK_SRC = get_watermark_src()
 
 
+async def get_media_dimensions(file_path: Path) -> tuple[int, int]:
+    """Returns (width, height) of a video or image file using ffprobe, with fallback to PIL."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=p=0:s=x",
+            str(file_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=8.0)
+        out = stdout.decode().strip()
+        if "x" in out:
+            parts = out.split("\n")[0].split("x")
+            return int(parts[0]), int(parts[1])
+    except Exception as e:
+        logger.debug(f"ffprobe dimension check failed for {file_path.name}: {e}")
+
+    try:
+        from PIL import Image
+        with Image.open(file_path) as im:
+            return im.size
+    except Exception:
+        pass
+
+    return 1280, 720
+
+
+def calculate_watermark_width(video_w: int, video_h: int) -> int:
+    """Calculates watermark width proportional to video/image resolution."""
+    # 22% of width for portrait / vertical video, 16% for landscape
+    ratio = 0.22 if video_h > video_w else 0.16
+    target_w = max(90, int(video_w * ratio))
+    if target_w % 2 != 0:
+        target_w += 1
+    return target_w
+
+
 async def apply_watermark(input_path: Path, output_path: Path) -> bool:
     """Overlays the animated Poco AI watermark onto a video, cycling corners every time the watermark disappears.
     For Watermark.webm (5.0s clip with built-in appear & disappear at the end of the clip):
@@ -43,6 +83,8 @@ async def apply_watermark(input_path: Path, output_path: Path) -> bool:
         logger.warning(f"Watermark file not found at {watermark_src}, skipping overlay.")
         return False
 
+    vw, vh = await get_media_dimensions(input_path)
+    wm_w = calculate_watermark_width(vw, vh)
     ext = watermark_src.suffix.lower()
     is_webm = ext == ".webm"
     is_gif = ext == ".gif"
@@ -50,11 +92,36 @@ async def apply_watermark(input_path: Path, output_path: Path) -> bool:
     if is_webm:
         c_sec = WEBM_CYCLE_SEC
         filter_str = (
-            "[1:v]format=yuva420p[wm_alpha];"
-            "[wm_alpha][0:v]scale2ref=w='if(gt(rh,rw),rw*0.22,rw*0.15)':h='ow'[wm_ref][base];"
-            "[base][wm_ref]overlay="
+            f"[1:v]scale={wm_w}:-1,format=yuva420p[wm];"
+            f"[0:v][wm]overlay="
             f"x='if(mod(floor(t/{c_sec}),2), 24, W-w-24)':"
             f"y='if(between(mod(floor(t/{c_sec}),4), 1, 2), H-h-24, 24)':"
+            "shortest=1[outv]"
+        )
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(input_path),
+            "-stream_loop", "-1",
+            "-i", str(watermark_src),
+            "-filter_complex", filter_str,
+            "-map", "[outv]",
+            "-map", "0:a?",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "22",
+            "-c:a", "copy",
+            str(output_path)
+        ]
+    elif is_gif:
+        v_expr = "clip(min(mod(t,2.2)/0.35, (2.2-mod(t,2.2))/0.35), 0, 1)"
+        s_expr = f"(3 - 2*{v_expr})*{v_expr}*{v_expr}"
+        filter_str = (
+            f"[1:v]scale={wm_w}:-1[wm_base];"
+            f"[wm_base]scale=w='2*max(1, trunc(iw*{s_expr}/2))':h='ow':eval=frame[wm_pop];"
+            "[0:v][wm_pop]overlay="
+            "x='if(mod(floor(t/2.2),2), 24, W-w-24)':"
+            "y='if(between(mod(floor(t/2.2),4), 1, 2), H-h-24, 24)':"
+            f"enable='gt({v_expr}, 0.02)':"
             "shortest=1[outv]"
         )
         cmd = [
@@ -74,27 +141,15 @@ async def apply_watermark(input_path: Path, output_path: Path) -> bool:
     else:
         v_expr = "clip(min(mod(t,2.2)/0.35, (2.2-mod(t,2.2))/0.35), 0, 1)"
         s_expr = f"(3 - 2*{v_expr})*{v_expr}*{v_expr}"
-        if is_gif:
-            filter_str = (
-                "[1:v][0:v]scale2ref=w='if(gt(rh,rw),rw*0.22,rw*0.15)':h='ow'[wm_ref][base];"
-                f"[wm_ref]scale=w='2*max(1, trunc(iw*{s_expr}/2))':h='ow':eval=frame[wm_pop];"
-                "[base][wm_pop]overlay="
-                "x='if(mod(floor(t/2.2),2), 24, W-w-24)':"
-                "y='if(between(mod(floor(t/2.2),4), 1, 2), H-h-24, 24)':"
-                f"enable='gt({v_expr}, 0.02)':"
-                "shortest=1[outv]"
-            )
-        else:
-            filter_str = (
-                "[1:v]colorkey=0x000000:0.12:0.02[wm_key];"
-                "[wm_key][0:v]scale2ref=w='if(gt(rh,rw),rw*0.22,rw*0.15)':h='ow'[wm_ref][base];"
-                f"[wm_ref]scale=w='2*max(1, trunc(iw*{s_expr}/2))':h='ow':eval=frame[wm_pop];"
-                "[base][wm_pop]overlay="
-                "x='if(mod(floor(t/2.2),2), 24, W-w-24)':"
-                "y='if(between(mod(floor(t/2.2),4), 1, 2), H-h-24, 24)':"
-                f"enable='gt({v_expr}, 0.02)':"
-                "shortest=1[outv]"
-            )
+        filter_str = (
+            f"[1:v]colorkey=0x000000:0.12:0.02,scale={wm_w}:-1[wm_base];"
+            f"[wm_base]scale=w='2*max(1, trunc(iw*{s_expr}/2))':h='ow':eval=frame[wm_pop];"
+            "[0:v][wm_pop]overlay="
+            "x='if(mod(floor(t/2.2),2), 24, W-w-24)':"
+            "y='if(between(mod(floor(t/2.2),4), 1, 2), H-h-24, 24)':"
+            f"enable='gt({v_expr}, 0.02)':"
+            "shortest=1[outv]"
+        )
         cmd = [
             "ffmpeg", "-y",
             "-i", str(input_path),
@@ -118,7 +173,7 @@ async def apply_watermark(input_path: Path, output_path: Path) -> bool:
         )
         _, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
         if proc.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0:
-            logger.info(f"Successfully applied cyclic corner watermark ({watermark_src.name}) to {output_path}")
+            logger.info(f"Successfully applied cyclic corner watermark ({watermark_src.name}, w={wm_w}) to {output_path}")
             return True
         else:
             err_msg = stderr.decode("utf-8", errors="ignore")
@@ -136,6 +191,8 @@ async def apply_watermark_image(input_path: Path, output_path: Path) -> bool:
         logger.warning(f"Watermark file not found at {watermark_src}, skipping overlay.")
         return False
 
+    vw, vh = await get_media_dimensions(input_path)
+    wm_w = calculate_watermark_width(vw, vh)
     ext = watermark_src.suffix.lower()
     is_webm = ext == ".webm"
     is_gif = ext == ".gif"
@@ -143,9 +200,8 @@ async def apply_watermark_image(input_path: Path, output_path: Path) -> bool:
     if is_webm:
         # Seek to t=3.0s of Watermark.webm where the watermark is at 100% full visibility
         filter_str = (
-            "[1:v]format=yuva420p[wm_alpha];"
-            "[wm_alpha][0:v]scale2ref=w='if(gt(rh,rw),rw*0.22,rw*0.15)':h='ow'[wm_scaled][base];"
-            "[base][wm_scaled]overlay=W-w-24:24[outv]"
+            f"[1:v]scale={wm_w}:-1,format=yuva420p[wm];"
+            "[0:v][wm]overlay=W-w-24:24[outv]"
         )
         cmd = [
             "ffmpeg", "-y",
@@ -159,8 +215,8 @@ async def apply_watermark_image(input_path: Path, output_path: Path) -> bool:
         ]
     elif is_gif:
         filter_str = (
-            "[1:v][0:v]scale2ref=w='if(gt(rh,rw),rw*0.22,rw*0.15)':h='ow'[wm_scaled][base];"
-            "[base][wm_scaled]overlay=W-w-24:24[outv]"
+            f"[1:v]scale={wm_w}:-1[wm];"
+            "[0:v][wm]overlay=W-w-24:24[outv]"
         )
         cmd = [
             "ffmpeg", "-y",
@@ -173,9 +229,8 @@ async def apply_watermark_image(input_path: Path, output_path: Path) -> bool:
         ]
     else:
         filter_str = (
-            "[1:v]colorkey=0x000000:0.12:0.02[wm];"
-            "[wm][0:v]scale2ref=w='if(gt(rh,rw),rw*0.22,rw*0.15)':h='ow'[wm_scaled][base];"
-            "[base][wm_scaled]overlay=W-w-24:24[outv]"
+            f"[1:v]colorkey=0x000000:0.12:0.02,scale={wm_w}:-1[wm];"
+            "[0:v][wm]overlay=W-w-24:24[outv]"
         )
         cmd = [
             "ffmpeg", "-y",
@@ -195,7 +250,7 @@ async def apply_watermark_image(input_path: Path, output_path: Path) -> bool:
         )
         _, stderr = await asyncio.wait_for(proc.communicate(), timeout=60.0)
         if proc.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0:
-            logger.info(f"Successfully applied watermark ({watermark_src.name}) to image {output_path}")
+            logger.info(f"Successfully applied watermark ({watermark_src.name}, w={wm_w}) to image {output_path}")
             return True
         else:
             err_msg = stderr.decode("utf-8", errors="ignore")
