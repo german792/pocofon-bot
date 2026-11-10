@@ -5,38 +5,45 @@ from config import BASE_DIR
 
 logger = logging.getLogger(__name__)
 
-# Prefer the new Watermark.webm uploaded by the user, fallback to Watermark.gif or legacy animation
-if (BASE_DIR / "Watermark.webm").exists():
-    WATERMARK_SRC = BASE_DIR / "Watermark.webm"
-elif (BASE_DIR / "watermark.webm").exists():
-    WATERMARK_SRC = BASE_DIR / "watermark.webm"
-elif (BASE_DIR / "Watermark.gif").exists():
-    WATERMARK_SRC = BASE_DIR / "Watermark.gif"
-elif (BASE_DIR / "Watermark.GIF").exists():
-    WATERMARK_SRC = BASE_DIR / "Watermark.GIF"
-elif (BASE_DIR / "watermark.gif").exists():
-    WATERMARK_SRC = BASE_DIR / "watermark.gif"
-else:
-    WATERMARK_SRC = BASE_DIR / "animation.gif.mp4"
-
 # Exact duration of one full appear -> hold -> disappear cycle in Watermark.webm (125 frames @ 25fps = 5.0s)
 WEBM_CYCLE_SEC = 5.0
+
+
+def get_watermark_src() -> Path:
+    """Find the best available watermark file across repository locations."""
+    candidates = [
+        BASE_DIR / "Watermark.webm",
+        BASE_DIR / "watermark.webm",
+        BASE_DIR / "static" / "brand" / "watermark.webm",
+        BASE_DIR / "Watermark.gif",
+        BASE_DIR / "Watermark.GIF",
+        BASE_DIR / "watermark.gif",
+        BASE_DIR / "static" / "brand" / "green_watermark_crop.png",
+        BASE_DIR / "animation.gif.mp4",
+    ]
+    for c in candidates:
+        if c.exists() and c.stat().st_size > 0:
+            return c
+    return BASE_DIR / "Watermark.webm"
+
+
+WATERMARK_SRC = get_watermark_src()
 
 
 async def apply_watermark(input_path: Path, output_path: Path) -> bool:
     """Overlays the animated Poco AI watermark onto a video, cycling corners every time the watermark disappears.
     For Watermark.webm (5.0s clip with built-in appear & disappear at the end of the clip):
-      - Decodes VP9 alpha channel via libvpx-vp9 (yuva420p)
       - Loops infinitely (-stream_loop -1)
       - Switches to a new corner at the end of every 5.0s cycle right when the watermark disappears:
         0..5s: Top-Right (TR) -> 5..10s: Bottom-Left (BL) -> 10..15s: Bottom-Right (BR) -> 15..20s: Top-Left (TL), repeating cyclically.
     Returns True if successful, False if failed.
     """
-    if not WATERMARK_SRC.exists():
-        logger.warning(f"Watermark file not found at {WATERMARK_SRC}, skipping overlay.")
+    watermark_src = get_watermark_src()
+    if not watermark_src.exists():
+        logger.warning(f"Watermark file not found at {watermark_src}, skipping overlay.")
         return False
 
-    ext = WATERMARK_SRC.suffix.lower()
+    ext = watermark_src.suffix.lower()
     is_webm = ext == ".webm"
     is_gif = ext == ".gif"
 
@@ -53,9 +60,8 @@ async def apply_watermark(input_path: Path, output_path: Path) -> bool:
         cmd = [
             "ffmpeg", "-y",
             "-i", str(input_path),
-            "-c:v", "libvpx-vp9",
             "-stream_loop", "-1",
-            "-i", str(WATERMARK_SRC),
+            "-i", str(watermark_src),
             "-filter_complex", filter_str,
             "-map", "[outv]",
             "-map", "0:a?",
@@ -93,7 +99,7 @@ async def apply_watermark(input_path: Path, output_path: Path) -> bool:
             "ffmpeg", "-y",
             "-i", str(input_path),
             "-stream_loop", "-1",
-            "-i", str(WATERMARK_SRC),
+            "-i", str(watermark_src),
             "-filter_complex", filter_str,
             "-map", "[outv]",
             "-map", "0:a?",
@@ -112,7 +118,7 @@ async def apply_watermark(input_path: Path, output_path: Path) -> bool:
         )
         _, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
         if proc.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0:
-            logger.info(f"Successfully applied cyclic corner watermark ({WATERMARK_SRC.name}) to {output_path}")
+            logger.info(f"Successfully applied cyclic corner watermark ({watermark_src.name}) to {output_path}")
             return True
         else:
             err_msg = stderr.decode("utf-8", errors="ignore")
@@ -125,11 +131,12 @@ async def apply_watermark(input_path: Path, output_path: Path) -> bool:
 
 async def apply_watermark_image(input_path: Path, output_path: Path) -> bool:
     """Overlays the Poco AI watermark onto a static image file."""
-    if not WATERMARK_SRC.exists():
-        logger.warning(f"Watermark file not found at {WATERMARK_SRC}, skipping overlay.")
+    watermark_src = get_watermark_src()
+    if not watermark_src.exists():
+        logger.warning(f"Watermark file not found at {watermark_src}, skipping overlay.")
         return False
 
-    ext = WATERMARK_SRC.suffix.lower()
+    ext = watermark_src.suffix.lower()
     is_webm = ext == ".webm"
     is_gif = ext == ".gif"
 
@@ -143,9 +150,8 @@ async def apply_watermark_image(input_path: Path, output_path: Path) -> bool:
         cmd = [
             "ffmpeg", "-y",
             "-i", str(input_path),
-            "-c:v", "libvpx-vp9",
             "-ss", "3.0",
-            "-i", str(WATERMARK_SRC),
+            "-i", str(watermark_src),
             "-filter_complex", filter_str,
             "-map", "[outv]",
             "-frames:v", "1",
@@ -159,7 +165,7 @@ async def apply_watermark_image(input_path: Path, output_path: Path) -> bool:
         cmd = [
             "ffmpeg", "-y",
             "-i", str(input_path),
-            "-i", str(WATERMARK_SRC),
+            "-i", str(watermark_src),
             "-filter_complex", filter_str,
             "-map", "[outv]",
             "-frames:v", "1",
@@ -174,7 +180,7 @@ async def apply_watermark_image(input_path: Path, output_path: Path) -> bool:
         cmd = [
             "ffmpeg", "-y",
             "-i", str(input_path),
-            "-i", str(WATERMARK_SRC),
+            "-i", str(watermark_src),
             "-filter_complex", filter_str,
             "-map", "[outv]",
             "-frames:v", "1",
@@ -187,9 +193,9 @@ async def apply_watermark_image(input_path: Path, output_path: Path) -> bool:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=60.0)
         if proc.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0:
-            logger.info(f"Successfully applied watermark ({WATERMARK_SRC.name}) to image {output_path}")
+            logger.info(f"Successfully applied watermark ({watermark_src.name}) to image {output_path}")
             return True
         else:
             err_msg = stderr.decode("utf-8", errors="ignore")
