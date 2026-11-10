@@ -3046,7 +3046,7 @@
       const keyVal = (input.value || '').trim().toUpperCase();
 
       if (!keyVal) {
-        msg.textContent = 'Пожалуйста, введите ключ доступа (например, POCO-XXXX-XXXX).';
+        msg.textContent = 'Пожалуйста, введите ключ доступа (например, POCO-XXXX-XXXX-XXXX).';
         msg.className = 'access-msg error';
         msg.style.display = 'block';
         return;
@@ -3453,7 +3453,7 @@
         <div class="access-input-group">
           <label class="access-label">🔑 Введите ваш ключ доступа:</label>
           <div class="input-with-button">
-            <input type="text" id="accessKeyInput" class="aero-input key-field" placeholder="POCO-XXXX-XXXX" maxlength="24" onkeydown="if(event.key==='Enter') submitAccessKey()">
+            <input type="text" id="accessKeyInput" class="aero-input key-field" placeholder="POCO-XXXX-XXXX-XXXX" maxlength="24" onkeydown="if(event.key==='Enter') submitAccessKey()">
             <button class="aero-action-btn" onclick="submitAccessKey()">✨ Войти</button>
           </div>
           <div id="accessKeyMsg" class="access-msg" style="display:none;"></div>
@@ -3558,7 +3558,7 @@
           <div id="newKeyDisplayBox" class="new-key-display" style="display:none;">
             <div class="new-key-label">Ключ успешно создан!</div>
             <div class="new-key-code-row">
-              <code id="newGeneratedKeyCode">POCO-XXXX-XXXX</code>
+              <code id="newGeneratedKeyCode">POCO-XXXX-XXXX-XXXX</code>
               <button class="aero-copy-btn" onclick="copyGeneratedKey()">📋 Скопировать</button>
             </div>
             <div class="new-key-hint">Отправьте этот код человеку — при вводе на сайте его сразу пустит в студию.</div>

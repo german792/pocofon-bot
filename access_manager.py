@@ -65,17 +65,68 @@ def _generate_random_key_string() -> str:
     return f"POCO-{part1}-{part2}"
 
 
-def generate_key(note: str = "", created_by: str = "@GermanUstinf") -> str:
-    """Generate and store a new unique random access key."""
+_KEY_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+
+
+def _signing_secret() -> bytes:
+    """Shared secret used to sign keys, so the bot and the website agree without shared storage."""
+    seed = os.getenv("KEY_SIGNING_SECRET") or getattr(config, "ADMIN_PASSWORD", "GermanUstinf2026!")
+    return f"poco-access-key:{seed}".encode("utf-8")
+
+
+def _mac_chars(nonce: str) -> str:
+    digest = hmac.new(_signing_secret(), nonce.encode("utf-8"), "sha256").digest()
+    return "".join(_KEY_ALPHABET[b % len(_KEY_ALPHABET)] for b in digest[:8])
+
+
+def _make_signed_key() -> str:
+    """Key format: POCO-NNNN-MMMM-MMMM (NNNN random, MMMMMMMM = HMAC of NNNN)."""
+    nonce = "".join(secrets.choice(_KEY_ALPHABET) for _ in range(4))
+    mac = _mac_chars(nonce)
+    return f"POCO-{nonce}-{mac[:4]}-{mac[4:]}"
+
+
+def _is_signed_key(key: str) -> bool:
+    parts = key.split("-")
+    if len(parts) != 4 or parts[0] != "POCO" or len(parts[1]) != 4:
+        return False
+    expected = _mac_chars(parts[1])
+    return hmac.compare_digest(parts[2] + parts[3], expected)
+
+
+def _lookup(cleaned_key: str) -> Optional[Dict[str, Any]]:
+    """Find key entry. Validly signed keys issued elsewhere (e.g. by the Telegram bot) are auto-registered."""
     keys = _load_keys()
-    
+    entry = keys.get(cleaned_key)
+    if entry is not None:
+        return None if entry.get("deleted") else entry
+    if _is_signed_key(cleaned_key):
+        entry = {
+            "key": cleaned_key,
+            "active": True,
+            "created_at": time.time(),
+            "created_by": "Telegram bot",
+            "note": "Ключ из Telegram-бота",
+            "used_count": 0,
+            "last_used_at": None,
+        }
+        keys[cleaned_key] = entry
+        _save_keys()
+        return entry
+    return None
+
+
+def generate_key(note: str = "", created_by: str = "@GermanUstinf") -> str:
+    """Generate and store a new signed access key (valid on both the bot and the website)."""
+    keys = _load_keys()
+
     # Ensure key is unique
     for _ in range(100):
-        key = _generate_random_key_string()
+        key = _make_signed_key()
         if key not in keys:
             break
     else:
-        key = f"POCO-{secrets.token_hex(4).upper()}-{secrets.token_hex(4).upper()}"
+        key = _make_signed_key()
 
     keys[key] = {
         "key": key,
@@ -98,15 +149,13 @@ def verify_key(key: str) -> Optional[Dict[str, Any]]:
     if not key:
         return None
     cleaned_key = key.strip().upper()
-    keys = _load_keys()
+    entry = _lookup(cleaned_key)
 
-    if cleaned_key in keys:
-        entry = keys[cleaned_key]
-        if entry.get("active", True):
-            entry["used_count"] = entry.get("used_count", 0) + 1
-            entry["last_used_at"] = time.time()
-            _save_keys()
-            return entry
+    if entry and entry.get("active", True):
+        entry["used_count"] = entry.get("used_count", 0) + 1
+        entry["last_used_at"] = time.time()
+        _save_keys()
+        return entry
     return None
 
 
@@ -114,26 +163,23 @@ def is_valid_key(key: str) -> bool:
     """Check if key exists and is currently active."""
     if not key:
         return False
-    cleaned_key = key.strip().upper()
-    keys = _load_keys()
-    entry = keys.get(cleaned_key)
+    entry = _lookup(key.strip().upper())
     return bool(entry and entry.get("active", True))
 
 
 def get_all_keys() -> List[Dict[str, Any]]:
     """Get list of all keys sorted newest first."""
     keys = _load_keys()
-    items = list(keys.values())
+    items = [k for k in keys.values() if not k.get("deleted")]
     items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return items
 
 
 def revoke_key(key: str) -> bool:
     """Revoke (deactivate) an access key."""
-    cleaned_key = key.strip().upper()
-    keys = _load_keys()
-    if cleaned_key in keys:
-        keys[cleaned_key]["active"] = False
+    entry = _lookup(key.strip().upper())
+    if entry:
+        entry["active"] = False
         _save_keys()
         return True
     return False
@@ -141,21 +187,22 @@ def revoke_key(key: str) -> bool:
 
 def activate_key(key: str) -> bool:
     """Reactivate an access key."""
-    cleaned_key = key.strip().upper()
-    keys = _load_keys()
-    if cleaned_key in keys:
-        keys[cleaned_key]["active"] = True
+    entry = _lookup(key.strip().upper())
+    if entry:
+        entry["active"] = True
         _save_keys()
         return True
     return False
 
 
 def delete_key(key: str) -> bool:
-    """Permanently delete an access key."""
+    """Permanently delete an access key (kept as a hidden tombstone so signed keys can't be re-accepted)."""
     cleaned_key = key.strip().upper()
     keys = _load_keys()
-    if cleaned_key in keys:
-        del keys[cleaned_key]
+    entry = keys.get(cleaned_key)
+    if entry:
+        entry["active"] = False
+        entry["deleted"] = True
         _save_keys()
         return True
     return False
