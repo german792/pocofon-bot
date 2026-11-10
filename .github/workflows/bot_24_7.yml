@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   run-bot:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 350
     steps:
       - name: Checkout code
@@ -28,10 +28,18 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
-      - name: Install dependencies & FFmpeg
+      - name: Set up FFmpeg (static build, fast)
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        continue-on-error: true
+        id: setup-ffmpeg
+
+      - name: Install dependencies
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
           pip install -r requirements.txt
 
       - name: Run POCO AI Bot
