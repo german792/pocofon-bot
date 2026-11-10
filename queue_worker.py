@@ -1,6 +1,7 @@
 import asyncio
 import html
 import logging
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List
@@ -72,6 +73,7 @@ class GenerationJob:
     ref_mode: str = "ref"
     audio_bytes: Optional[bytes] = None
     ref_video: Optional[bytes] = None
+    job_id: str = field(default_factory=lambda: f"tg_{uuid.uuid4().hex[:12]}")
 
     def get_all_ref_images(self) -> List[bytes]:
         if self.ref_images:
