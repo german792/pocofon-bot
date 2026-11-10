@@ -314,7 +314,7 @@ class GenerationQueue:
                 raw_file.write_bytes(img_bytes)
 
                 logger.info("Applying watermark to image...")
-                wm_ok = await apply_watermark_image(raw_file, temp_file)
+                wm_ok = await apply_watermark_image(raw_file, temp_file, username=job.user_name)
                 if not wm_ok or not temp_file.exists() or temp_file.stat().st_size == 0:
                     temp_file = raw_file
                 else:
@@ -474,8 +474,23 @@ class GenerationQueue:
             raw_file.write_bytes(video_bytes)
             logger.info(f"Saved raw video to {raw_file} ({len(video_bytes)} bytes)")
 
-            logger.info("Applying watermark to video...")
-            wm_ok = await apply_watermark(raw_file, temp_file)
+            logger.info("Applying watermark and audio to video...")
+            temp_audio_ref: Optional[Path] = None
+            if job.audio_bytes:
+                temp_audio_ref = VIDEOS_DIR / f"ref_audio_{job.user_id}_{ts}.mp3"
+                temp_audio_ref.write_bytes(job.audio_bytes)
+
+            try:
+                wm_ok = await apply_watermark(
+                    raw_file,
+                    temp_file,
+                    username=job.user_name,
+                    audio_ref_path=temp_audio_ref
+                )
+            finally:
+                if temp_audio_ref and temp_audio_ref.exists():
+                    temp_audio_ref.unlink(missing_ok=True)
+
             if not wm_ok or not temp_file.exists() or temp_file.stat().st_size == 0:
                 logger.warning("Watermarking failed or skipped, falling back to raw video.")
                 temp_file = raw_file
@@ -585,6 +600,7 @@ class GenerationQueue:
                     ref_images=prepared_refs,
                     ref_mode=job.ref_mode,
                     ref_video=job.ref_video,
+                    audio_bytes=job.audio_bytes,
                 )
 
             elif backend == "davinci_image":

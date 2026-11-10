@@ -914,6 +914,7 @@ class DaVinciClient:
         ref_images: Optional[List[bytes]] = None,
         ref_mode: str = "ref",
         ref_video: Optional[bytes] = None,
+        audio_bytes: Optional[bytes] = None,
     ) -> str:
         """Submit video generation task to POST /video/process. Returns processId."""
         await self.ensure_valid_token()
@@ -921,6 +922,10 @@ class DaVinciClient:
         video_bucket_path: Optional[str] = None
         if ref_video:
             video_bucket_path = await self.upload_media(ref_video, ext=".mp4", content_type="video/mp4")
+
+        audio_bucket_path: Optional[str] = None
+        if audio_bytes:
+            audio_bucket_path = await self.upload_media(audio_bytes, ext=".mp3", content_type="audio/mpeg")
 
         bucket_paths: List[str] = []
         if ref_images:
@@ -1050,6 +1055,10 @@ class DaVinciClient:
                 raise RuntimeError(
                     f"Модель {model_id} не поддерживает видео-референсы. Для изменения видео выберите Seedance 2.5, Seedance 2.0, Kling 4 или Gemini Omni."
                 )
+
+        if audio_bucket_path:
+            payload["audio"] = audio_bucket_path
+            payload["referenceAudios"] = [audio_bucket_path]
 
         logger.info(
             f"[video/process] model={model_id} payload keys={sorted(payload.keys())} "

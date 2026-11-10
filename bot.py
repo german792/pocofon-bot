@@ -172,6 +172,16 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
                 InlineKeyboardButton(text="🗑 Удалить", callback_data=f"rclear:{owner_id}"),
             ])
 
+    # Audio Reference Row (Available for ALL video models)
+    if draft.get("audio_bytes"):
+        rows.append([
+            InlineKeyboardButton(text="🎵 Аудио-референс прикреплен ✅ (Удалить 🗑)", callback_data=f"rclearaudio:{owner_id}")
+        ])
+    else:
+        rows.append([
+            InlineKeyboardButton(text="🎵 Прикрепить аудио (отправьте голос / mp3)", callback_data=f"audio_hint:{owner_id}")
+        ])
+
     # For ElevenLabs voice model, hide video duration/resolution/ratio rows
     if minfo.get("backend") == "davinci_voice":
         cost = calculate_credit_cost(cur_model, 0, "")
@@ -404,6 +414,8 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
         else:
             video_line = "🎞 <b>Видео-референс:</b> ⚠️ эта модель не умеет редактировать видео — выберите Seedance / Kling / Gemini Omni\n"
 
+    audio_ref_line = "🎵 <b>Аудио-референс:</b> прикреплен к видео ✅\n" if draft.get("audio_bytes") else ""
+
     if minfo.get("backend") == "davinci_voice":
         audio_ref = "🎵 Аудио-референс прикреплен (Voice Changer)" if draft.get("audio_bytes") else ref_badge
         cost = calculate_credit_cost(cur_model, 0, "")
@@ -439,6 +451,7 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
         f"📝 <b>Промпт:</b> <i>{html.escape(str(prompt))}</i>\n"
         f"📌 <b>Референсы:</b> {ref_badge}\n"
         f"{video_line}"
+        f"{audio_ref_line}"
         f"⏱ <b>Длительность:</b> {dur_str}\n"
         f"📐 <b>Разрешение и формат:</b> {res} | {ratio}\n"
         f"{audio_line}"
@@ -1318,10 +1331,14 @@ async def process_photo_batch(
 
 @router.message(F.voice | F.audio)
 async def handle_voice_or_audio(message: Message, bot: Bot, state: FSMContext):
-    """Support attaching voice/audio reference for ElevenLabs Voice Changer."""
+    """Support attaching voice/audio reference for ANY video model or ElevenLabs."""
     is_group = message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP)
-    if is_group and not (message.caption and "eleven" in message.caption.lower()):
-        return
+    caption_text = (message.caption or "").strip()
+    is_eleven = "eleven" in caption_text.lower() or "озвуч" in caption_text.lower()
+
+    if is_group and not is_eleven and not (message.caption and "видео" in message.caption.lower()):
+        if message.from_user.id not in user_drafts:
+            return
 
     try:
         media_obj = message.voice or message.audio
@@ -1334,16 +1351,29 @@ async def handle_voice_or_audio(message: Message, bot: Bot, state: FSMContext):
         return
 
     user_id = message.from_user.id
-    prompt = (message.caption or "Смена голоса по аудио-референсу (ElevenLabs Voice Changer)").strip()
-    draft = create_draft_for_user(
-        user_id=user_id,
-        prompt=prompt,
-        user_name=get_user_display_name(message.from_user),
-        message_id=message.message_id,
-        menu_mode="video",
-        audio_bytes=audio_bytes,
-    )
-    draft["model_key"] = "elevenlabs"
+    draft = user_drafts.get(user_id)
+
+    if draft and draft.get("menu_mode", "video") == "video":
+        # Attach audio reference to the user's active video draft!
+        draft["audio_bytes"] = audio_bytes
+        if caption_text:
+            draft["prompt"] = caption_text
+        if is_eleven:
+            draft["model_key"] = "elevenlabs"
+    else:
+        prompt = caption_text or "Сгенерируй видео под прикрепленный звук"
+        draft = create_draft_for_user(
+            user_id=user_id,
+            prompt=prompt,
+            user_name=get_user_display_name(message.from_user),
+            message_id=message.message_id,
+            menu_mode="video",
+            audio_bytes=audio_bytes,
+        )
+        if is_eleven:
+            draft["model_key"] = "elevenlabs"
+
+    sync_draft_references(draft)
     await show_or_update_menu(message, bot, draft, user_id)
 
 
@@ -2207,6 +2237,35 @@ async def on_clear_refs(call: CallbackQuery):
     except Exception:
         pass
     await call.answer("🗑 Референсы очищены")
+
+
+@router.callback_query(F.data.startswith("rclearaudio:"))
+async def on_clear_audio_ref(call: CallbackQuery):
+    owner_id = int(call.data.split(":")[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = user_drafts.get(owner_id)
+    if not draft:
+        await call.answer("Начните с отправки запроса", show_alert=True)
+        return
+    draft["audio_bytes"] = None
+    try:
+        await call.message.edit_text(
+            text=format_draft_text(draft),
+            reply_markup=build_settings_keyboard(draft, owner_id),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+    await call.answer("🗑 Аудио-референс удален")
+
+
+@router.callback_query(F.data.startswith("audio_hint:"))
+async def on_audio_hint(call: CallbackQuery):
+    await call.answer(
+        "🎵 Отправьте голосовое сообщение или аудиофайл (mp3/wav) в чат — оно прикрепится как звук к вашему видео!",
+        show_alert=True,
+    )
 
 
 @router.callback_query(F.data.startswith("rgrid:"))
