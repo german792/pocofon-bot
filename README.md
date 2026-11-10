@@ -45,3 +45,13 @@ BOT_TOKEN=ваш_токен_бота
 DAVINCI_TOKEN=ваш_токен
 DAVINCI_REFRESH_TOKEN=ваш_refresh_токен
 ```
+
+---
+
+## 🔐 Секреты
+
+Токены и пароли больше не хранятся в коде. Локально задайте их в `.env`, а для GitHub Actions — в **Settings → Secrets and variables → Actions**:
+
+`BOT_TOKEN`, `DAVINCI_TOKEN`, `DAVINCI_REFRESH_TOKEN`, `ADMIN_PASSWORD`, `API_PASSWORD`, при желании `KEY_SIGNING_SECRET`.
+
+Если `KEY_SIGNING_SECRET` не задан, ключи подписываются `ADMIN_PASSWORD` — тогда старые ключи `POCO-…` продолжают работать, пока пароль тот же.
