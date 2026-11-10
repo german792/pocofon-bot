@@ -19,7 +19,12 @@ from api_client import (
 from config import MODELS, BASE_DIR, DEFAULT_MODEL, MAX_CONCURRENT_JOBS, calculate_credit_cost
 import image_utils
 import history_manager
-from watermark_utils import apply_watermark, apply_watermark_image
+from watermark_utils import (
+    apply_watermark,
+    apply_watermark_image,
+    extract_frame_from_video,
+    extract_audio_from_video,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -586,6 +591,15 @@ class GenerationQueue:
 
         try:
             if backend == "davinci":
+                if not all_refs and job.ref_video:
+                    v_frame = await extract_frame_from_video(job.ref_video)
+                    if v_frame:
+                        all_refs = [v_frame]
+                if not job.audio_bytes and job.ref_video:
+                    v_audio = await extract_audio_from_video(job.ref_video)
+                    if v_audio:
+                        job.audio_bytes = v_audio
+
                 prepared_refs = [
                     image_utils.prepare_user_image(b, job.ratio) for b in all_refs if b
                 ]

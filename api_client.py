@@ -1047,14 +1047,10 @@ class DaVinciClient:
             "kling4Flash",
             "geminiOmniFlash12",
             "minimaxH3",
+            "wan30Prime",
         )
         if video_bucket_path:
-            if model_id in video_ref_models:
-                payload["referenceVideos"] = [video_bucket_path]
-            else:
-                raise RuntimeError(
-                    f"Модель {model_id} не поддерживает видео-референсы. Для изменения видео выберите Seedance 2.5, Seedance 2.0, Kling 4 или Gemini Omni."
-                )
+            payload["referenceVideos"] = [video_bucket_path]
 
         if audio_bucket_path:
             payload["audio"] = audio_bucket_path

@@ -54,6 +54,7 @@ from api_client import (
     DaVinciClient,
 )
 from queue_worker import GenerationQueue, GenerationJob
+from watermark_utils import extract_frame_from_video, extract_audio_from_video
 
 logging.basicConfig(
     level=logging.INFO,
@@ -140,18 +141,16 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
 
     rows = [switcher_row, *model_rows]
 
-    # Reference Row (Available for ALL models)
+    # Photo Reference Row (Available for ALL models)
     ref_count = len(ref_images)
     ref_limit = minfo.get("ref_limit", 1)
     if ref_count == 0:
         rows.append([
             InlineKeyboardButton(
-                text=f"📎 Добавить референс (до {ref_limit} фото)",
+                text=f"📎 Добавить фото-референс (до {ref_limit} шт.)",
                 callback_data=f"ref_hint:{owner_id}"
             )
         ])
-        if draft.get("ref_video"):
-            rows.append([InlineKeyboardButton(text="🗑 Убрать видео-референс", callback_data=f"rclear:{owner_id}")])
     else:
         grid_lbl = "✅ 🔲 Сетка 3×3 (снять)" if draft.get("has_grid") else "🔲 Сетка на референс"
         if minfo.get("multi_ref"):
@@ -171,6 +170,16 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
                 InlineKeyboardButton(text=grid_lbl, callback_data=f"rgrid:{owner_id}"),
                 InlineKeyboardButton(text="🗑 Удалить", callback_data=f"rclear:{owner_id}"),
             ])
+
+    # Video Reference Row (Available for ALL video models)
+    if draft.get("ref_video"):
+        rows.append([
+            InlineKeyboardButton(text="🎞 Видео-референс прикреплен ✅ (Удалить 🗑)", callback_data=f"rclearvideo:{owner_id}")
+        ])
+    else:
+        rows.append([
+            InlineKeyboardButton(text="🎞 Прикрепить видео (отправьте видеоролик)", callback_data=f"video_hint:{owner_id}")
+        ])
 
     # Audio Reference Row (Available for ALL video models)
     if draft.get("audio_bytes"):
@@ -407,12 +416,7 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
 
     user_line = f"👤 <b>Автор:</b> {draft.get('user_name')}\n" if draft.get("user_name") else ""
 
-    video_line = ""
-    if draft.get("ref_video"):
-        if minfo.get("video_ref"):
-            video_line = "🎞 <b>Видео-референс:</b> прикреплено ✅ (видео будет изменено по промпту)\n"
-        else:
-            video_line = "🎞 <b>Видео-референс:</b> ⚠️ эта модель не умеет редактировать видео — выберите Seedance / Kling / Gemini Omni\n"
+    video_line = "🎞 <b>Видео-референс:</b> прикреплен к видео ✅\n" if draft.get("ref_video") else ""
 
     audio_ref_line = "🎵 <b>Аудио-референс:</b> прикреплен к видео ✅\n" if draft.get("audio_bytes") else ""
 
@@ -505,7 +509,14 @@ def create_draft_for_user(
     message_id: Optional[int] = None,
     menu_mode: str = "video",
     audio_bytes: Optional[bytes] = None,
+    ref_video: Optional[bytes] = None,
 ) -> Dict[str, Any]:
+    prev_draft = user_drafts.get(user_id)
+    if ref_video is None and prev_draft:
+        ref_video = prev_draft.get("ref_video")
+    if audio_bytes is None and prev_draft:
+        audio_bytes = prev_draft.get("audio_bytes")
+
     prefs = get_user_prefs(user_id)
     refs: List[bytes] = []
     if ref_images:
@@ -540,6 +551,7 @@ def create_draft_for_user(
         "image_ratio": prefs.get("image_ratio", DEFAULT_IMAGE_RATIO),
         "audio": prefs["audio"],
         "audio_bytes": audio_bytes,
+        "ref_video": ref_video,
         "owner_id": user_id,
         "user_name": user_name,
         "original_message_id": message_id,
@@ -1092,6 +1104,10 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
 
     logger.info(f"[refs] video reference from user {user_id}: {len(video_bytes)} bytes, caption={bool(clean_prompt)}")
 
+    # Extract first frame and audio track from the reference video
+    first_frame = await extract_frame_from_video(video_bytes)
+    video_audio = await extract_audio_from_video(video_bytes)
+
     draft = user_drafts.get(user_id)
     if draft and draft.get("menu_mode", "video") == "video":
         if clean_prompt:
@@ -1101,19 +1117,28 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
         draft = create_draft_for_user(
             user_id=user_id,
             prompt=clean_prompt or "Измени видео, сохранив движение и композицию",
-            image_bytes=photos[0] if photos else None,
-            ref_images=photos,
+            image_bytes=photos[0] if photos else first_frame,
+            ref_images=photos if photos else ([first_frame] if first_frame else []),
             user_name=get_user_display_name(message.from_user),
             message_id=message.message_id,
             menu_mode="video",
+            ref_video=video_bytes,
         )
 
     draft["ref_video"] = video_bytes
+    if first_frame and not draft.get("ref_images") and not draft.get("image_bytes"):
+        draft["image_bytes"] = first_frame
+        draft["ref_images"] = [first_frame]
+        draft["all_uploaded_refs"] = [first_frame]
+    if video_audio and not draft.get("audio_bytes"):
+        draft["audio_bytes"] = video_audio
+
     cur_model = draft.get("model_key", DEFAULT_MODEL)
     if not MODELS.get(cur_model, {}).get("video_ref"):
         draft["model_key"] = DEFAULT_MODEL
         get_user_prefs(user_id)["model_key"] = DEFAULT_MODEL
     sync_draft_references(draft)
+    draft["menu_message_id"] = None
     await show_or_update_menu(message, bot, draft, user_id)
 
 
@@ -1245,8 +1270,7 @@ async def process_photo_batch(
         clean_prompt = (message.reply_to_message.text or message.reply_to_message.caption or "").strip()
 
     # If user already has an active draft open -> attach photos to draft!
-    cur_state = await state.get_state()
-    if user_id in user_drafts and (not clean_prompt or cur_state != UserInputState.waiting_for_prompt.state):
+    if user_id in user_drafts:
         draft = user_drafts[user_id]
         if clean_prompt:
             draft["prompt"] = clean_prompt
@@ -2268,6 +2292,35 @@ async def on_audio_hint(call: CallbackQuery):
     )
 
 
+@router.callback_query(F.data.startswith("rclearvideo:"))
+async def on_clear_video_ref(call: CallbackQuery):
+    owner_id = int(call.data.split(":")[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = user_drafts.get(owner_id)
+    if not draft:
+        await call.answer("Начните с отправки запроса", show_alert=True)
+        return
+    draft["ref_video"] = None
+    try:
+        await call.message.edit_text(
+            text=format_draft_text(draft),
+            reply_markup=build_settings_keyboard(draft, owner_id),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+    await call.answer("🗑 Видео-референс удален")
+
+
+@router.callback_query(F.data.startswith("video_hint:"))
+async def on_video_hint(call: CallbackQuery):
+    await call.answer(
+        "🎞 Отправьте видеоролик (до 20 МБ) в чат — он прикрепится как референс к вашему видео!",
+        show_alert=True,
+    )
+
+
 @router.callback_query(F.data.startswith("rgrid:"))
 async def on_toggle_reference_grid(call: CallbackQuery):
     parts = call.data.split(":")
@@ -2592,12 +2645,13 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
         ref_images=ref_images,
         ref_mode=draft.get("ref_mode", "ref"),
         audio_bytes=draft.get("audio_bytes"),
-        ref_video=draft.get("ref_video") if model_info.get("video_ref") else None,
+        ref_video=draft.get("ref_video"),
     )
 
     pos = await queue.add_job(job)
     dur_label = "Авто" if duration == -1 else f"{duration} сек"
     ref_line = f"📎 <b>Референсов:</b> {len(ref_images)} фото\n" if ref_images else ""
+    video_line = "🎞 <b>Видео-референс:</b> прикреплен к задаче ✅\n" if job.ref_video else ""
     user_tag = f"👤 <b>Автор:</b> {job.user_name}\n" if job.user_name else ""
     cost = calculate_credit_cost(model_key, duration, resolution)
     cost_line = f"💳 <b>Стоимость:</b> ~{cost} кредитов\n" if cost > 0 else ""
@@ -2617,6 +2671,7 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
             f"📝 <b>Промпт:</b> <i>{html.escape(prompt)}</i>\n"
             f"{param_line}"
             f"{ref_line}"
+            f"{video_line}"
             f"{cost_line}\n"
             f"<i>Как только очередь дойдет до вас, начнется генерация...</i>",
             parse_mode="HTML"

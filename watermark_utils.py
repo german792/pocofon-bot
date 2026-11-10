@@ -457,3 +457,53 @@ async def apply_watermark_image(
                 badge_path.unlink(missing_ok=True)
             except Exception:
                 pass
+
+
+async def extract_frame_from_video(video_bytes: bytes) -> Optional[bytes]:
+    """Extract the first high-res frame from video bytes using ffmpeg pipe."""
+    if not video_bytes:
+        return None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y",
+            "-i", "pipe:0",
+            "-vframes", "1",
+            "-f", "image2",
+            "-q:v", "2",
+            "pipe:1",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(input=video_bytes), timeout=25.0)
+        if proc.returncode == 0 and out:
+            return out
+    except Exception as e:
+        logger.debug(f"Failed to extract frame from video: {e}")
+    return None
+
+
+async def extract_audio_from_video(video_bytes: bytes) -> Optional[bytes]:
+    """Extract audio track from video bytes using ffmpeg pipe."""
+    if not video_bytes:
+        return None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y",
+            "-i", "pipe:0",
+            "-vn",
+            "-c:a", "libmp3lame",
+            "-b:a", "192k",
+            "-f", "mp3",
+            "pipe:1",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(input=video_bytes), timeout=25.0)
+        if proc.returncode == 0 and out and len(out) > 500:
+            return out
+    except Exception as e:
+        logger.debug(f"Failed to extract audio from video: {e}")
+    return None
+
