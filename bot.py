@@ -352,6 +352,19 @@ def sync_draft_references(draft: Dict[str, Any]) -> None:
     draft["image_bytes"] = draft["ref_images"][0] if draft["ref_images"] else None
 
 
+def get_user_display_name(user) -> str:
+    """Format user display name with @username if available, else html mention."""
+    if not user:
+        return ""
+    username = getattr(user, "username", None)
+    if username:
+        return f"@{username}"
+    full_name = getattr(user, "full_name", "") or getattr(user, "first_name", "") or "Пользователь"
+    if hasattr(user, "mention_html"):
+        return user.mention_html(full_name)
+    return full_name
+
+
 def format_draft_text(draft: Dict[str, Any]) -> str:
     sync_draft_references(draft)
     menu_mode = draft.get("menu_mode", "video")
@@ -382,7 +395,7 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
     else:
         ref_badge = f"📝 По тексту <i>(отправьте фото в чат, чтобы добавить референс — до {ref_limit} шт.)</i>"
 
-    user_line = f"👤 <b>Заказчик:</b> {draft.get('user_name')}\n" if draft.get("user_name") else ""
+    user_line = f"👤 <b>Автор:</b> {draft.get('user_name')}\n" if draft.get("user_name") else ""
 
     video_line = ""
     if draft.get("ref_video"):
@@ -454,7 +467,7 @@ def format_image_draft_text(draft: Dict[str, Any]) -> str:
     else:
         ref_badge = f"📝 По тексту <i>(пришлите фото в чат для добавления референса — до {ref_limit} шт.)</i>"
 
-    user_line = f"👤 <b>Заказчик:</b> {draft.get('user_name')}\n" if draft.get("user_name") else ""
+    user_line = f"👤 <b>Автор:</b> {draft.get('user_name')}\n" if draft.get("user_name") else ""
     cost = calculate_credit_cost(cur_model, 1, res)
     cost_line = f"💳 <b>Стоимость:</b> ~{cost} кр.\n" if cost > 0 else "💳 <b>Стоимость:</b> Бесплатно\n"
 
@@ -903,7 +916,7 @@ async def handle_last_command(message: Message, command: CommandObject, queue: G
         sent = await queue.deliver_latest_from_davinci(
             chat_id=message.chat.id,
             user_id=message.from_user.id,
-            user_name=message.from_user.mention_html(),
+            user_name=get_user_display_name(message.from_user),
             reply_to_message_id=message.message_id,
             count=count,
         )
@@ -1077,7 +1090,7 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
             prompt=clean_prompt or "Измени видео, сохранив движение и композицию",
             image_bytes=photos[0] if photos else None,
             ref_images=photos,
-            user_name=message.from_user.mention_html(),
+            user_name=get_user_display_name(message.from_user),
             message_id=message.message_id,
             menu_mode="video",
         )
@@ -1291,7 +1304,7 @@ async def process_photo_batch(
         prompt=clean_prompt,
         image_bytes=images[0],
         ref_images=images,
-        user_name=message.from_user.mention_html(),
+        user_name=get_user_display_name(message.from_user),
         message_id=message.message_id,
         menu_mode=menu_mode,
     )
@@ -1325,7 +1338,7 @@ async def handle_voice_or_audio(message: Message, bot: Bot, state: FSMContext):
     draft = create_draft_for_user(
         user_id=user_id,
         prompt=prompt,
-        user_name=message.from_user.mention_html(),
+        user_name=get_user_display_name(message.from_user),
         message_id=message.message_id,
         menu_mode="video",
         audio_bytes=audio_bytes,
@@ -1385,7 +1398,7 @@ async def handle_waiting_prompt(message: Message, bot: Bot, state: FSMContext):
         prompt=text,
         image_bytes=ref_images[0] if ref_images else None,
         ref_images=ref_images,
-        user_name=message.from_user.mention_html(),
+        user_name=get_user_display_name(message.from_user),
         message_id=message.message_id,
         menu_mode=target_mode,
     )
@@ -1405,7 +1418,7 @@ async def handle_video_command(message: Message, command: CommandObject, bot: Bo
     await state.clear()
 
     user_id = message.from_user.id
-    user_name = message.from_user.mention_html()
+    user_name = get_user_display_name(message.from_user)
     prompt_args = (command.args or "").strip()
 
     found_refs = await get_all_photos_for_message_or_reply(message, bot)
@@ -1458,7 +1471,7 @@ async def handle_image_command(message: Message, command: CommandObject, bot: Bo
     await state.clear()
 
     user_id = message.from_user.id
-    user_name = message.from_user.mention_html()
+    user_name = get_user_display_name(message.from_user)
     prompt_args = (command.args or "").strip()
 
     found_refs = await get_all_photos_for_message_or_reply(message, bot)
@@ -1490,7 +1503,7 @@ async def handle_voice_command(message: Message, command: CommandObject, bot: Bo
     """Open ElevenLabs TTS V3 menu directly."""
     await state.clear()
     user_id = message.from_user.id
-    user_name = message.from_user.mention_html()
+    user_name = get_user_display_name(message.from_user)
     prompt_args = (command.args or "").strip()
     if not prompt_args and message.reply_to_message:
         prompt_args = (message.reply_to_message.text or message.reply_to_message.caption or "").strip()
@@ -1523,7 +1536,7 @@ async def handle_model_command(message: Message):
         buttons.append([InlineKeyboardButton(text=lbl, callback_data=f"pref_mod:{mkey}:{user_id}")])
 
     await message.reply(
-        f"🤖 <b>Выбор модели по умолчанию для {message.from_user.mention_html()}</b>\n\n"
+        f"🤖 <b>Выбор модели по умолчанию для {get_user_display_name(message.from_user)}</b>\n\n"
         f"Текущая модель: <b>{MODELS[cur_model]['name']}</b>\n"
         f"<i>{MODELS[cur_model]['desc']}</i>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
@@ -1559,7 +1572,7 @@ async def on_set_pref_model(call: CallbackQuery):
 
     try:
         await call.message.edit_text(
-            f"🤖 <b>Выбор модели по умолчанию для {call.from_user.mention_html()}</b>\n\n"
+            f"🤖 <b>Выбор модели по умолчанию для {get_user_display_name(call.from_user)}</b>\n\n"
             f"Текущая модель: <b>{MODELS[mkey]['name']}</b>\n"
             f"<i>{MODELS[mkey]['desc']}</i>",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
@@ -1700,7 +1713,7 @@ async def process_grid_image(message: Message, bot: Bot, image_bytes: bytes, arg
         "color": opts["color"],
         "thickness_mode": opts["thickness_mode"],
         "show_labels": opts["show_labels"],
-        "user_name": message.from_user.mention_html(),
+        "user_name": get_user_display_name(message.from_user),
     }
     grid_sessions[grid_id] = session
     if len(grid_sessions) > 100:
@@ -1899,7 +1912,7 @@ async def on_grid_use_video(call: CallbackQuery, bot: Bot):
         prompt="Анимировать фото с сохранением композиции по сетке",
         image_bytes=gridded_bytes,
         ref_images=[gridded_bytes],
-        user_name=call.from_user.mention_html(),
+        user_name=get_user_display_name(call.from_user),
         message_id=call.message.message_id,
         menu_mode="video",
     )
@@ -1925,7 +1938,7 @@ async def on_grid_use_image(call: CallbackQuery, bot: Bot):
         prompt="Стилизовать изображение с сохранением пропорций и сетки",
         image_bytes=gridded_bytes,
         ref_images=[gridded_bytes],
-        user_name=call.from_user.mention_html(),
+        user_name=get_user_display_name(call.from_user),
         message_id=call.message.message_id,
         menu_mode="image",
     )
@@ -1984,7 +1997,7 @@ async def handle_text(message: Message, bot: Bot, state: FSMContext):
             prompt=clean_prompt,
             image_bytes=found_refs[0] if found_refs else None,
             ref_images=found_refs,
-            user_name=message.from_user.mention_html(),
+            user_name=get_user_display_name(message.from_user),
             message_id=message.message_id
         )
         await show_or_update_menu(message, bot, draft, message.from_user.id)
@@ -2005,7 +2018,7 @@ async def handle_text(message: Message, bot: Bot, state: FSMContext):
         prompt=text,
         image_bytes=found_refs[0] if found_refs else None,
         ref_images=found_refs,
-        user_name=message.from_user.mention_html(),
+        user_name=get_user_display_name(message.from_user),
         message_id=message.message_id
     )
     await show_or_update_menu(message, bot, draft, message.from_user.id)
@@ -2054,7 +2067,7 @@ async def on_open_menu_from_button(call: CallbackQuery, state: FSMContext):
             user_id=uid,
             prompt=default_prompt,
             ref_images=ref_images,
-            user_name=call.from_user.mention_html(),
+            user_name=get_user_display_name(call.from_user),
             message_id=call.message.message_id,
             menu_mode=target_mode,
         )
@@ -2515,7 +2528,7 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
         ratio=ratio,
         generate_audio=audio,
         image_bytes=ref_images[0] if ref_images else None,
-        user_name=draft.get("user_name") or call.from_user.mention_html(),
+        user_name=draft.get("user_name") or get_user_display_name(call.from_user),
         reply_to_message_id=draft.get("original_message_id"),
         ref_images=ref_images,
         ref_mode=draft.get("ref_mode", "ref"),
@@ -2526,7 +2539,7 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
     pos = await queue.add_job(job)
     dur_label = "Авто" if duration == -1 else f"{duration} сек"
     ref_line = f"📎 <b>Референсов:</b> {len(ref_images)} фото\n" if ref_images else ""
-    user_tag = f"👤 <b>Заказчик:</b> {job.user_name}\n" if job.user_name else ""
+    user_tag = f"👤 <b>Автор:</b> {job.user_name}\n" if job.user_name else ""
     cost = calculate_credit_cost(model_key, duration, resolution)
     cost_line = f"💳 <b>Стоимость:</b> ~{cost} кредитов\n" if cost > 0 else ""
 

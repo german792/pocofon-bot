@@ -169,7 +169,7 @@ class GenerationQueue:
         safe_stage = html.escape(str(stage))
         ref_count = len(job.get_all_ref_images())
         ref_line = f"📎 <b>Референсы:</b> {ref_count} фото\n" if ref_count > 0 else ""
-        user_line = f"👤 <b>Заказчик:</b> {job.user_name}\n" if job.user_name else ""
+        user_line = f"👤 <b>Автор:</b> {job.user_name}\n" if job.user_name else ""
         cost = calculate_credit_cost(job.model_key, job.duration, job.resolution)
         cost_line = f"💳 <b>Стоимость:</b> ~{cost} кр.\n" if cost > 0 else ""
 
@@ -333,10 +333,11 @@ class GenerationQueue:
                 )
             )
 
-            user_greeting = f"{job.user_name}, в" if job.user_name else "В"
+            user_line = f"👤 <b>Автор:</b> {job.user_name}\n" if job.user_name else ""
             ref_info = f"📎 <b>Референсов:</b> {ref_count} фото\n" if ref_count > 0 else ""
             caption = (
-                f"✨ <b>{user_greeting}аше изображение готово!</b>\n\n"
+                f"✨ <b>Ваше изображение готово!</b>\n\n"
+                f"{user_line}"
                 f"🤖 <b>Модель:</b> {model_name}\n"
                 f"📝 <b>Промпт:</b> <i>{html.escape(job.prompt[:600])}</i>\n"
                 f"📐 <b>Формат:</b> {job.resolution} | {job.ratio}\n"
@@ -414,9 +415,10 @@ class GenerationQueue:
                 )
             )
 
-            user_greeting = f"{job.user_name}, в" if job.user_name else "В"
+            user_line = f"👤 <b>Автор:</b> {job.user_name}\n" if job.user_name else ""
             caption = (
-                f"🎙 <b>{user_greeting}аша озвучка ElevenLabs готова!</b>\n\n"
+                f"🎙 <b>Ваша озвучка ElevenLabs готова!</b>\n\n"
+                f"{user_line}"
                 f"🤖 <b>Модель:</b> {model_name}\n"
                 f"📝 <b>Текст:</b> <i>{html.escape(job.prompt[:600])}</i>\n"
                 f"⚡ <b>Время генерации:</b> {total_elapsed} сек"
@@ -504,10 +506,11 @@ class GenerationQueue:
         except Exception:
             pass
 
-        user_greeting = f"{job.user_name}, в" if job.user_name else "В"
+        user_line = f"👤 <b>Автор:</b> {job.user_name}\n" if job.user_name else ""
         ref_info = f"📎 <b>Референсов:</b> {ref_count} фото\n" if ref_count > 0 else ""
         caption = (
-            f"✨ <b>{user_greeting}аше видео готово!</b>\n\n"
+            f"✨ <b>Ваше видео готово!</b>\n\n"
+            f"{user_line}"
             f"🤖 <b>Модель:</b> {model_name}\n"
             f"📝 <b>Промпт:</b> <i>{html.escape(job.prompt[:600])}</i>\n"
             f"⏱ <b>Параметры:</b> {dur_label} | {job.resolution} | {job.ratio}\n"
