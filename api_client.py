@@ -948,7 +948,7 @@ class DaVinciClient:
         elif model_id in ("kling4", "kling4Flash"):
             if api_dur < 3:
                 api_dur = 3
-        elif model_id == "ltx25Pro":
+        elif model_id in ("ltx25Pro", "ltx25Fast"):
             if api_dur <= 6:
                 api_dur = 6
             elif api_dur <= 8:
@@ -959,23 +959,33 @@ class DaVinciClient:
             api_dur = 5 if api_dur <= 5 else 10
         elif model_id == "minimax-hailuo-2-3":
             api_dur = 5 if api_dur <= 5 else (6 if api_dur <= 6 else 10)
-        elif model_id in ("wan26", "wan30Prime", "minimaxH3", "grok", "flux3", "flux3Max"):
+        elif model_id in (
+            "wan26",
+            "wan30Prime",
+            "minimaxH3",
+            "grok",
+            "flux3",
+            "flux3Max",
+            "geminiOmniFlash11",
+            "luma-dream-machine",
+            "luma-ray-3-2",
+        ):
             # These accept 1, 2, 3, 4, 5... directly without minimum clamping
             api_dur = dur
 
         # Normalize resolution per model
         res: Optional[str] = resolution
-        if model_id in ("kling4Flash", "ltx25Pro"):
+        if model_id in ("kling4Flash", "ltx25Pro", "ltx25Fast"):
             res = None
         elif model_id == "minimaxH3":
             res = "2K" if str(res).lower() in ("1080p", "2k", "4k") else "768P"
         elif model_id in ("seedance2Fast", "seedance2Mini", "wan30Prime", "wan26", "grok"):
             if res not in ("480p", "720p"):
                 res = "720p"
-        elif model_id in ("kling4", "flux3", "flux3Max", "pixversev6", "minimax-hailuo-2-3", "pika22"):
+        elif model_id in ("kling4", "flux3", "flux3Max", "pixversev6", "minimax-hailuo-2-3", "pika22", "luma-dream-machine", "luma-ray-3-2"):
             if res not in ("720p", "1080p"):
                 res = "720p"
-        elif model_id == "geminiOmniFlash12":
+        elif model_id in ("geminiOmniFlash12", "geminiOmniFlash11"):
             if res not in ("360p", "720p", "1080p", "4k"):
                 res = "720p"
         else:
@@ -984,7 +994,7 @@ class DaVinciClient:
 
         # Normalize dimension (aspect ratio) per model
         dim = ratio if ratio in ("16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "auto") else "16:9"
-        if model_id in ("ltx25Pro", "geminiOmniFlash12") and dim not in ("16:9", "9:16"):
+        if model_id in ("ltx25Pro", "ltx25Fast", "geminiOmniFlash12", "geminiOmniFlash11") and dim not in ("16:9", "9:16"):
             dim = "16:9"
         elif model_id in ("kling4", "kling4Flash") and dim not in ("16:9", "9:16", "1:1", "21:9"):
             dim = "16:9"
@@ -993,6 +1003,7 @@ class DaVinciClient:
         models_without_audio = (
             "kling4",
             "geminiOmniFlash12",
+            "geminiOmniFlash11",
             "minimaxH3",
             "minimax-hailuo-2-3",
             "pika22",
@@ -1008,11 +1019,14 @@ class DaVinciClient:
             "kling4",
             "kling4Flash",
             "geminiOmniFlash12",
+            "geminiOmniFlash11",
             "minimaxH3",
             "wan30Prime",
             "wan26",
             "grok",
             "runway-aleph",
+            "luma-dream-machine",
+            "luma-ray-3-2",
         )
         start_frame: Optional[str] = None
         reference_images_payload: Optional[List[str]] = None
@@ -1048,11 +1062,14 @@ class DaVinciClient:
             "kling4",
             "kling4Flash",
             "geminiOmniFlash12",
+            "geminiOmniFlash11",
             "minimaxH3",
             "wan30Prime",
             "wan26",
             "grok",
             "runway-aleph",
+            "luma-dream-machine",
+            "luma-ray-3-2",
         )
         if video_bucket_path:
             payload["referenceVideos"] = [video_bucket_path]

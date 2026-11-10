@@ -165,6 +165,18 @@ MODELS = {
         "durations": list(range(1, 11)),
         "desc": "Кинематографичная модель LTX 2.5 Pro со звуком и референсом (до 10с)"
     },
+    "ltx_25_fast": {
+        "name": "LTX 2.5 Fast",
+        "short": "⚡ LTX 2.5 Fast",
+        "category": "video",
+        "backend": "davinci",
+        "api_id": "ltx25Fast",
+        "has_audio": True,
+        "multi_ref": False,
+        "ref_limit": 1,
+        "durations": list(range(1, 11)),
+        "desc": "Сверхбыстрая кинематографичная модель LTX 2.5 Fast со звуком (до 10с, от 1с)"
+    },
     "gemini_omni_12": {
         "name": "Gemini OmniFlash 1.2",
         "short": "💎 Gemini Omni 1.2",
@@ -177,6 +189,45 @@ MODELS = {
         "ref_limit": 10,
         "durations": list(range(1, 16)),
         "desc": "Google Gemini Omni Flash 1.2 (видео до 15с, 4K + мульти-референсы)"
+    },
+    "gemini_omni_11": {
+        "name": "Gemini OmniFlash 1.1",
+        "short": "⚡ Gemini Omni 1.1",
+        "category": "video",
+        "backend": "davinci",
+        "api_id": "geminiOmniFlash11",
+        "has_audio": False,
+        "multi_ref": True,
+        "video_ref": True,
+        "ref_limit": 10,
+        "durations": list(range(1, 16)),
+        "desc": "Google Gemini Omni Flash 1.1 (видео до 15с, 4K + мульти-референсы, от 1с)"
+    },
+    "luma_dream_machine": {
+        "name": "Luma Dream Machine",
+        "short": "🌟 Luma Dream Machine",
+        "category": "video",
+        "backend": "davinci",
+        "api_id": "luma-dream-machine",
+        "has_audio": True,
+        "multi_ref": True,
+        "video_ref": True,
+        "ref_limit": 5,
+        "durations": list(range(1, 16)),
+        "desc": "Luma Dream Machine: кино-реализм нового уровня Luma AI (до 15с, от 1с)"
+    },
+    "luma_ray_32": {
+        "name": "Luma Ray v3.2",
+        "short": "⚡ Luma Ray 3.2",
+        "category": "video",
+        "backend": "davinci",
+        "api_id": "luma-ray-3-2",
+        "has_audio": True,
+        "multi_ref": True,
+        "video_ref": True,
+        "ref_limit": 5,
+        "durations": list(range(1, 16)),
+        "desc": "Luma Ray v3.2: следующее поколение AI видео Luma Ray со звуком (до 15с, от 1с)"
     },
     "minimax_h3": {
         "name": "MiniMax H3",
@@ -472,10 +523,12 @@ def calculate_credit_cost(model_key: str, duration: int = 5, resolution: str = "
             return int(dur * 30)
         elif api_id == "flux3Max":
             return int(dur * 36)
-        elif api_id == "ltx25Pro":
+        elif api_id in ("ltx25Pro", "ltx25Fast"):
             return int(dur * 6)
-        elif api_id == "geminiOmniFlash12":
+        elif api_id in ("geminiOmniFlash12", "geminiOmniFlash11"):
             return int(dur * 28)
+        elif api_id in ("luma-dream-machine", "luma-ray-3-2"):
+            return int(dur * 22)
         elif api_id == "minimaxH3":
             return int(dur * 17)
         elif api_id == "minimax-hailuo-2-3":
@@ -528,11 +581,16 @@ VIDEO_MODEL_KEYS = [
     "flux_3",
     "flux_3_max",
     "ltx_25_pro",
+    "ltx_25_fast",
     "gemini_omni_12",
+    "gemini_omni_11",
     "grok",
     "wan_2_6",
+    "wan_3_prime",
     "minimax_h3",
     "runway_alpha",
+    "luma_dream_machine",
+    "luma_ray_32",
     "elevenlabs",
 ]
 IMAGE_MODEL_KEYS = [k for k, v in MODELS.items() if v.get("category") == "image"]
