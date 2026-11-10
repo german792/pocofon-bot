@@ -70,6 +70,7 @@ BUILD_ID = "multiref-v5-video-2026-11-09"
 
 class UserInputState(StatesGroup):
     waiting_for_prompt = State()
+    waiting_for_duration = State()
 
 
 # Active draft per user
@@ -201,19 +202,35 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
         ])
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
-    # Duration Row (Model-specific options, e.g. up to 30s on Seedance 2.5 & Kling 4.0)
-    model_durations = minfo.get("durations", DURATION_OPTIONS)
-    if dur not in model_durations and model_durations:
-        dur = min(model_durations, key=lambda x: abs(x - dur))
-        draft["duration"] = dur
+    # Duration Rows (Exact seconds: stepper, quick buttons 1..6, 7..20, and manual input)
+    dur = max(1, min(30, int(draft.get("duration", DEFAULT_DURATION))))
+    draft["duration"] = dur
 
-    dur_buttons = []
-    for d in model_durations:
-        label = f"{d}с"
-        if d == dur:
-            label = f"✅ {label}"
-        dur_buttons.append(InlineKeyboardButton(text=label, callback_data=f"sd:{d}:{owner_id}"))
-    rows.append(dur_buttons)
+    # Stepper Row: [- 1с] [ ⏱ {dur} сек ] [+ 1с]
+    rows.append([
+        InlineKeyboardButton(text="➖ 1с", callback_data=f"sd_dec:{owner_id}"),
+        InlineKeyboardButton(text=f"⏱ {dur} сек", callback_data=f"sd_custom:{owner_id}"),
+        InlineKeyboardButton(text="➕ 1с", callback_data=f"sd_inc:{owner_id}"),
+    ])
+
+    # Quick seconds Row 1 (1s to 6s)
+    row_quick_1 = []
+    for d in [1, 2, 3, 4, 5, 6]:
+        lbl = f"✅ {d}с" if d == dur else f"{d}с"
+        row_quick_1.append(InlineKeyboardButton(text=lbl, callback_data=f"sd:{d}:{owner_id}"))
+    rows.append(row_quick_1)
+
+    # Quick seconds Row 2 (7s, 8s, 10s, 12s, 15s, 20s)
+    row_quick_2 = []
+    for d in [7, 8, 10, 12, 15, 20]:
+        lbl = f"✅ {d}с" if d == dur else f"{d}с"
+        row_quick_2.append(InlineKeyboardButton(text=lbl, callback_data=f"sd:{d}:{owner_id}"))
+    rows.append(row_quick_2)
+
+    # Manual entry button
+    rows.append([
+        InlineKeyboardButton(text="✏️ Ввести секунды вручную (любое число)", callback_data=f"sd_custom:{owner_id}")
+    ])
 
     # Resolution Row
     res_buttons = []
@@ -434,11 +451,8 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
             f"👇 <i>Нажмите «Озвучить» или переключите модель:</i>"
         )
 
-    dur = draft.get("duration", DEFAULT_DURATION)
-    model_durations = minfo.get("durations", DURATION_OPTIONS)
-    if dur not in model_durations and model_durations:
-        dur = min(model_durations, key=lambda x: abs(x - dur))
-        draft["duration"] = dur
+    dur = max(1, min(30, int(draft.get("duration", DEFAULT_DURATION))))
+    draft["duration"] = dur
     dur_str = f"{dur} сек"
     res = draft.get("resolution", DEFAULT_RESOLUTION)
     ratio = draft.get("ratio", DEFAULT_RATIO)
@@ -1489,6 +1503,52 @@ async def handle_waiting_prompt(message: Message, bot: Bot, state: FSMContext):
     await show_or_update_menu(message, bot, draft, message.from_user.id)
 
 
+@router.message(UserInputState.waiting_for_duration, F.text)
+async def handle_custom_duration_input(message: Message, bot: Bot, state: FSMContext):
+    user_id = message.from_user.id
+    draft = user_drafts.get(user_id)
+    text = (message.text or "").strip().lower()
+    m = re.search(r'\b(\d{1,2})\b', text)
+    if m:
+        val = int(m.group(1))
+        if 1 <= val <= 30:
+            if draft:
+                draft["duration"] = val
+                get_user_prefs(user_id)["duration"] = val
+            await state.clear()
+            await message.reply(f"✅ <b>Длительность установлена:</b> {val} сек!", parse_mode="HTML")
+            if draft:
+                draft["menu_message_id"] = None
+                await show_or_update_menu(message, bot, draft, user_id)
+            return
+    await message.reply("⚠️ Пожалуйста, отправьте число от 1 до 30 (например: 1, 2, 3, 4, 7...).")
+
+
+@router.message(Command("dur", "duration"), ~F.photo, ~F.document)
+async def handle_duration_command(message: Message, command: CommandObject, bot: Bot):
+    user_id = message.from_user.id
+    draft = user_drafts.get(user_id)
+    arg = (command.args or "").strip()
+    if not arg:
+        await message.reply("⏱ Укажите секунды: например <code>/dur 3</code> или <code>/dur 7</code>", parse_mode="HTML")
+        return
+    m = re.search(r'\b(\d{1,2})\b', arg)
+    if m:
+        val = int(m.group(1))
+        if 1 <= val <= 30:
+            if draft:
+                draft["duration"] = val
+                get_user_prefs(user_id)["duration"] = val
+                await message.reply(f"✅ <b>Длительность установлена:</b> {val} сек!", parse_mode="HTML")
+                draft["menu_message_id"] = None
+                await show_or_update_menu(message, bot, draft, user_id)
+            else:
+                get_user_prefs(user_id)["duration"] = val
+                await message.reply(f"✅ <b>Длительность сохранена:</b> {val} сек!", parse_mode="HTML")
+            return
+    await message.reply("⚠️ Пожалуйста, укажите число от 1 до 30 (например: <code>/dur 4</code>).", parse_mode="HTML")
+
+
 # --- Command Handlers (Text Only, Photos Handled Above) ---
 
 @router.message(Command("video", "gen", "prompt", "v", "s2"), ~F.photo, ~F.document)
@@ -2456,6 +2516,71 @@ async def on_set_duration(call: CallbackQuery):
         )
     except Exception:
         pass
+    await call.answer(f"⏱ {dur} сек")
+
+
+@router.callback_query(F.data.startswith("sd_dec:"))
+async def on_dec_duration(call: CallbackQuery):
+    parts = call.data.split(":")
+    owner_id = int(parts[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = user_drafts.get(owner_id)
+    if not draft:
+        return
+    dur = max(1, int(draft.get("duration", DEFAULT_DURATION)) - 1)
+    draft["duration"] = dur
+    get_user_prefs(owner_id)["duration"] = dur
+    draft["menu_message_id"] = call.message.message_id
+    draft["menu_chat_id"] = call.message.chat.id
+    try:
+        await call.message.edit_text(
+            text=format_draft_text(draft),
+            reply_markup=build_settings_keyboard(draft, owner_id),
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+    await call.answer(f"⏱ {dur} сек")
+
+
+@router.callback_query(F.data.startswith("sd_inc:"))
+async def on_inc_duration(call: CallbackQuery):
+    parts = call.data.split(":")
+    owner_id = int(parts[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = user_drafts.get(owner_id)
+    if not draft:
+        return
+    dur = min(30, int(draft.get("duration", DEFAULT_DURATION)) + 1)
+    draft["duration"] = dur
+    get_user_prefs(owner_id)["duration"] = dur
+    draft["menu_message_id"] = call.message.message_id
+    draft["menu_chat_id"] = call.message.chat.id
+    try:
+        await call.message.edit_text(
+            text=format_draft_text(draft),
+            reply_markup=build_settings_keyboard(draft, owner_id),
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+    await call.answer(f"⏱ {dur} сек")
+
+
+@router.callback_query(F.data.startswith("sd_custom:"))
+async def on_custom_duration_prompt(call: CallbackQuery, state: FSMContext):
+    parts = call.data.split(":")
+    owner_id = int(parts[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    await state.set_state(UserInputState.waiting_for_duration)
+    await call.message.reply(
+        "⏱ <b>Введите точную длительность видео в секундах:</b>\n"
+        "<i>Например: 1, 2, 3, 4, 7, 10, 15... (любое число от 1 до 30)</i>",
+        parse_mode="HTML"
+    )
     await call.answer()
 
 

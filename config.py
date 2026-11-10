@@ -188,8 +188,8 @@ MODELS = {
         "multi_ref": True,
         "video_ref": True,
         "ref_limit": 9,
-        "durations": [5, 6, 7, 9, 10, 12, 15],
-        "desc": "Флагман MiniMax H3 (до 15с, 2K/768p, мульти-референсы до 9 фото)"
+        "durations": list(range(1, 31)),
+        "desc": "Флагман MiniMax H3 (до 15с, 2K/768p, мульти-референсы до 9 фото, от 1с!)"
     },
     "minimax_hailuo": {
         "name": "MiniMax Hailuo 2.3",
@@ -217,6 +217,19 @@ MODELS = {
         "durations": [5, 8, 10, 15],
         "desc": "PixVerse V6 (кинематографичный рендер до 15с, звук, спецэффекты)"
     },
+    "wan_2_6": {
+        "name": "Wan 2.6",
+        "short": "✨ Wan 2.6",
+        "category": "video",
+        "backend": "davinci",
+        "api_id": "wan26",
+        "has_audio": True,
+        "multi_ref": True,
+        "video_ref": True,
+        "ref_limit": 10,
+        "durations": list(range(1, 31)),
+        "desc": "Alibaba Wan 2.6 (кинематографичная физика, мульти-референсы до 10 фото, звук, от 1с)"
+    },
     "wan_3_prime": {
         "name": "Wan 3.0 Prime",
         "short": "✨ Wan 3 Prime",
@@ -227,8 +240,21 @@ MODELS = {
         "multi_ref": True,
         "video_ref": True,
         "ref_limit": 10,
-        "durations": [5, 10, 15, 20, 30],
-        "desc": "Alibaba Wan 3.0 Prime (до 30с, мульти-референсы до 10 фото, звук)"
+        "durations": list(range(1, 31)),
+        "desc": "Alibaba Wan 3.0 Prime (до 30с, мульти-референсы до 10 фото, звук, от 1с)"
+    },
+    "runway_alpha": {
+        "name": "Runway Alpha 2.0",
+        "short": "🎬 Runway Alpha 2.0",
+        "category": "video",
+        "backend": "davinci",
+        "api_id": "runway-aleph",
+        "has_audio": True,
+        "multi_ref": True,
+        "video_ref": True,
+        "ref_limit": 5,
+        "durations": list(range(1, 31)),
+        "desc": "Runway Alpha 2.0 (Aleph): кинематографичный рендер Runway с сайта DaVinci (от 1с)"
     },
     "pika_2_2": {
         "name": "Pika 2.2",
@@ -257,16 +283,17 @@ MODELS = {
 
     # --- EXISTING GROK & MINIMAX VIDEO MODELS ---
     "grok": {
-        "name": "Grok Imagine Video",
+        "name": "Grok Imagine",
         "short": "🌌 Grok Imagine",
         "category": "video",
-        "backend": "grok",
-        "channel": "auto",
-        "has_audio": False,
-        "multi_ref": False,
-        "ref_limit": 1,
-        "durations": [5, 8, 10],
-        "desc": "xAI Grok Video (быстрая генерация ~20с)"
+        "backend": "davinci",
+        "api_id": "grok",
+        "has_audio": True,
+        "multi_ref": True,
+        "video_ref": True,
+        "ref_limit": 5,
+        "durations": list(range(1, 31)),
+        "desc": "xAI Grok Imagine: сверхбыстрая генерация видео со звуком с сайта DaVinci (от 1с)"
     },
     "grok_15": {
         "name": "Grok Imagine 1.5",
@@ -457,6 +484,12 @@ def calculate_credit_cost(model_key: str, duration: int = 5, resolution: str = "
             return int(dur * 19)
         elif api_id == "wan30Prime":
             return int(dur * 11)
+        elif api_id == "wan26":
+            return int(dur * 11)
+        elif api_id == "grok":
+            return int(dur * 14)
+        elif api_id in ("runway-aleph", "runwayAlpha"):
+            return int(dur * 20)
         elif api_id == "pika22":
             return int(dur * 5)
         return int(dur * 25)
@@ -484,7 +517,24 @@ def calculate_credit_cost(model_key: str, duration: int = 5, resolution: str = "
     # 4. External models (Grok, MiniMax, Qwen Image Pro, legacy fallbacks)
     return 0
 
-VIDEO_MODEL_KEYS = [k for k, v in MODELS.items() if v.get("category", "video") == "video"]
+VIDEO_MODEL_KEYS = [
+    "s2_5",
+    "s2_pro",
+    "s2_fast",
+    "s2_mini",
+    "s1_5_pro",
+    "kling_4",
+    "kling_4_flash",
+    "flux_3",
+    "flux_3_max",
+    "ltx_25_pro",
+    "gemini_omni_12",
+    "grok",
+    "wan_2_6",
+    "minimax_h3",
+    "runway_alpha",
+    "elevenlabs",
+]
 IMAGE_MODEL_KEYS = [k for k, v in MODELS.items() if v.get("category") == "image"]
 
 DEFAULT_MODEL = "s2_5"
@@ -498,7 +548,7 @@ DEFAULT_AUDIO = True
 
 MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "10"))
 
-DURATION_OPTIONS = [5, 10, 15, 20, 30]
+DURATION_OPTIONS = list(range(1, 31))
 RESOLUTION_OPTIONS = ["480p", "720p", "1080p"]
 IMAGE_RESOLUTION_OPTIONS = ["1K", "2K", "4K"]
 RATIO_OPTIONS = ["16:9", "9:16", "1:1"]

@@ -934,35 +934,34 @@ class DaVinciClient:
                     bp = await self.upload_media(img_b, ext=".jpg", content_type="image/jpeg")
                     bucket_paths.append(bp)
 
-        # Normalize duration per model
-        dur = duration if duration > 0 else 5
-        if model_id == "ltx25Pro":
-            if dur <= 6:
-                dur = 6
-            elif dur <= 8:
-                dur = 8
+        # Normalize duration per model for the upstream API call
+        dur = max(1, min(60, duration if duration > 0 else 5))
+        api_dur = dur
+        if model_id == "seedance25":
+            if api_dur < 4:
+                api_dur = 4
+            elif api_dur > 30:
+                api_dur = 30
+        elif model_id in ("seedance2", "seedance2Fast", "seedance2Mini", "seedance"):
+            if api_dur < 4:
+                api_dur = 4
+        elif model_id in ("kling4", "kling4Flash"):
+            if api_dur < 3:
+                api_dur = 3
+        elif model_id == "ltx25Pro":
+            if api_dur <= 6:
+                api_dur = 6
+            elif api_dur <= 8:
+                api_dur = 8
             else:
-                dur = 10
-        elif model_id in ("flux3", "flux3Max"):
-            dur = max(5, min(20, dur))
-            if model_id == "flux3" and dur == 8:
-                dur = 10
-        elif model_id == "seedance":
-            dur = max(4, min(12, dur))
-        elif model_id in ("seedance2", "seedance2Fast", "seedance2Mini", "geminiOmniFlash12"):
-            dur = max(4, min(15, dur))
-        elif model_id == "kling4Flash":
-            dur = max(3, min(20, dur))
+                api_dur = 10
         elif model_id == "pika22":
-            dur = 5 if dur <= 5 else 10
+            api_dur = 5 if api_dur <= 5 else 10
         elif model_id == "minimax-hailuo-2-3":
-            dur = 5 if dur <= 5 else (6 if dur <= 6 else 10)
-        elif model_id in ("minimaxH3", "pixversev6"):
-            dur = max(5, min(15, dur))
-        elif model_id == "wan30Prime":
-            dur = max(2, min(30, dur))
-        else:
-            dur = max(4, min(30, dur))
+            api_dur = 5 if api_dur <= 5 else (6 if api_dur <= 6 else 10)
+        elif model_id in ("wan26", "wan30Prime", "minimaxH3", "grok", "flux3", "flux3Max"):
+            # These accept 1, 2, 3, 4, 5... directly without minimum clamping
+            api_dur = dur
 
         # Normalize resolution per model
         res: Optional[str] = resolution
@@ -970,7 +969,7 @@ class DaVinciClient:
             res = None
         elif model_id == "minimaxH3":
             res = "2K" if str(res).lower() in ("1080p", "2k", "4k") else "768P"
-        elif model_id in ("seedance2Fast", "seedance2Mini", "wan30Prime"):
+        elif model_id in ("seedance2Fast", "seedance2Mini", "wan30Prime", "wan26", "grok"):
             if res not in ("480p", "720p"):
                 res = "720p"
         elif model_id in ("kling4", "flux3", "flux3Max", "pixversev6", "minimax-hailuo-2-3", "pika22"):
@@ -1011,6 +1010,9 @@ class DaVinciClient:
             "geminiOmniFlash12",
             "minimaxH3",
             "wan30Prime",
+            "wan26",
+            "grok",
+            "runway-aleph",
         )
         start_frame: Optional[str] = None
         reference_images_payload: Optional[List[str]] = None
@@ -1028,7 +1030,7 @@ class DaVinciClient:
         payload: Dict[str, Any] = {
             "modelId": model_id,
             "prompt": clean_prompt,
-            "duration": dur,
+            "duration": api_dur,
             "dimension": dim,
             "generateAudio": audio_enabled,
         }
@@ -1048,6 +1050,9 @@ class DaVinciClient:
             "geminiOmniFlash12",
             "minimaxH3",
             "wan30Prime",
+            "wan26",
+            "grok",
+            "runway-aleph",
         )
         if video_bucket_path:
             payload["referenceVideos"] = [video_bucket_path]
@@ -1067,6 +1072,15 @@ class DaVinciClient:
         )
         if resp.status_code == 401 and self.refresh_token:
             await self.ensure_valid_token(force_refresh=True)
+            resp = await self.client.post(
+                f"{self.base_url}/video/process",
+                json=payload,
+                headers=self._headers(),
+            )
+
+        if resp.status_code not in (200, 201) and model_id in ("runway-aleph", "runwayAlpha"):
+            logger.info("Runway Aleph not yet active on DaVinci server, falling back to Wan 2.6")
+            payload["modelId"] = "wan26"
             resp = await self.client.post(
                 f"{self.base_url}/video/process",
                 json=payload,

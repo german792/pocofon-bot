@@ -490,7 +490,8 @@ class GenerationQueue:
                     raw_file,
                     temp_file,
                     username=job.user_name,
-                    audio_ref_path=temp_audio_ref
+                    audio_ref_path=temp_audio_ref,
+                    target_duration=job.duration
                 )
             finally:
                 if temp_audio_ref and temp_audio_ref.exists():

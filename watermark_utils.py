@@ -133,7 +133,8 @@ async def apply_watermark(
     input_path: Path,
     output_path: Path,
     username: Optional[str] = None,
-    audio_ref_path: Optional[Path] = None
+    audio_ref_path: Optional[Path] = None,
+    target_duration: Optional[int] = None
 ) -> bool:
     """Overlays the animated Poco AI watermark + username badge onto a video,
     cycling corners every time the watermark disappears (every 5.0s).
@@ -164,6 +165,7 @@ async def apply_watermark(
             badge_path = None
 
     has_audio_ref = audio_ref_path is not None and audio_ref_path.exists() and audio_ref_path.stat().st_size > 0
+    dur_args = ["-t", str(target_duration)] if target_duration and target_duration > 0 else []
 
     try:
         if is_webm:
@@ -216,6 +218,7 @@ async def apply_watermark(
                     "-c:a", "aac",
                     "-b:a", "192k",
                     "-shortest",
+                    *dur_args,
                     str(output_path)
                 ])
             else:
@@ -225,6 +228,7 @@ async def apply_watermark(
                     "-preset", "veryfast",
                     "-crf", "22",
                     "-c:a", "copy",
+                    *dur_args,
                     str(output_path)
                 ])
 
@@ -282,6 +286,7 @@ async def apply_watermark(
                     "-c:a", "aac",
                     "-b:a", "192k",
                     "-shortest",
+                    *dur_args,
                     str(output_path)
                 ])
             else:
@@ -291,6 +296,7 @@ async def apply_watermark(
                     "-preset", "veryfast",
                     "-crf", "22",
                     "-c:a", "copy",
+                    *dur_args,
                     str(output_path)
                 ])
 
@@ -315,6 +321,7 @@ async def apply_watermark(
                 "-preset", "veryfast",
                 "-crf", "22",
                 "-c:a", "copy",
+                *dur_args,
                 str(output_path)
             ]
             rc, err = await _run_ffmpeg_command(cmd, timeout=120.0)
