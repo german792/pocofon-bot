@@ -109,6 +109,8 @@ def _lookup(cleaned_key: str) -> Optional[Dict[str, Any]]:
             "note": "Ключ из Telegram-бота",
             "used_count": 0,
             "last_used_at": None,
+            "bound_client_id": None,
+            "bound_at": None,
         }
         keys[cleaned_key] = entry
         _save_keys()
@@ -136,35 +138,77 @@ def generate_key(note: str = "", created_by: str = "@GermanUstinf") -> str:
         "note": note.strip() if note else "Ключ доступа",
         "used_count": 0,
         "last_used_at": None,
+        "bound_client_id": None,
+        "bound_at": None,
     }
     _save_keys()
     return key
 
 
-def verify_key(key: str) -> Optional[Dict[str, Any]]:
+def verify_key(key: str, client_id: Optional[str] = None) -> tuple[Optional[Dict[str, Any]], str]:
     """
-    Verify access key. Returns key metadata if valid & active, otherwise None.
-    Increments usage count on successful verification.
+    Verify access key and enforce strict single-person (single-device) policy.
+    Returns (entry, status) where status is one of:
+      - 'OK': valid and bound to this person/device
+      - 'ALREADY_BOUND': key was already activated by another person/device
+      - 'REVOKED': key is deactivated by admin
+      - 'INVALID': key does not exist or corrupted
     """
     if not key:
-        return None
+        return None, "INVALID"
     cleaned_key = key.strip().upper()
     entry = _lookup(cleaned_key)
 
-    if entry and entry.get("active", True):
+    if not entry:
+        return None, "INVALID"
+
+    if not entry.get("active", True):
+        return None, "REVOKED"
+
+    bound_client = entry.get("bound_client_id")
+    cleaned_cid = str(client_id).strip() if client_id else None
+
+    # Strict single-device binding:
+    if not bound_client:
+        # First-time activation: bind key permanently to this person's client_id!
+        if cleaned_cid:
+            entry["bound_client_id"] = cleaned_cid
+            entry["bound_at"] = time.time()
         entry["used_count"] = entry.get("used_count", 0) + 1
         entry["last_used_at"] = time.time()
         _save_keys()
-        return entry
-    return None
+        return entry, "OK"
+
+    # Key is already bound to a device:
+    if cleaned_cid and bound_client == cleaned_cid:
+        # Same user continuing on their authorized device
+        entry["used_count"] = entry.get("used_count", 0) + 1
+        entry["last_used_at"] = time.time()
+        _save_keys()
+        return entry, "OK"
+
+    # Mismatch! Another device/person is trying to use the already activated key
+    return None, "ALREADY_BOUND"
 
 
-def is_valid_key(key: str) -> bool:
-    """Check if key exists and is currently active."""
+def unbind_key(key: str) -> bool:
+    """Reset device binding for a key so it can be re-bound to another device."""
+    cleaned_key = key.strip().upper()
+    entry = _lookup(cleaned_key)
+    if entry:
+        entry["bound_client_id"] = None
+        entry["bound_at"] = None
+        _save_keys()
+        return True
+    return False
+
+
+def is_valid_key(key: str, client_id: Optional[str] = None) -> bool:
+    """Check if key exists, is active, and allowed for client_id."""
     if not key:
         return False
-    entry = _lookup(key.strip().upper())
-    return bool(entry and entry.get("active", True))
+    entry, status = verify_key(key, client_id=client_id)
+    return status == "OK" and entry is not None
 
 
 def get_all_keys() -> List[Dict[str, Any]]:

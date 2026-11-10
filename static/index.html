@@ -2783,7 +2783,9 @@
       });
 
       // Build Auth Headers
-      const authHeaders = {};
+      const authHeaders = {
+        'X-Client-Id': getOrCreateClientId()
+      };
       const curAdminToken = localStorage.getItem('poco_admin_token');
       const curAccessKey = localStorage.getItem('poco_access_key');
       if (curAdminToken) {
@@ -2973,11 +2975,25 @@
     let currentUserRole = 'guest';
     let filterHistoryTimeout = null;
 
+    function getOrCreateClientId() {
+      let id = localStorage.getItem('poco_client_id');
+      if (!id || id.length < 8) {
+        try {
+          id = 'dev_' + (window.crypto && crypto.randomUUID ? crypto.randomUUID() : (Math.random().toString(36).substring(2, 12) + Date.now().toString(36)));
+        } catch (e) {
+          id = 'dev_' + Math.random().toString(36).substring(2, 12) + Date.now().toString(36);
+        }
+        localStorage.setItem('poco_client_id', id);
+      }
+      return id;
+    }
+
     async function checkAuthOnLoad() {
       const adminToken = localStorage.getItem('poco_admin_token');
       const accessKey = localStorage.getItem('poco_access_key');
+      const clientId = getOrCreateClientId();
 
-      const headers = {};
+      const headers = { 'X-Client-Id': clientId };
       if (adminToken) headers['X-Admin-Token'] = adminToken;
       if (accessKey) headers['X-Access-Key'] = accessKey;
 
@@ -3057,17 +3073,21 @@
       msg.style.display = 'block';
 
       try {
+        const clientId = getOrCreateClientId();
         const res = await fetch('/api/auth/verify-key', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key: keyVal })
+          headers: { 
+            'Content-Type': 'application/json',
+            'X-Client-Id': clientId
+          },
+          body: JSON.stringify({ key: keyVal, client_id: clientId })
         });
 
         const data = await res.json();
         if (res.ok && data.valid) {
           localStorage.setItem('poco_access_key', data.key);
           currentUserRole = 'user';
-          msg.textContent = '✅ Доступ подтвержден! Добро пожаловать.';
+          msg.textContent = '✅ Доступ подтвержден! Ключ привязан к вашему устройству.';
           msg.className = 'access-msg success';
 
           const userPill = document.getElementById('userKeyPill');
@@ -3078,7 +3098,7 @@
 
           setTimeout(() => {
             hideAccessLockModal();
-            showToast('Доступ к POCO AI Studio предоставлен!', 'success');
+            showToast('Доступ предоставлен и привязан к этому устройству навсегда!', 'success');
           }, 600);
         } else {
           msg.textContent = data.detail || 'Неверный ключ доступа. Напишите создателю: @GermanUstinf';
@@ -3319,6 +3339,11 @@
             ? '<span class="key-badge-status active">🟢 Активен</span>'
             : '<span class="key-badge-status revoked">🔴 Отозван</span>';
 
+          const isBound = Boolean(k.bound_client_id);
+          const bindBadge = isBound
+            ? `<span class="key-badge-status" style="background:rgba(52,199,89,0.15);color:#34c759;border:1px solid rgba(52,199,89,0.3);">📱 Привязан</span> <button class="key-row-action" style="background:rgba(255,149,0,0.15);color:#ff9500;border:1px solid rgba(255,149,0,0.3);margin-left:4px;padding:2px 6px;font-size:10px;" onclick="unbindKey('${k.key}')" title="Сбросить привязку устройства">Сброс</button>`
+            : '<span class="key-badge-status" style="background:rgba(255,255,255,0.08);color:var(--text-dim);">⚪ Свободен</span>';
+
           const actionBtn = isActive
             ? `<button class="key-row-action revoke" onclick="revokeKey('${k.key}')">Отозвать</button>`
             : `<button class="key-row-action activate" onclick="activateKey('${k.key}')">Активировать</button>`;
@@ -3328,6 +3353,7 @@
           tr.innerHTML = `
             <td><code><b>${k.key}</b></code></td>
             <td>${statusBadge}</td>
+            <td>${bindBadge}</td>
             <td>${k.note || 'Без заметки'}</td>
             <td>${k.used_count || 0}</td>
             <td>${lastUsed}</td>
@@ -3340,7 +3366,7 @@
         });
 
       } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--danger);">${err.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--danger);">${err.message}</td></tr>`;
       }
     }
 
@@ -3412,6 +3438,27 @@
         if (res.ok) {
           showToast(`Ключ ${key} вновь активирован!`, 'success');
           loadAdminKeys();
+        }
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    }
+
+    async function unbindKey(key) {
+      if (!confirm(`Сбросить привязку устройства для ключа ${key}? После сброса этот ключ сможет активировать другой человек.`)) return;
+      const adminToken = localStorage.getItem('poco_admin_token');
+      try {
+        const res = await fetch('/api/admin/keys/unbind', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken },
+          body: JSON.stringify({ key })
+        });
+        if (res.ok) {
+          showToast(`Привязка ключа ${key} сброшена!`, 'success');
+          loadAdminKeys();
+        } else {
+          const err = await res.json();
+          showToast(err.detail || 'Ошибка сброса привязки', 'error');
         }
       } catch (e) {
         showToast(e.message, 'error');
@@ -3577,6 +3624,7 @@
                 <tr>
                   <th>Ключ</th>
                   <th>Статус</th>
+                  <th>Привязка (1 чел.)</th>
                   <th>Для кого / Заметка</th>
                   <th>Входов</th>
                   <th>Последний вход</th>
@@ -3584,7 +3632,7 @@
                 </tr>
               </thead>
               <tbody id="adminKeysTableBody">
-                <tr><td colspan="6" style="text-align:center;">Загрузка ключей...</td></tr>
+                <tr><td colspan="7" style="text-align:center;">Загрузка ключей...</td></tr>
               </tbody>
             </table>
           </div>

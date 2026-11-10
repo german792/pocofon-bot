@@ -856,11 +856,38 @@ async def handle_list_keys_command(message: Message):
     lines = ["🔑 <b>Последние ключи доступа к сайту:</b>\n"]
     for k in keys:
         status_icon = "🟢" if k.get("active", True) else "🔴"
+        bind_status = "📱 <i>Используется</i>" if k.get("bound_client_id") else "⚪ <i>Свободен</i>"
         lines.append(
-            f"{status_icon} <code>{k['key']}</code> — <i>{html.escape(k.get('note', ''))}</i> (входов: {k.get('used_count', 0)})"
+            f"{status_icon} <code>{k['key']}</code> — <i>{html.escape(k.get('note', ''))}</i> ({bind_status}, входов: {k.get('used_count', 0)})"
         )
     lines.append("\n<i>Создать новый: <code>/genkey [заметка]</code></i>")
+    lines.append("<i>Сбросить привязку: <code>/unbind КЛЮЧ</code></i>")
     await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("unbind", "resetkey", "сброситьключ", ignore_case=True, ignore_mention=True))
+async def handle_unbind_key_command(message: Message, command: CommandObject):
+    """Unbind a key from its device so another person can use it."""
+    user_un = (message.from_user.username or "").lower().strip()
+    user_id = message.from_user.id
+    is_admin = (
+        user_un in [u.lower() for u in getattr(config, "ADMIN_TELEGRAM_USERNAMES", [])]
+        or user_id in getattr(config, "ADMIN_TELEGRAM_IDS", [])
+    )
+    if not is_admin:
+        await message.reply("🔒 Доступ только для создателя @GermanUstinf.", parse_mode="HTML")
+        return
+
+    target_key = (command.args or "").strip().upper()
+    if not target_key:
+        await message.reply("Использование: <code>/unbind POCO-XXXX-XXXX-XXXX</code>", parse_mode="HTML")
+        return
+
+    ok = access_manager.unbind_key(target_key)
+    if ok:
+        await message.reply(f"✅ Привязка ключа <code>{target_key}</code> сброшена! Теперь его можно активировать на новом устройстве.", parse_mode="HTML")
+    else:
+        await message.reply(f"❌ Ключ <code>{target_key}</code> не найден в базе.", parse_mode="HTML")
 
 
 @router.message(Command("last", "sync"))

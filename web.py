@@ -81,9 +81,10 @@ def get_auth_context(request: Request) -> Dict[str, Any]:
         return {"authenticated": True, "role": "admin", "user_id": "GermanUstinf", "note": "Создатель"}
 
     access_key = request.headers.get("x-access-key") or request.query_params.get("access_key")
+    client_id = request.headers.get("x-client-id") or request.query_params.get("client_id")
     if access_key:
-        key_info = access_manager.verify_key(access_key)
-        if key_info:
+        key_info, status = access_manager.verify_key(access_key, client_id=client_id)
+        if key_info and status == "OK":
             return {
                 "authenticated": True,
                 "role": "user",
@@ -425,19 +426,37 @@ async def get_system_status():
 
 
 @app.post("/api/auth/verify-key")
-async def api_verify_key(payload: Dict[str, Any]):
+async def api_verify_key(request: Request, payload: Dict[str, Any]):
     key = str(payload.get("key", "")).strip().upper()
-    info = access_manager.verify_key(key)
-    if not info:
+    client_id = str(payload.get("client_id", "")).strip() or request.headers.get("x-client-id")
+    if not key:
+        raise HTTPException(
+            status_code=400,
+            detail="Пожалуйста, введите ключ доступа (например, POCO-XXXX-XXXX-XXXX)."
+        )
+
+    info, status = access_manager.verify_key(key, client_id=client_id)
+    if status == "ALREADY_BOUND":
+        raise HTTPException(
+            status_code=403,
+            detail="🔒 Этот ключ уже активирован на другом устройстве! Доступ предоставляется только для одного человека."
+        )
+    if status == "REVOKED":
         raise HTTPException(
             status_code=401,
-            detail="Неверный или отозванный ключ доступа. Напишите создателю: @GermanUstinf"
+            detail="⛔ Данный ключ доступа был отозван или заблокирован администратором."
+        )
+    if not info or status != "OK":
+        raise HTTPException(
+            status_code=401,
+            detail="Неверный ключ доступа. Напишите создателю: @GermanUstinf"
         )
     return {
         "valid": True,
         "key": info["key"],
         "note": info.get("note", ""),
         "created_at": info.get("created_at"),
+        "bound": bool(info.get("bound_client_id")),
     }
 
 
@@ -531,6 +550,18 @@ async def api_admin_delete_key(request: Request, payload: Dict[str, Any]):
         raise HTTPException(status_code=403, detail="Требуется вход администратора")
     key = str(payload.get("key", "")).strip()
     ok = access_manager.delete_key(key)
+    return {"success": ok}
+
+
+@app.post("/api/admin/keys/unbind")
+async def api_admin_unbind_key(request: Request, payload: Dict[str, Any]):
+    ctx = get_auth_context(request)
+    if ctx.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Требуется вход администратора")
+    key = str(payload.get("key", "")).strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="Ключ не указан")
+    ok = access_manager.unbind_key(key)
     return {"success": ok}
 
 
