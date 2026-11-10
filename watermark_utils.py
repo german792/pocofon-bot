@@ -9,6 +9,9 @@ from config import BASE_DIR
 
 logger = logging.getLogger(__name__)
 
+# Show the user's @username badge next to the watermark (disabled: only the POCO AI watermark is shown)
+SHOW_USERNAME_BADGE = False
+
 # Exact duration of one full appear -> hold -> disappear cycle in Watermark.webm (125 frames @ 25fps = 5.0s)
 WEBM_CYCLE_SEC = 5.0
 
@@ -152,7 +155,7 @@ async def apply_watermark(
 
     badge_path: Optional[Path] = None
     badge_w, badge_h = 0, 0
-    if username:
+    if username and SHOW_USERNAME_BADGE:
         try:
             badge_h = max(22, int(wm_w * 0.16))
             badge_path, badge_w, badge_h = make_username_badge(username, height=badge_h)
@@ -343,7 +346,7 @@ async def apply_watermark_image(
 
     badge_path: Optional[Path] = None
     badge_w, badge_h = 0, 0
-    if username:
+    if username and SHOW_USERNAME_BADGE:
         try:
             badge_h = max(22, int(wm_w * 0.16))
             badge_path, badge_w, badge_h = make_username_badge(username, height=badge_h)
