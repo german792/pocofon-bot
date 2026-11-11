@@ -1104,6 +1104,19 @@ class DaVinciClient:
                 headers=self._headers(),
             )
 
+        if resp.status_code not in (200, 201) and ("audio" in payload or "referenceAudios" in payload):
+            logger.warning(
+                f"DaVinci server rejected task with audio fields ({resp.status_code}). "
+                f"Retrying without server-side audio payload (audio will be overlaid locally by FFmpeg)..."
+            )
+            payload.pop("audio", None)
+            payload.pop("referenceAudios", None)
+            resp = await self.client.post(
+                f"{self.base_url}/video/process",
+                json=payload,
+                headers=self._headers(),
+            )
+
         if resp.status_code not in (200, 201):
             try:
                 err_data = resp.json()

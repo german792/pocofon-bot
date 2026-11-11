@@ -529,6 +529,7 @@ class GenerationQueue:
 
         user_line = f"👤 <b>Автор:</b> {job.user_name}\n" if job.user_name else ""
         ref_info = f"📎 <b>Референсов:</b> {ref_count} фото\n" if ref_count > 0 else ""
+        audio_ref_info = "🎵 <b>Звуковой референс:</b> наложен на видео ✅\n" if job.audio_bytes else ""
         caption = (
             f"✨ <b>Ваше видео готово!</b>\n\n"
             f"{user_line}"
@@ -536,6 +537,7 @@ class GenerationQueue:
             f"📝 <b>Промпт:</b> <i>{html.escape(job.prompt[:600])}</i>\n"
             f"⏱ <b>Параметры:</b> {dur_label} | {job.resolution} | {job.ratio}\n"
             f"{ref_info}"
+            f"{audio_ref_info}"
             f"⚡ <b>Время генерации:</b> {total_elapsed} сек"
         )
 
