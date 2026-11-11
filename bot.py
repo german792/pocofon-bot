@@ -1035,13 +1035,41 @@ async def handle_allow_user_command(message: Message, command: CommandObject):
             )
             return
 
-    # Check if replied to another user's message (handles forwarded users too)
+    # Check if multiple identifiers are passed (e.g. /allow @user1 @user2)
+    tokens = [t.strip(",; ") for t in arg.split() if t.strip(",; ")]
+    if len(tokens) > 1:
+        results = []
+        for tok in tokens:
+            ok, rmsg = user_access.allow_user(tok, added_by=added_by_str)
+            results.append(rmsg)
+            target_uid = user_access.lookup_user_id(tok)
+            if ok and target_uid and target_uid != user.id:
+                try:
+                    await message.bot.send_message(
+                        chat_id=target_uid,
+                        text=(
+                            f"🎉 <b>Администратор {added_by_str} одобрил ваш доступ к Poco AI вне группы (в ЛС бота)!</b>\n\n"
+                            f"✨ Теперь вы можете свободно пользоваться всеми функциями бота в личных сообщениях.\n"
+                            f"Нажмите /start или отправьте текстовый запрос для генерации видео!"
+                        ),
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+        await message.reply("\n\n".join(results), parse_mode="HTML")
+        return
+
+    # Check if replied to another user's message (only if no explicit argument was provided)
     target_user: Optional[User] = None
-    if message.reply_to_message:
+    if not arg and message.reply_to_message:
         if getattr(message.reply_to_message, "forward_from", None):
             target_user = message.reply_to_message.forward_from
         elif getattr(message.reply_to_message, "from_user", None):
             target_user = message.reply_to_message.from_user
+
+        if target_user and target_user.is_bot:
+            await message.reply("⚠️ Нельзя выдать доступ боту. Ответьте на сообщение реального пользователя.")
+            return
 
     if not arg and not target_user:
         await message.reply(

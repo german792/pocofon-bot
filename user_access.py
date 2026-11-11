@@ -26,12 +26,129 @@ ALLOWED_USERS_FILE = DATA_DIR / "allowed_users.json"
 # Permanent super-admins (always allowed, cannot be revoked)
 DEFAULT_ADMIN_USERNAMES = ["germanustinf", "german792", "german_ustinf"]
 
+GITHUB_SYNC_TOKEN = os.getenv("GH_PAT") or os.getenv("GITHUB_TOKEN") or ""
+GITHUB_REPO = os.getenv("GITHUB_REPOSITORY") or "german792/pocofon-bot2"
+_github_file_sha: Optional[str] = None
+_gh_synced_initially = False
+
 # In-memory cached state
 _access_cache: Optional[Dict[str, Any]] = None
 
 
+def _fetch_from_github_sync():
+    """Fetch allowed_users.json from GitHub repo on startup if available."""
+    global _access_cache, _github_file_sha, _gh_synced_initially
+    if _gh_synced_initially:
+        return
+    _gh_synced_initially = True
+    if not GITHUB_SYNC_TOKEN or not GITHUB_REPO:
+        return
+    try:
+        import urllib.request
+        import base64
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/data/allowed_users.json"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Authorization": f"Bearer {GITHUB_SYNC_TOKEN}",
+                "User-Agent": "poco-bot-access-sync",
+                "Accept": "application/vnd.github.v3+json",
+            }
+        )
+        with urllib.request.urlopen(req, timeout=5.0) as resp:
+            res = json.loads(resp.read().decode("utf-8"))
+            _github_file_sha = res.get("sha")
+            raw_bytes = base64.b64decode(res.get("content", ""))
+            gh_data = json.loads(raw_bytes.decode("utf-8"))
+            if isinstance(gh_data, dict):
+                if _access_cache is None:
+                    _access_cache = gh_data
+                else:
+                    for adm in gh_data.get("admins", {}).get("usernames", []):
+                        if adm.lower() not in [u.lower() for u in _access_cache["admins"]["usernames"]]:
+                            _access_cache["admins"]["usernames"].append(adm)
+                    for u in gh_data.get("allowed_usernames", []):
+                        if u.lower() not in [x.lower() for x in _access_cache.get("allowed_usernames", [])]:
+                            _access_cache["allowed_usernames"].append(u)
+                    for uid in gh_data.get("allowed_user_ids", []):
+                        if uid not in _access_cache.get("allowed_user_ids", []):
+                            _access_cache["allowed_user_ids"].append(uid)
+                    for gid, ginfo in gh_data.get("allowed_groups", {}).items():
+                        if gid not in _access_cache.get("allowed_groups", {}):
+                            _access_cache["allowed_groups"][gid] = ginfo
+                    for k, v in gh_data.get("details", {}).items():
+                        if k not in _access_cache.get("details", {}):
+                            _access_cache["details"][k] = v
+                logger.info(f"Loaded allowed_users.json from GitHub ({GITHUB_REPO})")
+    except Exception as e:
+        logger.debug(f"GitHub access fetch note: {e}")
+
+
+def _sync_to_github_async():
+    """Background thread to push updated allowed_users.json to GitHub with [skip ci]."""
+    import threading
+    t = threading.Thread(target=_sync_to_github_worker, daemon=True)
+    t.start()
+
+
+def _sync_to_github_worker():
+    global _github_file_sha, _access_cache
+    if not GITHUB_SYNC_TOKEN or not GITHUB_REPO or _access_cache is None:
+        return
+    try:
+        import urllib.request
+        import base64
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/data/allowed_users.json"
+
+        # If sha is not known, fetch current sha
+        if not _github_file_sha:
+            try:
+                chk_req = urllib.request.Request(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {GITHUB_SYNC_TOKEN}",
+                        "User-Agent": "poco-bot-access-sync",
+                    }
+                )
+                with urllib.request.urlopen(chk_req, timeout=5.0) as chk_resp:
+                    chk_data = json.loads(chk_resp.read().decode("utf-8"))
+                    _github_file_sha = chk_data.get("sha")
+            except Exception:
+                pass
+
+        content_bytes = json.dumps(_access_cache, indent=2, ensure_ascii=False).encode("utf-8")
+        payload = {
+            "message": "Update allowed_users.json [skip ci]",
+            "content": base64.b64encode(content_bytes).decode("ascii"),
+        }
+        if _github_file_sha:
+            payload["sha"] = _github_file_sha
+
+        put_req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {GITHUB_SYNC_TOKEN}",
+                "User-Agent": "poco-bot-access-sync",
+                "Content-Type": "application/json",
+            },
+            method="PUT"
+        )
+        with urllib.request.urlopen(put_req, timeout=7.0) as resp:
+            resp_data = json.loads(resp.read().decode("utf-8"))
+            _github_file_sha = resp_data.get("content", {}).get("sha")
+            logger.info(f"Successfully synced allowed_users.json to GitHub ({GITHUB_REPO})")
+    except Exception as e:
+        logger.warning(f"Failed to sync allowed_users.json to GitHub: {e}")
+
+
 def _load_access_data() -> Dict[str, Any]:
     global _access_cache
+    if _access_cache is not None:
+        return _access_cache
+
+    # First attempt to fetch from GitHub repository
+    _fetch_from_github_sync()
     if _access_cache is not None:
         return _access_cache
 
@@ -101,6 +218,9 @@ def _save_access_data():
         tmp_file.replace(ALLOWED_USERS_FILE)
     except Exception as e:
         logger.error(f"Error saving allowed_users.json: {e}")
+
+    # Asynchronously persist to GitHub repository
+    _sync_to_github_async()
 
 
 def is_admin(user: Optional[User]) -> bool:
@@ -199,23 +319,33 @@ def is_user_allowed(user: Optional[User]) -> bool:
     uid = user.id
     uname = (user.username or "").strip().lower()
 
-    # 1. Check user ID
-    if uid and uid in data.get("allowed_user_ids", []):
-        if uname and uname not in data.get("allowed_usernames", []):
+    # 1. Check user ID (support int and string representations)
+    allowed_uids = {int(x) for x in data.get("allowed_user_ids", []) if str(x).lstrip("-").isdigit()}
+    if uid and uid in allowed_uids:
+        # Bind username if user now has one
+        allowed_unames = {str(u).lstrip("@").strip().lower() for u in data.get("allowed_usernames", [])}
+        if uname and uname not in allowed_unames:
             data["allowed_usernames"].append(uname)
             if str(uid) in data.get("details", {}):
                 data["details"][str(uid)]["username"] = user.username or ""
             _save_access_data()
         return True
 
-    # 2. Check username
-    if uname and uname in [u.lower() for u in data.get("allowed_usernames", [])]:
+    # 2. Check username (case-insensitive and leading @ stripped)
+    allowed_unames = {str(u).lstrip("@").strip().lower() for u in data.get("allowed_usernames", [])}
+    if uname and uname in allowed_unames:
         # Auto-learn user ID for future requests
-        if uid and uid not in data.get("allowed_user_ids", []):
+        if uid and uid not in allowed_uids:
             data["allowed_user_ids"].append(uid)
             if uname in data.get("details", {}):
                 data["details"][uname]["user_id"] = uid
             _save_access_data()
+        return True
+
+    # 3. Check details dictionary directly
+    if uid and str(uid) in data.get("details", {}):
+        return True
+    if uname and uname in data.get("details", {}):
         return True
 
     return False
@@ -322,7 +452,8 @@ def allow_user(
         .strip()
     )
 
-    if target_user:
+    # Only use target_user if no explicit identifier was typed (e.g. pure /allow as reply)
+    if not clean_id and target_user:
         uid = target_user.id
         uname = (target_user.username or "").strip().lower()
         disp_name = target_user.full_name or f"User {uid}"
@@ -399,8 +530,17 @@ def revoke_user(
 ) -> Tuple[bool, str]:
     """Revoke bot access from a user."""
     data = _load_access_data()
+    raw_id = (identifier or "").strip()
+    clean_id = (
+        raw_id.replace("https://t.me/", "")
+        .replace("http://t.me/", "")
+        .replace("t.me/", "")
+        .lstrip("@")
+        .strip()
+    )
 
-    if target_user:
+    # Only use target_user if no explicit identifier was typed (e.g. pure /revoke as reply)
+    if not clean_id and target_user:
         uid = target_user.id
         uname = (target_user.username or "").strip().lower()
 
@@ -423,7 +563,6 @@ def revoke_user(
         u_label = f"@{target_user.username}" if target_user.username else target_user.full_name
         return True, f"🚫 Доступ для <b>{u_label}</b> закрыт."
 
-    clean_id = (identifier or "").strip()
     if not clean_id:
         return False, "⚠️ Укажите @username или ID пользователя. Например: <code>/revoke @username</code>"
 
