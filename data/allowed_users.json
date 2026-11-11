@@ -20,7 +20,8 @@
   "allowed_user_ids": [
     7148172629,
     8648040165,
-    8614961056
+    8614961056,
+    6773107503
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -56,7 +57,7 @@
       "role": "user"
     },
     "kouue": {
-      "user_id": null,
+      "user_id": 6773107503,
       "username": "Kouue",
       "name": "@Kouue",
       "added_at": 1794421295.413596,
