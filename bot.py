@@ -996,24 +996,201 @@ async def handle_allow_user_command(message: Message, command: CommandObject):
             )
             return
 
-    # Check if replied to another user's message
+    # Check if replied to another user's message (handles forwarded users too)
     target_user: Optional[User] = None
-    if message.reply_to_message and message.reply_to_message.from_user:
-        target_user = message.reply_to_message.from_user
+    if message.reply_to_message:
+        if getattr(message.reply_to_message, "forward_from", None):
+            target_user = message.reply_to_message.forward_from
+        elif getattr(message.reply_to_message, "from_user", None):
+            target_user = message.reply_to_message.from_user
 
     if not arg and not target_user:
         await message.reply(
-            "ℹ️ <b>Как выдать доступ:</b>\n"
-            "• <code>/allow all</code> — открыть доступ сразу всем участникам этой группы\n"
+            "ℹ️ <b>Как выдать доступ пользователю вне группы (в ЛС):</b>\n"
             "• <code>/allow @username</code> — выдать доступ по юзернейму\n"
             "• <code>/allow 123456789</code> — выдать по Telegram ID\n"
-            "• Ответьте <code>/allow</code> на сообщение пользователя в группе или чате.",
+            "• <code>/allow all</code> — открыть доступ сразу всем в группе\n"
+            "• Ответьте <code>/allow</code> на сообщение пользователя или перешлите его сообщение боту в ЛС.",
             parse_mode="HTML"
         )
         return
 
     success, reply_msg = user_access.allow_user(arg, added_by=added_by_str, target_user=target_user)
     await message.reply(reply_msg, parse_mode="HTML")
+
+    # If target_user or user ID is known, send them an instant PM notification!
+    target_uid = target_user.id if target_user else user_access.lookup_user_id(arg)
+    if success and target_uid and target_uid != user.id:
+        try:
+            await message.bot.send_message(
+                chat_id=target_uid,
+                text=(
+                    f"🎉 <b>Администратор {added_by_str} одобрил ваш доступ к Poco AI вне группы (в ЛС бота)!</b>\n\n"
+                    f"✨ Теперь вы можете свободно пользоваться всеми функциями бота в личных сообщениях.\n"
+                    f"Нажмите /start или отправьте текстовый запрос для генерации видео!"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.forward_from)
+async def handle_admin_forwarded_user_in_pm(message: Message):
+    """When German forwards a user's message to the bot in PM, offer 1-click button to allow PM access."""
+    admin = message.from_user
+    if not user_access.is_admin(admin):
+        return
+
+    fwd_user = message.forward_from
+    if not fwd_user or fwd_user.is_bot:
+        return
+
+    if user_access.is_admin(fwd_user):
+        await message.reply("ℹ️ Это сообщение от администратора бота.")
+        return
+
+    uid = fwd_user.id
+    u_name = fwd_user.full_name or f"User {uid}"
+    u_tag = f"@{fwd_user.username}" if fwd_user.username else "без юзернейма"
+    is_allowed = user_access.is_user_allowed(fwd_user)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="✅ Разрешить доступ в ЛС и везде" if not is_allowed else "🔄 Обновить доступ в ЛС",
+                callback_data=f"allow_user_btn:{uid}"
+            )
+        ]
+    ])
+
+    await message.reply(
+        f"👤 <b>Пользователь из пересланного сообщения:</b>\n"
+        f"• Имя: <b>{u_name}</b>\n"
+        f"• Юзернейм: {u_tag}\n"
+        f"• Telegram ID: <code>{uid}</code>\n"
+        f"• Статус доступа: <i>{'✅ Есть доступ' if is_allowed else '⛔ Нет доступа в ЛС'}</i>\n\n"
+        f"Нажмите кнопку ниже, чтобы выдать пользователю доступ к боту вне группы (в ЛС бота):",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("allow_user_btn:"))
+async def handle_allow_user_callback(call: CallbackQuery):
+    """Grant PM access to a user when admin clicks inline button."""
+    admin = call.from_user
+    if not user_access.is_admin(admin):
+        await call.answer("⛔ Доступно только администратору бота (@GermanUstinf).", show_alert=True)
+        return
+
+    uid_str = call.data.split(":", 1)[1]
+    if not uid_str.isdigit():
+        await call.answer("Ошибка ID пользователя", show_alert=True)
+        return
+
+    uid = int(uid_str)
+    admin_tag = f"@{admin.username}" if (admin and admin.username) else (admin.full_name or "admin")
+    ok, msg_text = user_access.allow_user(uid_str, added_by=admin_tag)
+
+    try:
+        await call.message.edit_text(
+            f"✅ <b>Доступ успешно выдан!</b>\n\n"
+            f"Пользователь с ID <code>{uid}</code> теперь может свободно пользоваться ботом <b>вне группы (в ЛС бота)</b>.\n"
+            f"Администратор: {admin_tag}",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+
+    # Notify the user in PM!
+    try:
+        await call.bot.send_message(
+            chat_id=uid,
+            text=(
+                f"🎉 <b>Администратор {admin_tag} одобрил ваш доступ к Poco AI вне группы (в ЛС бота)!</b>\n\n"
+                f"✨ Теперь вам доступны все генерации, выбор моделей и настройки прямо здесь в диалоге с ботом.\n"
+                f"Нажмите /start или отправьте описание видео для начала работы!"
+            ),
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+
+    await call.answer("✅ Доступ пользователю открыт!", show_alert=False)
+
+
+@router.callback_query(F.data.startswith("deny_user_btn:"))
+async def handle_deny_user_callback(call: CallbackQuery):
+    """Deny PM access to a user when admin clicks inline button."""
+    admin = call.from_user
+    if not user_access.is_admin(admin):
+        await call.answer("⛔ Доступно только администратору бота.", show_alert=True)
+        return
+
+    uid_str = call.data.split(":", 1)[1]
+    admin_tag = f"@{admin.username}" if (admin and admin.username) else (admin.full_name or "admin")
+
+    try:
+        await call.message.edit_text(
+            f"❌ <b>Запрос доступа отклонен</b>\n\n"
+            f"Пользователю с ID <code>{uid_str}</code> отказано в доступе к боту в ЛС.\n"
+            f"Администратор: {admin_tag}",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+    await call.answer("Запрос отклонен", show_alert=False)
+
+
+@router.callback_query(F.data.startswith("req_access:"))
+async def handle_request_access_callback(call: CallbackQuery):
+    """Notify all admins when an unauthorized user requests PM access in the bot's PM."""
+    user = call.from_user
+    uid = user.id
+    u_tag = f"@{user.username}" if user.username else user.full_name
+
+    admin_ids = user_access.get_admin_user_ids()
+    admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Разрешить в ЛС", callback_data=f"allow_user_btn:{uid}"),
+            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"deny_user_btn:{uid}")
+        ]
+    ])
+
+    sent_any = False
+    for adm_id in admin_ids:
+        try:
+            await call.bot.send_message(
+                chat_id=adm_id,
+                text=(
+                    f"🔔 <b>Запрос на доступ к Poco AI вне группы (в ЛС):</b>\n\n"
+                    f"👤 Пользователь: <b>{user.full_name}</b> ({u_tag})\n"
+                    f"🆔 Telegram ID: <code>{uid}</code>\n\n"
+                    f"Разрешить пользователю пользоваться ботом в личных сообщениях?"
+                ),
+                reply_markup=admin_kb,
+                parse_mode="HTML"
+            )
+            sent_any = True
+        except Exception:
+            pass
+
+    if sent_any:
+        await call.answer("Запрос отправлен администратору @GermanUstinf!", show_alert=True)
+        try:
+            await call.message.edit_text(
+                f"⏳ <b>Запрос отправлен администратору!</b>\n\n"
+                f"👤 Профиль: {u_tag}\n"
+                f"🆔 Ваш ID: <code>{uid}</code>\n\n"
+                f"Администратор @GermanUstinf уведомлен. Как только доступ будет одобрен, бот сразу напишет вам здесь.",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+    else:
+        # If no admin user ID is registered in bot yet, tell user to message German directly
+        await call.answer("Пожалуйста, напишите создателю @GermanUstinf!", show_alert=True)
 
 
 @router.message(Command("revoke", "disallow", "deny", "revokeall", "revoke_all"), ~F.photo, ~F.document)

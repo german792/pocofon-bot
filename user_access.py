@@ -14,7 +14,7 @@ from typing import Dict, Any, List, Optional, Tuple, Callable, Awaitable
 
 from aiogram import BaseMiddleware
 from aiogram.enums import ChatType
-from aiogram.types import Message, CallbackQuery, TelegramObject, User
+from aiogram.types import Message, CallbackQuery, TelegramObject, User, InlineKeyboardMarkup, InlineKeyboardButton
 import config
 
 logger = logging.getLogger(__name__)
@@ -104,36 +104,87 @@ def _save_access_data():
 
 
 def is_admin(user: Optional[User]) -> bool:
-    """Check if the user is an admin / owner."""
+    """Check if the user is an admin / owner, and auto-learn their numeric user ID."""
     if not user:
         return False
 
     data = _load_access_data()
+    is_adm = False
 
     # Check username
     if user.username:
         u_lower = user.username.strip().lower()
-        if u_lower in [adm.lower() for adm in data["admins"].get("usernames", [])]:
-            return True
-        if u_lower in DEFAULT_ADMIN_USERNAMES:
-            return True
-        if u_lower in [adm.lower() for adm in getattr(config, "ADMIN_TELEGRAM_USERNAMES", [])]:
-            return True
+        if (
+            u_lower in [adm.lower() for adm in data["admins"].get("usernames", [])]
+            or u_lower in DEFAULT_ADMIN_USERNAMES
+            or u_lower in [adm.lower() for adm in getattr(config, "ADMIN_TELEGRAM_USERNAMES", [])]
+        ):
+            is_adm = True
 
     # Check user ID
     if user.id:
-        if user.id in data["admins"].get("user_ids", []):
-            return True
-        if user.id in getattr(config, "ADMIN_TELEGRAM_IDS", []):
-            return True
-            return True
+        if (
+            user.id in data["admins"].get("user_ids", [])
+            or user.id in getattr(config, "ADMIN_TELEGRAM_IDS", [])
+        ):
+            is_adm = True
         env_admin_ids = [
             int(x.strip()) for x in os.getenv("ADMIN_USER_IDS", "").split(",") if x.strip().isdigit()
         ]
         if user.id in env_admin_ids:
-            return True
+            is_adm = True
 
-    return False
+    if is_adm and user.id:
+        changed = False
+        if user.id not in data["admins"].get("user_ids", []):
+            data["admins"]["user_ids"].append(user.id)
+            changed = True
+        if user.id not in data.get("allowed_user_ids", []):
+            data["allowed_user_ids"].append(user.id)
+            changed = True
+        if user.username:
+            u_lower = user.username.strip().lower()
+            if u_lower in data.get("details", {}) and not data["details"][u_lower].get("user_id"):
+                data["details"][u_lower]["user_id"] = user.id
+                changed = True
+        if changed:
+            _save_access_data()
+
+    return is_adm
+
+
+def get_admin_user_ids() -> List[int]:
+    """Get list of known admin Telegram user IDs."""
+    data = _load_access_data()
+    ids = list(data.get("admins", {}).get("user_ids", []))
+    for adm_id in getattr(config, "ADMIN_TELEGRAM_IDS", []):
+        if adm_id not in ids:
+            ids.append(adm_id)
+    return ids
+
+
+def lookup_user_id(identifier: str) -> Optional[int]:
+    """Look up numeric user ID by username or ID string if known."""
+    data = _load_access_data()
+    clean = (
+        (identifier or "")
+        .replace("https://t.me/", "")
+        .replace("http://t.me/", "")
+        .replace("t.me/", "")
+        .lstrip("@")
+        .strip()
+        .lower()
+    )
+    if not clean:
+        return None
+    if clean.isdigit():
+        return int(clean)
+    if clean in data.get("details", {}):
+        return data["details"][clean].get("user_id")
+    for val in data.get("details", {}).values():
+        if (val.get("username") or "").lower() == clean:
+            return val.get("user_id")
+    return None
 
 
 def is_user_allowed(user: Optional[User]) -> bool:
@@ -150,6 +201,11 @@ def is_user_allowed(user: Optional[User]) -> bool:
 
     # 1. Check user ID
     if uid and uid in data.get("allowed_user_ids", []):
+        if uname and uname not in data.get("allowed_usernames", []):
+            data["allowed_usernames"].append(uname)
+            if str(uid) in data.get("details", {}):
+                data["details"][str(uid)]["username"] = user.username or ""
+            _save_access_data()
         return True
 
     # 2. Check username
@@ -255,9 +311,16 @@ def allow_user(
     added_by: str = "",
     target_user: Optional[User] = None
 ) -> Tuple[bool, str]:
-    """Grant bot access to a user by username or numeric Telegram user ID."""
+    """Grant bot access to a user by username or numeric Telegram user ID (for PM and groups)."""
     data = _load_access_data()
-    clean_id = (identifier or "").strip()
+    raw_id = (identifier or "").strip()
+    clean_id = (
+        raw_id.replace("https://t.me/", "")
+        .replace("http://t.me/", "")
+        .replace("t.me/", "")
+        .lstrip("@")
+        .strip()
+    )
 
     if target_user:
         uid = target_user.id
@@ -280,7 +343,10 @@ def allow_user(
         }
         _save_access_data()
         u_label = f"@{target_user.username}" if target_user.username else disp_name
-        return True, f"✅ Доступ разрешен для <b>{u_label}</b> (ID: <code>{uid}</code>)!"
+        return True, (
+            f"✅ Доступ успешно выдан для <b>{u_label}</b> (ID: <code>{uid}</code>)!\n\n"
+            f"✨ Пользователь теперь может пользоваться ботом как в группах, так и <b>вне группы (в личных сообщениях с ботом)</b>."
+        )
 
     if not clean_id:
         return False, "⚠️ Укажите @username или числовой ID пользователя. Например: <code>/allow @GermanUstinf</code>"
@@ -299,10 +365,13 @@ def allow_user(
             "role": "user"
         }
         _save_access_data()
-        return True, f"✅ Доступ разрешен для ID: <code>{uid}</code>!"
+        return True, (
+            f"✅ Доступ успешно выдан для ID: <code>{uid}</code>!\n\n"
+            f"✨ Пользователь теперь может пользоваться ботом как в группах, так и <b>вне группы (в личных сообщениях с ботом)</b>."
+        )
 
     # It's a username
-    clean_uname = clean_id.lstrip("@").strip().lower()
+    clean_uname = clean_id.lower()
     if not clean_uname:
         return False, "⚠️ Некорректный username."
 
@@ -311,14 +380,17 @@ def allow_user(
 
     data["details"][clean_uname] = {
         "user_id": None,
-        "username": clean_id.lstrip("@"),
-        "name": f"@{clean_id.lstrip('@')}",
+        "username": clean_id,
+        "name": f"@{clean_id}",
         "added_at": time.time(),
         "added_by": added_by or "admin",
         "role": "user"
     }
     _save_access_data()
-    return True, f"✅ Доступ разрешен для <b>@{clean_id.lstrip('@')}</b>!"
+    return True, (
+        f"✅ Доступ успешно выдан для <b>@{clean_id}</b>!\n\n"
+        f"✨ Пользователь теперь может пользоваться ботом как в группах, так и <b>вне группы (в личных сообщениях с ботом)</b>."
+    )
 
 
 def revoke_user(
@@ -515,6 +587,11 @@ class AccessControlMiddleware(BaseMiddleware):
         if isinstance(event, CallbackQuery):
             user = event.from_user
             chat_id = event.message.chat.id if event.message and event.message.chat else None
+            cb_data = event.data or ""
+
+            # Always let request and approval buttons through
+            if cb_data.startswith("req_access:") or cb_data.startswith("allow_user_btn:") or cb_data.startswith("deny_user_btn:"):
+                return await handler(event, data)
 
             # If user is allowed individually OR whole group has /allow all
             if (user and is_user_allowed(user)) or (chat_id and is_group_allowed(chat_id)):
@@ -552,10 +629,34 @@ class AccessControlMiddleware(BaseMiddleware):
 
             # User is NOT authorized:
             if event.chat.type == ChatType.PRIVATE:
+                uid = user.id
+                u_tag = f"@{user.username}" if user.username else user.full_name
+                request_url = (
+                    f"https://t.me/GermanUstinf?text="
+                    f"Здравствуйте!+Прошу+выдать+доступ+к+боту+Poco+AI+в+ЛС.+Мой+ID:+{uid}"
+                )
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="📩 Написать @GermanUstinf",
+                            url=request_url
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="🔔 Запросить доступ в ЛС через бота",
+                            callback_data=f"req_access:{uid}"
+                        )
+                    ]
+                ])
+
                 await event.reply(
-                    "⛔ <b>Доступ ограничен</b>\n\n"
-                    "У вас нет разрешения на использование бота <b>Poco AI</b>.\n"
-                    "Для получения доступа обратитесь к администратору: @GermanUstinf",
+                    f"⛔ <b>Доступ в ЛС ограничен</b>\n\n"
+                    f"У вас пока нет разрешения на использование бота <b>Poco AI</b> вне группы (в личных сообщениях).\n\n"
+                    f"👤 <b>Ваш профиль:</b> {u_tag}\n"
+                    f"🆔 <b>Ваш Telegram ID:</b> <code>{uid}</code>\n\n"
+                    f"Для получения доступа обратитесь к создателю @GermanUstinf или нажмите кнопку ниже:",
+                    reply_markup=kb,
                     parse_mode="HTML"
                 )
                 return None
