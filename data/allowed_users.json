@@ -16,14 +16,16 @@
     "boborp4",
     "kouue",
     "neurodollarr",
-    "orew55"
+    "orew55",
+    "gg67dr"
   ],
   "allowed_user_ids": [
     7148172629,
     8648040165,
     8614961056,
     6773107503,
-    8930485550
+    8930485550,
+    8856446174
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -80,6 +82,14 @@
       "name": "@Orew55",
       "added_at": 1794421644.3041058,
       "added_by": "@GermanUstinf",
+      "role": "user"
+    },
+    "gg67dr": {
+      "user_id": 8856446174,
+      "username": "GG67dr",
+      "name": "Tung tung sahur",
+      "added_at": 1794421774.349368,
+      "added_by": "group_-1004328649380",
       "role": "user"
     }
   }
