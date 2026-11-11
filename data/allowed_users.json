@@ -15,7 +15,8 @@
     "german_ustinf",
     "boborp4",
     "kouue",
-    "neurodollarr"
+    "neurodollarr",
+    "orew55"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -70,6 +71,14 @@
       "name": "Eblan",
       "added_at": 1794421308.2875814,
       "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "orew55": {
+      "user_id": null,
+      "username": "Orew55",
+      "name": "@Orew55",
+      "added_at": 1794421644.3041058,
+      "added_by": "@GermanUstinf",
       "role": "user"
     }
   }
