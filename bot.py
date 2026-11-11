@@ -22,6 +22,7 @@ from aiogram.types import (
 )
 import image_utils
 import access_manager
+import user_access
 import config
 import history_manager
 
@@ -63,6 +64,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 router = Router()
+router.message.middleware(user_access.AccessControlMiddleware())
+router.callback_query.middleware(user_access.AccessControlMiddleware())
 
 # Marker of the code version (visible in the menu) to confirm the latest bot.py is deployed
 BUILD_ID = "multiref-v5-video-2026-11-09"
@@ -671,6 +674,15 @@ async def handle_start_and_help(message: Message, state: FSMContext):
         ]
     ])
 
+    admin_block = ""
+    if user_access.is_admin(message.from_user):
+        admin_block = (
+            "\n\n👑 <b>Команды администратора:</b>\n"
+            "• <code>/allow @username</code> — выдать доступ к боту (в ЛС или группе)\n"
+            "• <code>/revoke @username</code> — закрыть доступ к боту\n"
+            "• <code>/allowed</code> — список пользователей с доступом"
+        )
+
     if message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
         group_text = (
             f"👋 <b>Привет, {first_name}!</b> Я мультимодельный ИИ-бот <b>Poco AI</b>.\n\n"
@@ -692,6 +704,7 @@ async def handle_start_and_help(message: Message, state: FSMContext):
             f"• <code>/balance</code> — просмотр баланса кредитов DaVinci AI\n"
             f"• <code>/last</code> — забрать последнее готовое видео с сайта\n"
             f"• <code>/model</code> — выбор модели по умолчанию"
+            f"{admin_block}"
         )
         await message.reply(group_text, reply_markup=start_kb, parse_mode="HTML")
         return
@@ -716,6 +729,7 @@ async def handle_start_and_help(message: Message, state: FSMContext):
         f"🔲 <b>Сетка на изображение:</b> команда <code>/grid</code> или <code>/сетка</code>\n\n"
         f"📎 <b>Референсы для всех моделей:</b>\n"
         f"Отправьте одно или несколько фото с подписью или прямо во время настройки меню — они прикрепятся как референс!"
+        f"{admin_block}"
     )
     await message.answer(welcome_text, reply_markup=start_kb, parse_mode="HTML")
 
@@ -911,14 +925,18 @@ async def handle_admin_auth_command(message: Message, command: CommandObject):
     user_id = message.from_user.id
     user_un = (message.from_user.username or "").lower().strip()
 
-    if access_manager.verify_admin_password(raw):
+    if access_manager.verify_admin_password(raw) or user_access.authenticate_admin(message.from_user, raw):
         if user_id not in config.ADMIN_TELEGRAM_IDS:
             config.ADMIN_TELEGRAM_IDS.append(user_id)
+        user_access.authenticate_admin(message.from_user, raw)
         await message.reply(
             f"👑 <b>Вы успешно авторизованы как Администратор!</b>\n\n"
             f"👤 <b>Username:</b> @{user_un or 'не задан'}\n"
             f"🆔 <b>Ваш ID:</b> <code>{user_id}</code>\n\n"
             f"✨ Теперь вам доступны команды:\n"
+            f"• <code>/allow @username</code> — выдать доступ к боту\n"
+            f"• <code>/revoke @username</code> — отозвать доступ\n"
+            f"• <code>/allowed</code> — список допущенных пользователей\n"
             f"• <code>/genkey [заметка]</code> — генерация ключа доступа\n"
             f"• <code>/keys</code> — просмотр активных ключей\n"
             f"• <code>/token [x-token]</code> — обновление токена DaVinci",
@@ -932,6 +950,88 @@ async def handle_admin_auth_command(message: Message, command: CommandObject):
             f"<i>Ваш ID: <code>{user_id}</code>, Username: @{user_un or 'не задан'}</i>",
             parse_mode="HTML",
         )
+
+
+@router.message(Command("allow"), ~F.photo, ~F.document)
+async def handle_allow_user_command(message: Message, command: CommandObject):
+    """Grant bot access to a user. Works in PM and in groups (supports /allow @username, /allow ID, or reply)."""
+    user = message.from_user
+    if not user_access.is_admin(user):
+        await message.reply("⛔ Эта команда доступна только администраторам бота (@GermanUstinf).")
+        return
+
+    # Check if replied to another user's message
+    target_user: Optional[User] = None
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_user = message.reply_to_message.from_user
+
+    arg = (command.args or "").strip()
+    if not arg and not target_user:
+        await message.reply(
+            "ℹ️ <b>Как выдать доступ пользователю:</b>\n"
+            "• <code>/allow @username</code> — выдать по юзернейму\n"
+            "• <code>/allow 123456789</code> — выдать по Telegram ID\n"
+            "• Ответьте <code>/allow</code> на сообщение пользователя в группе или чате.",
+            parse_mode="HTML"
+        )
+        return
+
+    added_by_str = f"@{user.username}" if (user and user.username) else (user.full_name if user else "admin")
+    success, reply_msg = user_access.allow_user(arg, added_by=added_by_str, target_user=target_user)
+    await message.reply(reply_msg, parse_mode="HTML")
+
+
+@router.message(Command("revoke", "disallow", "deny"), ~F.photo, ~F.document)
+async def handle_revoke_user_command(message: Message, command: CommandObject):
+    """Revoke bot access from a user. Works in PM and in groups (supports /revoke @username, /revoke ID, or reply)."""
+    user = message.from_user
+    if not user_access.is_admin(user):
+        await message.reply("⛔ Эта команда доступна только администраторам бота (@GermanUstinf).")
+        return
+
+    target_user: Optional[User] = None
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_user = message.reply_to_message.from_user
+
+    arg = (command.args or "").strip()
+    if not arg and not target_user:
+        await message.reply(
+            "ℹ️ <b>Как закрыть доступ пользователю:</b>\n"
+            "• <code>/revoke @username</code>\n"
+            "• <code>/revoke 123456789</code>\n"
+            "• Ответьте <code>/revoke</code> на сообщение пользователя.",
+            parse_mode="HTML"
+        )
+        return
+
+    success, reply_msg = user_access.revoke_user(arg, target_user=target_user)
+    await message.reply(reply_msg, parse_mode="HTML")
+
+
+@router.message(Command("allowed", "users", "whitelist"), ~F.photo, ~F.document)
+async def handle_allowed_users_list_command(message: Message):
+    """Show list of all users allowed to use the bot."""
+    user = message.from_user
+    if not user_access.is_admin(user):
+        await message.reply("⛔ Список доступа доступен только администраторам бота (@GermanUstinf).")
+        return
+
+    users_list = user_access.get_allowed_users_list()
+    if not users_list:
+        await message.reply("📋 Список доступа пуст (доступен только создатель @GermanUstinf).")
+        return
+
+    lines = ["👥 <b>Пользователи с доступом к Poco AI:</b>\n"]
+    for i, u in enumerate(users_list, 1):
+        uname = f"@{u['username']}" if u.get("username") else ""
+        uid = f"(ID: <code>{u['user_id']}</code>)" if u.get("user_id") else ""
+        role_badge = " 👑 <i>(Создатель/Админ)</i>" if u.get("role") in ("admin", "superadmin") else ""
+        display = f"<b>{u.get('name') or uname or uid}</b> {uname if u.get('name') != uname else ''} {uid}{role_badge}"
+        lines.append(f"{i}. {display.strip()}")
+
+    lines.append("\n<i>Выдать доступ: <code>/allow @username</code></i>")
+    lines.append("<i>Отозвать доступ: <code>/revoke @username</code></i>")
+    await message.reply("\n".join(lines), parse_mode="HTML")
 
 
 @router.message(Command("genkey", "key", "createkey", "создатьключ", ignore_case=True, ignore_mention=True))
