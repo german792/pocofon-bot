@@ -12,10 +12,12 @@
   "allowed_usernames": [
     "germanustinf",
     "german792",
-    "german_ustinf"
+    "german_ustinf",
+    "boborp4"
   ],
   "allowed_user_ids": [
-    7148172629
+    7148172629,
+    8648040165
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -39,6 +41,14 @@
       "username": "GermanUstinf",
       "name": "Poco",
       "added_at": 1794421254.160145,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "boborp4": {
+      "user_id": 8648040165,
+      "username": "boborp4",
+      "name": "bobor p4 bobor p4",
+      "added_at": 1794421256.973863,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
