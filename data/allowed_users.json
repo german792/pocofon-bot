@@ -5,14 +5,18 @@
       "german792",
       "german_ustinf"
     ],
-    "user_ids": []
+    "user_ids": [
+      7148172629
+    ]
   },
   "allowed_usernames": [
     "germanustinf",
     "german792",
     "german_ustinf"
   ],
-  "allowed_user_ids": [],
+  "allowed_user_ids": [
+    7148172629
+  ],
   "allowed_groups": {},
   "details": {}
 }
