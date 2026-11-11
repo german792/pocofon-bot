@@ -13,7 +13,8 @@
     "germanustinf",
     "german792",
     "german_ustinf",
-    "boborp4"
+    "boborp4",
+    "kouue"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -50,6 +51,14 @@
       "name": "bobor p4 bobor p4",
       "added_at": 1794421256.973863,
       "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "kouue": {
+      "user_id": null,
+      "username": "Kouue",
+      "name": "@Kouue",
+      "added_at": 1794421295.413596,
+      "added_by": "@GermanUstinf",
       "role": "user"
     }
   }
