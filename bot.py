@@ -678,9 +678,11 @@ async def handle_start_and_help(message: Message, state: FSMContext):
     if user_access.is_admin(message.from_user):
         admin_block = (
             "\n\n👑 <b>Команды администратора:</b>\n"
-            "• <code>/allow @username</code> — выдать доступ к боту (в ЛС или группе)\n"
-            "• <code>/revoke @username</code> — закрыть доступ к боту\n"
-            "• <code>/allowed</code> — список пользователей с доступом"
+            "• <code>/allow all</code> — открыть доступ сразу всем в группе\n"
+            "• <code>/allow @username</code> — выдать доступ пользователю (в ЛС или группе)\n"
+            "• <code>/revoke all</code> — закрыть общий доступ группы\n"
+            "• <code>/revoke @username</code> — закрыть доступ пользователю\n"
+            "• <code>/allowed</code> — список допущенных пользователей и групп"
         )
 
     if message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
@@ -952,53 +954,99 @@ async def handle_admin_auth_command(message: Message, command: CommandObject):
         )
 
 
-@router.message(Command("allow"), ~F.photo, ~F.document)
+@router.message(Command("allow", "allowall", "allow_all"), ~F.photo, ~F.document)
 async def handle_allow_user_command(message: Message, command: CommandObject):
-    """Grant bot access to a user. Works in PM and in groups (supports /allow @username, /allow ID, or reply)."""
+    """Grant bot access to a user or whole group (/allow all, /allow @username, /allow ID, or reply)."""
     user = message.from_user
     if not user_access.is_admin(user):
         await message.reply("⛔ Эта команда доступна только администраторам бота (@GermanUstinf).")
         return
+
+    added_by_str = f"@{user.username}" if (user and user.username) else (user.full_name if user else "admin")
+    arg = (command.args or "").strip()
+    cmd_name = (command.command or "").lower()
+
+    # Check if admin wrote "/allow all" (or "/allowall") to grant access to whole group
+    if cmd_name in ("allowall", "allow_all") or arg.lower() in ("all", "все", "всем", "group", "группа"):
+        if message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
+            success, reply_msg = user_access.allow_group(
+                chat_id=message.chat.id,
+                chat_title=message.chat.title or "Группа",
+                added_by=added_by_str
+            )
+            # Also auto-whitelist group administrators
+            try:
+                admins = await message.bot.get_chat_administrators(message.chat.id)
+                for adm in admins:
+                    if adm.user and not adm.user.is_bot:
+                        user_access.allow_user(
+                            str(adm.user.id),
+                            added_by=f"group_admin_{message.chat.id}",
+                            target_user=adm.user
+                        )
+            except Exception:
+                pass
+            await message.reply(reply_msg, parse_mode="HTML")
+            return
+        else:
+            await message.reply(
+                "ℹ️ Команда <code>/allow all</code> работает внутри группы, чтобы открыть доступ сразу всем её участникам.\n\n"
+                "Для выдачи доступа отдельному пользователю в ЛС используйте: <code>/allow @username</code>",
+                parse_mode="HTML"
+            )
+            return
 
     # Check if replied to another user's message
     target_user: Optional[User] = None
     if message.reply_to_message and message.reply_to_message.from_user:
         target_user = message.reply_to_message.from_user
 
-    arg = (command.args or "").strip()
     if not arg and not target_user:
         await message.reply(
-            "ℹ️ <b>Как выдать доступ пользователю:</b>\n"
-            "• <code>/allow @username</code> — выдать по юзернейму\n"
+            "ℹ️ <b>Как выдать доступ:</b>\n"
+            "• <code>/allow all</code> — открыть доступ сразу всем участникам этой группы\n"
+            "• <code>/allow @username</code> — выдать доступ по юзернейму\n"
             "• <code>/allow 123456789</code> — выдать по Telegram ID\n"
             "• Ответьте <code>/allow</code> на сообщение пользователя в группе или чате.",
             parse_mode="HTML"
         )
         return
 
-    added_by_str = f"@{user.username}" if (user and user.username) else (user.full_name if user else "admin")
     success, reply_msg = user_access.allow_user(arg, added_by=added_by_str, target_user=target_user)
     await message.reply(reply_msg, parse_mode="HTML")
 
 
-@router.message(Command("revoke", "disallow", "deny"), ~F.photo, ~F.document)
+@router.message(Command("revoke", "disallow", "deny", "revokeall", "revoke_all"), ~F.photo, ~F.document)
 async def handle_revoke_user_command(message: Message, command: CommandObject):
-    """Revoke bot access from a user. Works in PM and in groups (supports /revoke @username, /revoke ID, or reply)."""
+    """Revoke bot access from a user or whole group."""
     user = message.from_user
     if not user_access.is_admin(user):
         await message.reply("⛔ Эта команда доступна только администраторам бота (@GermanUstinf).")
         return
 
+    arg = (command.args or "").strip()
+    cmd_name = (command.command or "").lower()
+
+    # Check if admin wrote "/revoke all" to revoke whole group access
+    if cmd_name in ("revokeall", "revoke_all") or arg.lower() in ("all", "все", "всем", "group", "группа"):
+        if message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
+            success, reply_msg = user_access.revoke_group(message.chat.id)
+            await message.reply(reply_msg, parse_mode="HTML")
+            return
+        else:
+            await message.reply("ℹ️ Команда <code>/revoke all</code> отзывает общий доступ внутри группы.", parse_mode="HTML")
+            return
+
     target_user: Optional[User] = None
     if message.reply_to_message and message.reply_to_message.from_user:
         target_user = message.reply_to_message.from_user
 
-    arg = (command.args or "").strip()
     if not arg and not target_user:
         await message.reply(
-            "ℹ️ <b>Как закрыть доступ пользователю:</b>\n"
-            "• <code>/revoke @username</code>\n"
-            "• <code>/revoke 123456789</code>\n"
+            "ℹ️ <b>Как закрыть доступ:</b>\n"
+            "• <code>/revoke all</code> — закрыть общий доступ в группе\n"
+            "• <code>/revoke @username</code> — закрыть доступ пользователю\n"
+            "• <code>/revoke 123456789</code> — по Telegram ID\n"
             "• Ответьте <code>/revoke</code> на сообщение пользователя.",
             parse_mode="HTML"
         )
@@ -1010,27 +1058,38 @@ async def handle_revoke_user_command(message: Message, command: CommandObject):
 
 @router.message(Command("allowed", "users", "whitelist"), ~F.photo, ~F.document)
 async def handle_allowed_users_list_command(message: Message):
-    """Show list of all users allowed to use the bot."""
+    """Show list of all users and groups allowed to use the bot."""
     user = message.from_user
     if not user_access.is_admin(user):
         await message.reply("⛔ Список доступа доступен только администраторам бота (@GermanUstinf).")
         return
 
+    groups_list = user_access.get_allowed_groups_list()
     users_list = user_access.get_allowed_users_list()
-    if not users_list:
+
+    if not groups_list and not users_list:
         await message.reply("📋 Список доступа пуст (доступен только создатель @GermanUstinf).")
         return
 
-    lines = ["👥 <b>Пользователи с доступом к Poco AI:</b>\n"]
-    for i, u in enumerate(users_list, 1):
-        uname = f"@{u['username']}" if u.get("username") else ""
-        uid = f"(ID: <code>{u['user_id']}</code>)" if u.get("user_id") else ""
-        role_badge = " 👑 <i>(Создатель/Админ)</i>" if u.get("role") in ("admin", "superadmin") else ""
-        display = f"<b>{u.get('name') or uname or uid}</b> {uname if u.get('name') != uname else ''} {uid}{role_badge}"
-        lines.append(f"{i}. {display.strip()}")
+    lines = []
+    if groups_list:
+        lines.append("🏰 <b>Группы с общим доступом (/allow all):</b>")
+        for g in groups_list:
+            lines.append(f"• «<b>{g.get('title', 'Группа')}</b>» (ID: <code>{g.get('chat_id')}</code>)")
+        lines.append("")
 
-    lines.append("\n<i>Выдать доступ: <code>/allow @username</code></i>")
-    lines.append("<i>Отозвать доступ: <code>/revoke @username</code></i>")
+    if users_list:
+        lines.append("👥 <b>Пользователи с индивидуальным доступом:</b>")
+        for i, u in enumerate(users_list, 1):
+            uname = f"@{u['username']}" if u.get("username") else ""
+            uid = f"(ID: <code>{u['user_id']}</code>)" if u.get("user_id") else ""
+            role_badge = " 👑 <i>(Создатель/Админ)</i>" if u.get("role") in ("admin", "superadmin") else ""
+            display = f"<b>{u.get('name') or uname or uid}</b> {uname if u.get('name') != uname else ''} {uid}{role_badge}"
+            lines.append(f"{i}. {display.strip()}")
+
+    lines.append("\n<i>Выдать группе: <code>/allow all</code> (в группе)</i>")
+    lines.append("<i>Выдать пользователю: <code>/allow @username</code></i>")
+    lines.append("<i>Отозвать: <code>/revoke @username</code> или <code>/revoke all</code></i>")
     await message.reply("\n".join(lines), parse_mode="HTML")
 
 

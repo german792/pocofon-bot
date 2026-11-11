@@ -42,6 +42,7 @@ def _load_access_data() -> Dict[str, Any]:
         },
         "allowed_usernames": list(DEFAULT_ADMIN_USERNAMES),
         "allowed_user_ids": [],
+        "allowed_groups": {},
         "details": {
             "germanustinf": {
                 "username": "GermanUstinf",
@@ -68,6 +69,8 @@ def _load_access_data() -> Dict[str, Any]:
                 data["allowed_usernames"] = list(DEFAULT_ADMIN_USERNAMES)
             if "allowed_user_ids" not in data or not isinstance(data["allowed_user_ids"], list):
                 data["allowed_user_ids"] = []
+            if "allowed_groups" not in data or not isinstance(data["allowed_groups"], dict):
+                data["allowed_groups"] = {}
             if "details" not in data or not isinstance(data["details"], dict):
                 data["details"] = {}
 
@@ -160,6 +163,91 @@ def is_user_allowed(user: Optional[User]) -> bool:
         return True
 
     return False
+
+
+def is_group_allowed(chat_id: Optional[int]) -> bool:
+    """Check if full group access (/allow all) is enabled for this chat."""
+    if not chat_id:
+        return False
+    data = _load_access_data()
+    groups = data.get("allowed_groups", {})
+    if isinstance(groups, dict):
+        return str(chat_id) in groups or chat_id in groups
+    elif isinstance(groups, list):
+        return chat_id in groups or str(chat_id) in groups
+    return False
+
+
+def allow_group(chat_id: int, chat_title: str = "", added_by: str = "") -> Tuple[bool, str]:
+    """Enable bot access for all users in this group."""
+    data = _load_access_data()
+    if not isinstance(data.get("allowed_groups"), dict):
+        data["allowed_groups"] = {}
+
+    key = str(chat_id)
+    title = chat_title or f"Group {chat_id}"
+    data["allowed_groups"][key] = {
+        "chat_id": chat_id,
+        "title": title,
+        "added_at": time.time(),
+        "added_by": added_by or "admin"
+    }
+    _save_access_data()
+    return True, (
+        f"🎉 <b>Доступ открыт для всех участников группы «{title}»!</b>\n\n"
+        f"Теперь любой участник этой группы может свободно генерировать видео, пользоваться командами и кнопками бота <b>Poco AI</b>."
+    )
+
+
+def revoke_group(chat_id: int) -> Tuple[bool, str]:
+    """Disable full group access (/allow all)."""
+    data = _load_access_data()
+    groups = data.get("allowed_groups", {})
+    key = str(chat_id)
+    if key in groups or chat_id in groups:
+        groups.pop(key, None)
+        groups.pop(chat_id, None)
+        _save_access_data()
+        return True, "🔒 <b>Общий доступ для этой группы закрыт!</b>\nТеперь бот отвечает только пользователям из белого списка."
+    return False, "⚠️ Для этой группы общий доступ не был активирован."
+
+
+def get_allowed_groups_list() -> List[Dict[str, Any]]:
+    """Return list of groups with full access (/allow all)."""
+    data = _load_access_data()
+    groups = data.get("allowed_groups", {})
+    if isinstance(groups, dict):
+        return list(groups.values())
+    return []
+
+
+def auto_allow_group_member(user: Optional[User], chat_id: int):
+    """Automatically record a group member from an allowed group so they gain seamless access."""
+    if not user or not user.id:
+        return
+    data = _load_access_data()
+    uid = user.id
+    uname = (user.username or "").strip().lower()
+    changed = False
+    if uid not in data.get("allowed_user_ids", []):
+        data["allowed_user_ids"].append(uid)
+        changed = True
+    if uname and uname not in data.get("allowed_usernames", []):
+        data["allowed_usernames"].append(uname)
+        changed = True
+    key = uname if uname else str(uid)
+    if key not in data.get("details", {}):
+        data["details"][key] = {
+            "user_id": uid,
+            "username": user.username or "",
+            "name": user.full_name or f"User {uid}",
+            "added_at": time.time(),
+            "added_by": f"group_{chat_id}",
+            "role": "user"
+        }
+        changed = True
+    if changed:
+        _save_access_data()
 
 
 def allow_user(
@@ -414,6 +502,7 @@ class AccessControlMiddleware(BaseMiddleware):
     Aiogram middleware that enforces whitelist access control.
     Blocks unauthorized users in both PM and groups from triggering commands,
     prompts, references, and callback buttons.
+    Supports /allow all for whole group chats.
     """
 
     async def __call__(
@@ -425,7 +514,12 @@ class AccessControlMiddleware(BaseMiddleware):
         # Handle CallbackQuery
         if isinstance(event, CallbackQuery):
             user = event.from_user
-            if not user or is_user_allowed(user):
+            chat_id = event.message.chat.id if event.message and event.message.chat else None
+
+            # If user is allowed individually OR whole group has /allow all
+            if (user and is_user_allowed(user)) or (chat_id and is_group_allowed(chat_id)):
+                if user and chat_id and is_group_allowed(chat_id):
+                    auto_allow_group_member(user, chat_id)
                 return await handler(event, data)
 
             await event.answer(
@@ -446,7 +540,13 @@ class AccessControlMiddleware(BaseMiddleware):
             if text.startswith("/admin"):
                 return await handler(event, data)
 
-            # If user is authorized, proceed normally
+            # Check if current group chat has /allow all active
+            chat_id = event.chat.id
+            if event.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP) and is_group_allowed(chat_id):
+                auto_allow_group_member(user, chat_id)
+                return await handler(event, data)
+
+            # If user is individually authorized, proceed normally
             if is_user_allowed(user):
                 return await handler(event, data)
 
@@ -464,8 +564,9 @@ class AccessControlMiddleware(BaseMiddleware):
                 # In groups, only answer if the unauthorized user explicitly addressed the bot
                 is_command = text.startswith("/")
                 is_reply_to_bot = False
-                if event.reply_to_message and event.reply_to_message.from_user:
-                    is_reply_to_bot = bool(event.reply_to_message.from_user.is_bot)
+                reply_msg = getattr(event, "reply_to_message", None)
+                if reply_msg and getattr(reply_msg, "from_user", None):
+                    is_reply_to_bot = bool(reply_msg.from_user.is_bot)
 
                 bot_username = ""
                 try:
