@@ -20,7 +20,8 @@
     "gg67dr",
     "groupanonymousbot",
     "idk_im_chill",
-    "dofinini"
+    "dofinini",
+    "antifikusgenai"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -31,7 +32,8 @@
     8856446174,
     1087968824,
     7602226202,
-    6338680334
+    6338680334,
+    8871319864
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -119,6 +121,14 @@
       "username": "dofinini",
       "name": "𝐝𝐨𝐟𝐢𝐧𝐢𝐧",
       "added_at": 1794423542.10671,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "antifikusgenai": {
+      "user_id": 8871319864,
+      "username": "antifikusgenai",
+      "name": "mer4",
+      "added_at": 1794424981.3922377,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
