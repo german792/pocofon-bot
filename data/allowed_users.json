@@ -18,7 +18,8 @@
     "neurodollarr",
     "orew55",
     "gg67dr",
-    "groupanonymousbot"
+    "groupanonymousbot",
+    "idk_im_chill"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -27,7 +28,8 @@
     6773107503,
     8930485550,
     8856446174,
-    1087968824
+    1087968824,
+    7602226202
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -99,6 +101,14 @@
       "username": "GroupAnonymousBot",
       "name": "Group",
       "added_at": 1794422003.808224,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "idk_im_chill": {
+      "user_id": 7602226202,
+      "username": "idk_im_chill",
+      "name": "I don’t know",
+      "added_at": 1794422979.890158,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
