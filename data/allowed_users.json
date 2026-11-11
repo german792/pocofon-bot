@@ -1,0 +1,18 @@
+{
+  "admins": {
+    "usernames": [
+      "germanustinf",
+      "german792",
+      "german_ustinf"
+    ],
+    "user_ids": []
+  },
+  "allowed_usernames": [
+    "germanustinf",
+    "german792",
+    "german_ustinf"
+  ],
+  "allowed_user_ids": [],
+  "allowed_groups": {},
+  "details": {}
+}
