@@ -126,10 +126,10 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
             rows = [
                 [
                     InlineKeyboardButton(text="🔄 Сменить модель", callback_data=f"wstep:model:{owner_id}"),
-                    InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}")
+                    InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}", style="danger")
                 ],
                 [
-                    InlineKeyboardButton(text=btn_label, callback_data=f"gen:{owner_id}")
+                    InlineKeyboardButton(text=btn_label, callback_data=f"gen:{owner_id}", style="success")
                 ]
             ]
             return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -137,9 +137,9 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     # STEP 1: Model Selection
     if step == "model":
         rows = [
-            # Switcher row
+            # Switcher row (✅ text kept for older Telegram clients; style="primary" colors it on new ones)
             [
-                InlineKeyboardButton(text="✅ 🎬 Видео / Озвучка", callback_data=f"tab:video:{owner_id}"),
+                InlineKeyboardButton(text="✅ 🎬 Видео / Озвучка", callback_data=f"tab:video:{owner_id}", style="primary"),
                 InlineKeyboardButton(text="🖼 Генерация Фото", callback_data=f"tab:image:{owner_id}"),
             ]
         ]
@@ -148,9 +148,11 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
         for mkey in VIDEO_MODEL_KEYS:
             m = MODELS[mkey]
             lbl = m["short"]
-            if mkey == cur_model:
+            is_active = mkey == cur_model
+            btn_kwargs = {"style": "primary"} if is_active else {}
+            if is_active:
                 lbl = f"✅ {lbl}"
-            cur_row.append(InlineKeyboardButton(text=lbl, callback_data=f"sm:{mkey}:{owner_id}"))
+            cur_row.append(InlineKeyboardButton(text=lbl, callback_data=f"sm:{mkey}:{owner_id}", **btn_kwargs))
             if len(cur_row) == 2:
                 rows.append(cur_row)
                 cur_row = []
@@ -166,7 +168,8 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
             rows.append([
                 InlineKeyboardButton(
                     text=f"📎 Добавить фото-референс (до {ref_limit} шт.)",
-                    callback_data=f"ref_hint:{owner_id}"
+                    callback_data=f"ref_hint:{owner_id}",
+                    style="primary"
                 )
             ])
         else:
@@ -180,38 +183,38 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
                 rows.append([
                     InlineKeyboardButton(text=mode_lbl, callback_data=f"rmode:{owner_id}"),
                     InlineKeyboardButton(text=grid_lbl, callback_data=f"rgrid:{owner_id}"),
-                    InlineKeyboardButton(text="🗑 Очистить", callback_data=f"rclear:{owner_id}"),
+                    InlineKeyboardButton(text="🗑 Очистить", callback_data=f"rclear:{owner_id}", style="danger"),
                 ])
             else:
                 rows.append([
                     InlineKeyboardButton(text=f"📎 Референс: {ref_count} фото ✅", callback_data=f"ref_hint:{owner_id}"),
                     InlineKeyboardButton(text=grid_lbl, callback_data=f"rgrid:{owner_id}"),
-                    InlineKeyboardButton(text="🗑 Удалить", callback_data=f"rclear:{owner_id}"),
+                    InlineKeyboardButton(text="🗑 Удалить", callback_data=f"rclear:{owner_id}", style="danger"),
                 ])
 
         # Video Reference Row
         if draft.get("ref_video"):
             rows.append([
-                InlineKeyboardButton(text="🎞 Видео-референс прикреплен ✅ (Удалить 🗑)", callback_data=f"rclearvideo:{owner_id}")
+                InlineKeyboardButton(text="🎞 Видео-референс прикреплен ✅ (Удалить 🗑)", callback_data=f"rclearvideo:{owner_id}", style="danger")
             ])
         else:
             rows.append([
-                InlineKeyboardButton(text="🎞 Прикрепить видео (отправьте видеоролик)", callback_data=f"video_hint:{owner_id}")
+                InlineKeyboardButton(text="🎞 Прикрепить видео (отправьте видеоролик)", callback_data=f"video_hint:{owner_id}", style="primary")
             ])
 
         # Audio Reference Row
         if draft.get("audio_bytes"):
             rows.append([
-                InlineKeyboardButton(text="🎵 Аудио-референс прикреплен ✅ (Удалить 🗑)", callback_data=f"rclearaudio:{owner_id}")
+                InlineKeyboardButton(text="🎵 Аудио-референс прикреплен ✅ (Удалить 🗑)", callback_data=f"rclearaudio:{owner_id}", style="danger")
             ])
         else:
             rows.append([
-                InlineKeyboardButton(text="🎵 Прикрепить аудио (отправьте голос / mp3)", callback_data=f"audio_hint:{owner_id}")
+                InlineKeyboardButton(text="🎵 Прикрепить аудио (отправьте голос / mp3)", callback_data=f"audio_hint:{owner_id}", style="primary")
             ])
 
         # Cancel button
         rows.append([
-            InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}")
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}", style="danger")
         ])
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -227,8 +230,10 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
         rows = []
         cur_row = []
         for d in range(1, max_dur + 1):
-            lbl = f"✅ {d}с" if d == cur_dur else f"{d}с"
-            cur_row.append(InlineKeyboardButton(text=lbl, callback_data=f"sd:{d}:{owner_id}"))
+            is_active = d == cur_dur
+            lbl = f"✅ {d}с" if is_active else f"{d}с"
+            btn_kwargs = {"style": "primary"} if is_active else {}
+            cur_row.append(InlineKeyboardButton(text=lbl, callback_data=f"sd:{d}:{owner_id}", **btn_kwargs))
             if len(cur_row) == 5:
                 rows.append(cur_row)
                 cur_row = []
@@ -237,7 +242,7 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
 
         rows.append([
             InlineKeyboardButton(text="⬅️ Назад к выбору модели", callback_data=f"wstep:model:{owner_id}"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}")
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}", style="danger")
         ])
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -255,8 +260,10 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     # Resolution Row
     res_buttons = []
     for r in RESOLUTION_OPTIONS:
-        label = f"✅ {r}" if r == res else r
-        res_buttons.append(InlineKeyboardButton(text=label, callback_data=f"sr:{r}:{owner_id}"))
+        is_active = r == res
+        label = f"✅ {r}" if is_active else r
+        btn_kwargs = {"style": "primary"} if is_active else {}
+        res_buttons.append(InlineKeyboardButton(text=label, callback_data=f"sr:{r}:{owner_id}", **btn_kwargs))
     rows.append(res_buttons)
 
     # Ratio Row
@@ -264,15 +271,18 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     ratio_buttons = []
     for rat in RATIO_OPTIONS:
         lbl = ratio_labels.get(rat, rat)
-        if rat == ratio:
+        is_active = rat == ratio
+        btn_kwargs = {"style": "primary"} if is_active else {}
+        if is_active:
             lbl = f"✅ {lbl}"
-        ratio_buttons.append(InlineKeyboardButton(text=lbl, callback_data=f"sa:{rat}:{owner_id}"))
+        ratio_buttons.append(InlineKeyboardButton(text=lbl, callback_data=f"sa:{rat}:{owner_id}", **btn_kwargs))
     rows.append(ratio_buttons)
 
     # Audio toggle for models supporting audio generation
     if minfo.get("has_audio") and minfo.get("backend") != "minimax":
         audio_label = "🔊 Звук: Вкл ✅" if audio else "🔇 Звук: Выкл"
-        rows.append([InlineKeyboardButton(text=audio_label, callback_data=f"tg:{'1' if not audio else '0'}:{owner_id}")])
+        audio_kwargs = {"style": "success"} if audio else {}
+        rows.append([InlineKeyboardButton(text=audio_label, callback_data=f"tg:{'1' if not audio else '0'}:{owner_id}", **audio_kwargs)])
 
     # Navigation buttons to return to Step 1 or Step 2
     rows.append([
@@ -284,8 +294,8 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     cost = calculate_credit_cost(cur_model, dur, res)
     btn_text = f"🚀 Сгенерировать видео (~{cost} кр.)" if cost > 0 else "🚀 Сгенерировать видео"
     rows.append([
-        InlineKeyboardButton(text=btn_text, callback_data=f"gen:{owner_id}"),
-        InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}")
+        InlineKeyboardButton(text=btn_text, callback_data=f"gen:{owner_id}", style="success"),
+        InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}", style="danger")
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -306,7 +316,7 @@ def build_image_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     # Top Switcher Row: Video Menu vs Image Menu
     switcher_row = [
         InlineKeyboardButton(text="🎬 Видео / Озвучка", callback_data=f"tab:video:{owner_id}"),
-        InlineKeyboardButton(text="✅ 🖼 Генерация Фото", callback_data=f"tab:image:{owner_id}"),
+        InlineKeyboardButton(text="✅ 🖼 Генерация Фото", callback_data=f"tab:image:{owner_id}", style="primary"),
     ]
 
     # Image Models grid (2 per row)
@@ -315,9 +325,11 @@ def build_image_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     for mkey in IMAGE_MODEL_KEYS:
         m = MODELS[mkey]
         lbl = m["short"]
-        if mkey == cur_model:
+        is_active = mkey == cur_model
+        btn_kwargs = {"style": "primary"} if is_active else {}
+        if is_active:
             lbl = f"✅ {lbl}"
-        cur_row.append(InlineKeyboardButton(text=lbl, callback_data=f"sm:{mkey}:{owner_id}"))
+        cur_row.append(InlineKeyboardButton(text=lbl, callback_data=f"sm:{mkey}:{owner_id}", **btn_kwargs))
         if len(cur_row) == 2:
             model_rows.append(cur_row)
             cur_row = []
@@ -333,7 +345,8 @@ def build_image_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
         rows.append([
             InlineKeyboardButton(
                 text=f"📎 Добавить фото-референс (до {ref_limit} шт.)",
-                callback_data=f"ref_hint:{owner_id}"
+                callback_data=f"ref_hint:{owner_id}",
+                style="primary"
             )
         ])
     else:
@@ -344,29 +357,33 @@ def build_image_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
                 callback_data=f"ref_hint:{owner_id}"
             ),
             InlineKeyboardButton(text=grid_lbl, callback_data=f"rgrid:{owner_id}"),
-            InlineKeyboardButton(text="🗑 Очистить", callback_data=f"rclear:{owner_id}"),
+            InlineKeyboardButton(text="🗑 Очистить", callback_data=f"rclear:{owner_id}", style="danger"),
         ])
 
     # Image Quality / Resolution Row (1K, 2K, 4K)
     res_buttons = []
     for r in IMAGE_RESOLUTION_OPTIONS:
-        lbl = f"✅ {r}" if r == res else r
-        res_buttons.append(InlineKeyboardButton(text=lbl, callback_data=f"sir:{r}:{owner_id}"))
+        is_active = r == res
+        lbl = f"✅ {r}" if is_active else r
+        btn_kwargs = {"style": "primary"} if is_active else {}
+        res_buttons.append(InlineKeyboardButton(text=lbl, callback_data=f"sir:{r}:{owner_id}", **btn_kwargs))
     rows.append(res_buttons)
 
     # Image Aspect Ratio Row (1:1, 16:9, 9:16, 4:3, 3:4)
     ratio_buttons = []
     for rat in IMAGE_RATIO_OPTIONS:
-        lbl = f"✅ {rat}" if rat == ratio else rat
-        ratio_buttons.append(InlineKeyboardButton(text=lbl, callback_data=f"sia:{rat}:{owner_id}"))
+        is_active = rat == ratio
+        lbl = f"✅ {rat}" if is_active else rat
+        btn_kwargs = {"style": "primary"} if is_active else {}
+        ratio_buttons.append(InlineKeyboardButton(text=lbl, callback_data=f"sia:{rat}:{owner_id}", **btn_kwargs))
     rows.append(ratio_buttons)
 
     # Action row
     cost = calculate_credit_cost(cur_model, 1, res)
     btn_text = f"🎨 Сгенерировать фото (~{cost} кр.)" if cost > 0 else "🎨 Сгенерировать фото"
     rows.append([
-        InlineKeyboardButton(text=btn_text, callback_data=f"gen:{owner_id}"),
-        InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}")
+        InlineKeyboardButton(text=btn_text, callback_data=f"gen:{owner_id}", style="success"),
+        InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}", style="danger")
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -649,8 +666,8 @@ async def handle_start_and_help(message: Message, state: FSMContext):
 
     start_kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🎬 Меню генерации видео", callback_data=f"open_menu:video:{uid}"),
-            InlineKeyboardButton(text="🖼 Меню генерации фото", callback_data=f"open_menu:image:{uid}"),
+            InlineKeyboardButton(text="🎬 Меню генерации видео", callback_data=f"open_menu:video:{uid}", style="success"),
+            InlineKeyboardButton(text="🖼 Меню генерации фото", callback_data=f"open_menu:image:{uid}", style="primary"),
         ]
     ])
 
@@ -1408,8 +1425,8 @@ async def process_photo_batch(
         await state.update_data(image_bytes=existing_refs[0], ref_images=existing_refs)
         quick_kb = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="🎬 Открыть меню Видео", callback_data=f"open_menu:video:{user_id}"),
-                InlineKeyboardButton(text="🖼 Открыть меню Фото", callback_data=f"open_menu:image:{user_id}"),
+                InlineKeyboardButton(text="🎬 Открыть меню Видео", callback_data=f"open_menu:video:{user_id}", style="success"),
+                InlineKeyboardButton(text="🖼 Открыть меню Фото", callback_data=f"open_menu:image:{user_id}", style="primary"),
             ]
         ])
         await message.answer(
@@ -1748,8 +1765,10 @@ async def handle_model_command(message: Message):
     buttons = []
     for mkey, minfo in MODELS.items():
         cat_icon = "🖼" if minfo.get("category") == "image" else "🎬"
-        lbl = f"✅ {cat_icon} {minfo['name']}" if mkey == cur_model else f"{cat_icon} {minfo['name']}"
-        buttons.append([InlineKeyboardButton(text=lbl, callback_data=f"pref_mod:{mkey}:{user_id}")])
+        is_active = mkey == cur_model
+        lbl = f"✅ {cat_icon} {minfo['name']}" if is_active else f"{cat_icon} {minfo['name']}"
+        btn_kwargs = {"style": "primary"} if is_active else {}
+        buttons.append([InlineKeyboardButton(text=lbl, callback_data=f"pref_mod:{mkey}:{user_id}", **btn_kwargs)])
 
     await message.reply(
         f"🤖 <b>Выбор модели по умолчанию для {get_user_display_name(message.from_user)}</b>\n\n"
@@ -1783,8 +1802,10 @@ async def on_set_pref_model(call: CallbackQuery):
     buttons = []
     for k, minfo in MODELS.items():
         cat_icon = "🖼" if minfo.get("category") == "image" else "🎬"
-        lbl = f"✅ {cat_icon} {minfo['name']}" if k == mkey else f"{cat_icon} {minfo['name']}"
-        buttons.append([InlineKeyboardButton(text=lbl, callback_data=f"pref_mod:{k}:{owner_id}")])
+        is_active = k == mkey
+        lbl = f"✅ {cat_icon} {minfo['name']}" if is_active else f"{cat_icon} {minfo['name']}"
+        btn_kwargs = {"style": "primary"} if is_active else {}
+        buttons.append([InlineKeyboardButton(text=lbl, callback_data=f"pref_mod:{k}:{owner_id}", **btn_kwargs)])
 
     try:
         await call.message.edit_text(
