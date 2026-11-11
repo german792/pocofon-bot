@@ -19,7 +19,8 @@
     "orew55",
     "gg67dr",
     "groupanonymousbot",
-    "idk_im_chill"
+    "idk_im_chill",
+    "dofinini"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -29,7 +30,8 @@
     8930485550,
     8856446174,
     1087968824,
-    7602226202
+    7602226202,
+    6338680334
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -109,6 +111,14 @@
       "username": "idk_im_chill",
       "name": "I don’t know",
       "added_at": 1794422979.890158,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "dofinini": {
+      "user_id": 6338680334,
+      "username": "dofinini",
+      "name": "𝐝𝐨𝐟𝐢𝐧𝐢𝐧",
+      "added_at": 1794423542.10671,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
