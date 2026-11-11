@@ -17,6 +17,30 @@
   "allowed_user_ids": [
     7148172629
   ],
-  "allowed_groups": {},
-  "details": {}
+  "allowed_groups": {
+    "-1004328649380": {
+      "chat_id": -1004328649380,
+      "title": "POCO AI PRIVATE 1",
+      "added_at": 1794421245.6482408,
+      "added_by": "@GermanUstinf"
+    }
+  },
+  "details": {
+    "7148172629": {
+      "user_id": 7148172629,
+      "username": "",
+      "name": "User 7148172629",
+      "added_at": 1794421245.7804193,
+      "added_by": "group_admin_-1004328649380",
+      "role": "user"
+    },
+    "germanustinf": {
+      "user_id": 7148172629,
+      "username": "GermanUstinf",
+      "name": "Poco",
+      "added_at": 1794421254.160145,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    }
+  }
 }
