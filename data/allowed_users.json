@@ -14,11 +14,13 @@
     "german792",
     "german_ustinf",
     "boborp4",
-    "kouue"
+    "kouue",
+    "neurodollarr"
   ],
   "allowed_user_ids": [
     7148172629,
-    8648040165
+    8648040165,
+    8614961056
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -59,6 +61,14 @@
       "name": "@Kouue",
       "added_at": 1794421295.413596,
       "added_by": "@GermanUstinf",
+      "role": "user"
+    },
+    "neurodollarr": {
+      "user_id": 8614961056,
+      "username": "Neurodollarr",
+      "name": "Eblan",
+      "added_at": 1794421308.2875814,
+      "added_by": "group_-1004328649380",
       "role": "user"
     }
   }
