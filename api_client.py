@@ -743,6 +743,15 @@ class QwenImageClient:
             return resp.content
 
 
+# Промпт предобработки, как в запросе с сайта (ставит позу и кадр). Меняется здесь.
+MOTION_PREPROCESS_PROMPT = (
+    "Use the uploaded user image as the main identity reference. Preserve the user's facial features, "
+    "hairstyle, body proportions, clothing identity, and overall visual realism. Keep the original "
+    "environment, lighting style, atmosphere, and scene aesthetics from the user image intact. "
+    "Maintain cinematic realism, realistic anatomy, and coherent perspective."
+)
+
+
 class DaVinciClient:
     """Unified Client for DaVinci AI Studio (api-dev.davinci.ai):
     - Video models: Seedance 2.5, Seedance 2.0, Seedance 2.0 Fast, Seedance 2.0 Mini, Seedance 1.5 Pro,
@@ -902,6 +911,47 @@ class DaVinciClient:
             pass
 
         return final_path
+
+    async def create_motion_control_task(
+        self,
+        image_bytes: bytes,
+        video_bytes: bytes,
+        resolution: str = "720p",
+        keep_sound: bool = True,
+    ) -> str:
+        """Kling Motion Control 3.0: фото персонажа + видео с движением → processId."""
+        await self.ensure_valid_token()
+        image_path = await self.upload_media(image_bytes, ext=".jpg", content_type="image/jpeg")
+        video_path = await self.upload_media(video_bytes, ext=".mp4", content_type="video/mp4")
+        res = resolution if resolution in ("720p", "1080p") else "720p"
+        payload: Dict[str, Any] = {
+            "modelId": "klingMotionControl3",
+            "generationMode": "workflow",
+            "imagePath": image_path,
+            "inputVideos": [video_path],
+            "characterOrientation": "video",
+            "generateAudio": False,
+            "keepOriginalSound": bool(keep_sound),
+            "resolution": res,
+            "preprocessPrompt": MOTION_PREPROCESS_PROMPT,
+        }
+        logger.info(f"[motion/process] resolution={res} image={image_path} video={video_path}")
+        resp = await self.client.post(f"{self.base_url}/video/process", json=payload, headers=self._headers())
+        if resp.status_code == 401 and self.refresh_token:
+            await self.ensure_valid_token(force_refresh=True)
+            resp = await self.client.post(f"{self.base_url}/video/process", json=payload, headers=self._headers())
+        if resp.status_code not in (200, 201):
+            try:
+                err = resp.json()
+                err_msg = err.get("data") or err.get("message") or err.get("error") or resp.text
+            except Exception:
+                err_msg = resp.text
+            raise RuntimeError(f"Ошибка генерации Motion Control ({resp.status_code}): {err_msg}")
+        data = resp.json().get("data")
+        process_id = data[0] if isinstance(data, list) and data else str(data or "")
+        if not process_id:
+            raise RuntimeError("Сервер не вернул id задачи Motion Control")
+        return process_id
 
     async def create_video_task(
         self,
@@ -1123,7 +1173,7 @@ class DaVinciClient:
                 err_msg = err_data.get("data") or err_data.get("message") or err_data.get("error") or resp.text
             except Exception:
                 err_msg = resp.text
-            raise RuntimeError(f"Ошибка DaVinci Video ({resp.status_code}): {err_msg}")
+            raise RuntimeError(f"Ошибка генерации видео ({resp.status_code}): {err_msg}")
 
         data = resp.json().get("data")
         process_id = data[0] if isinstance(data, list) and data else str(data or "")

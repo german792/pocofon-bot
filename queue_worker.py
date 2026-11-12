@@ -49,6 +49,27 @@ def _quote(text: str, limit: int = 500) -> str:
     return f"<blockquote expandable>{html.escape(text)}</blockquote>"
 
 
+def _telegram_photo_ready(path: Path) -> Path:
+    """Telegram отклоняет фото тяжелее ~10 МБ или с суммой сторон больше 10000 px.
+    Большие 2K/4K результаты переводим в JPEG нужного размера; маленькие не трогаем."""
+    from PIL import Image
+    with Image.open(path) as src:
+        w, h = src.size
+        small_enough = path.stat().st_size <= 9_500_000 and max(w, h) <= 4096 and (w + h) <= 9500
+        if small_enough:
+            return path
+        im = src.convert("RGB")
+    scale = min(1.0, 2560 / max(w, h), 9000 / (w + h))
+    if scale < 1.0:
+        im = im.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
+    out = path.with_name(path.stem + ".tg.jpg")
+    for q in (95, 90, 85, 80, 75):
+        im.save(out, "JPEG", quality=q, optimize=True)
+        if out.stat().st_size <= 9_500_000:
+            break
+    return out
+
+
 RESULT_EFFECT_ID = "5046509860389126442"  # 🎉 message effect (private chats only)
 SPINNER_FRAMES = ("🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘")
 
@@ -269,7 +290,7 @@ class GenerationQueue:
                 self.queue.task_done()
 
     def _get_client_for_backend(self, backend: str):
-        if backend in ("davinci", "davinci_image", "davinci_voice"):
+        if backend in ("davinci", "davinci_image", "davinci_voice", "davinci_motion"):
             return self.davinci_client
         if backend == "v2":
             return self.v2_client
@@ -343,20 +364,28 @@ class GenerationQueue:
                 )
             )
 
-            try:
-                logger.info(f"Downloading image from {direct_link}...")
-                img_bytes = await client.download_image(media_url)
+            temp_file = None
+            img_bytes = None
+            for dl_attempt in range(1, 4):
+                try:
+                    logger.info(f"Downloading image from {direct_link} (attempt {dl_attempt})...")
+                    img_bytes = await asyncio.wait_for(client.download_image(media_url), timeout=120.0)
+                    if img_bytes:
+                        break
+                except Exception as dl_err:
+                    logger.warning(f"Image download attempt {dl_attempt} failed: {dl_err}")
+                    await asyncio.sleep(2)
+            if img_bytes:
                 raw_file.write_bytes(img_bytes)
-
-                logger.info("Applying watermark to image...")
-                wm_ok = await apply_watermark_image(raw_file, temp_file, username=job.user_name)
-                if not wm_ok or not temp_file.exists() or temp_file.stat().st_size == 0:
-                    temp_file = raw_file
-                else:
-                    raw_file.unlink(missing_ok=True)
-            except Exception as dl_err:
-                logger.error(f"Image download/watermark failed: {dl_err}", exc_info=True)
-                temp_file = raw_file if raw_file.exists() else None
+                temp_file = raw_file
+                try:
+                    wm_out = VIDEOS_DIR / f"{job.model_key}_{job.user_id}_{ts}.png"
+                    wm_ok = await apply_watermark_image(raw_file, wm_out, username=job.user_name)
+                    if wm_ok and wm_out.exists() and wm_out.stat().st_size > 0:
+                        raw_file.unlink(missing_ok=True)
+                        temp_file = wm_out
+                except Exception as wm_err:
+                    logger.warning(f"Watermark skipped: {wm_err}")
 
             await self._update_status(
                 job,
@@ -377,31 +406,69 @@ class GenerationQueue:
                 f"<b>{html.escape(str(model_name))}</b>  ·  {job.resolution} · {job.ratio}{ref_part}  ·  ⚡ {total_elapsed} с"
             )
 
-            if temp_file and temp_file.exists():
-                photo_input = FSInputFile(str(temp_file), filename=f"image_{job.user_id}.png")
-                grid_kb = _result_keyboard(
-                    job.user_id, "image",
-                    extra_rows=[[InlineKeyboardButton(text="🔲 Наложить толстую сетку", callback_data=f"grid_gen:{job.user_id}")]],
+            if not (temp_file and temp_file.exists()):
+                await self._update_status(
+                    job,
+                    "❌ <b>Изображение не получилось забрать с сервера.</b>\nПопробуйте ещё раз: баланс не списан, если генерация не прошла."
                 )
-                for attempt in range(1, 3):
-                    try:
-                        await self.bot.send_photo(
-                            chat_id=job.chat_id,
-                            photo=photo_input,
-                            caption=caption,
-                            parse_mode="HTML",
-                            reply_to_message_id=job.reply_to_message_id,
-                            allow_sending_without_reply=True,
-                            reply_markup=grid_kb,
-                        )
-                        break
-                    except Exception as upload_err:
-                        logger.warning(f"send_photo attempt {attempt} failed: {upload_err}")
-                        await asyncio.sleep(2)
+                return
+
+            grid_kb = _result_keyboard(
+                job.user_id, "image",
+                extra_rows=[[InlineKeyboardButton(text="🔲 Наложить толстую сетку", callback_data=f"grid_gen:{job.user_id}")]],
+            )
+            try:
+                send_path = await asyncio.to_thread(_telegram_photo_ready, temp_file)
+            except Exception as prep_err:
+                logger.warning(f"Photo prep failed, sending as is: {prep_err}")
+                send_path = temp_file
+
+            sent_ok = False
+            for attempt in range(1, 3):
                 try:
-                    temp_file.unlink(missing_ok=True)
+                    await self.bot.send_photo(
+                        chat_id=job.chat_id,
+                        photo=FSInputFile(str(send_path), filename=f"image_{job.user_id}{send_path.suffix}"),
+                        caption=caption,
+                        parse_mode="HTML",
+                        reply_to_message_id=job.reply_to_message_id,
+                        allow_sending_without_reply=True,
+                        reply_markup=grid_kb,
+                    )
+                    sent_ok = True
+                    break
+                except Exception as upload_err:
+                    logger.warning(f"send_photo attempt {attempt} failed: {upload_err}")
+                    await asyncio.sleep(2)
+            if not sent_ok:
+                # Telegram не принял как фото (слишком большой): шлём файлом без сжатия
+                try:
+                    await self.bot.send_document(
+                        chat_id=job.chat_id,
+                        document=FSInputFile(str(send_path), filename=f"image_{job.user_id}{send_path.suffix}"),
+                        caption=caption,
+                        parse_mode="HTML",
+                        reply_to_message_id=job.reply_to_message_id,
+                        allow_sending_without_reply=True,
+                        reply_markup=grid_kb,
+                    )
+                    sent_ok = True
+                except Exception as doc_err:
+                    logger.error(f"send_document failed too: {doc_err}")
+
+            for p in {temp_file, send_path, raw_file}:
+                try:
+                    if p and p.exists():
+                        p.unlink()
                 except Exception:
                     pass
+
+            if not sent_ok:
+                await self._update_status(
+                    job,
+                    "❌ <b>Не удалось отправить изображение.</b>\nПопробуйте ещё раз, можно взять меньшее разрешение."
+                )
+                return
 
             try:
                 await self.bot.delete_message(chat_id=job.chat_id, message_id=job.status_message_id)
@@ -652,6 +719,16 @@ class GenerationQueue:
                     ref_mode=job.ref_mode,
                     ref_video=job.ref_video,
                     audio_bytes=job.audio_bytes,
+                )
+
+            elif backend == "davinci_motion":
+                imgs = [b for b in all_refs if b]
+                if not imgs or not job.ref_video:
+                    raise RuntimeError("Для Motion Control нужны фото персонажа и видео с движением")
+                task_id = await self.davinci_client.create_motion_control_task(
+                    image_bytes=imgs[0],
+                    video_bytes=job.ref_video,
+                    resolution=job.resolution,
                 )
 
             elif backend == "davinci_image":

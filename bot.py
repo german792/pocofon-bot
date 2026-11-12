@@ -47,6 +47,7 @@ from config import (
     IMAGE_RATIO_OPTIONS,
     calculate_credit_cost,
     VOICE_MODEL_KEY,
+    MOTION_MODEL_KEY,
     VOICES,
     DEFAULT_VOICE_ID,
 )
@@ -122,7 +123,7 @@ def voice_text_of(draft: Dict[str, Any]) -> str:
 
 def tabs_row(active: str, owner_id: int) -> List[InlineKeyboardButton]:
     """Three top tabs: video / photo / voice. ✅ stays for old clients, style=primary colors it on new ones."""
-    items = [("video", "🎬 Видео"), ("image", "🖼 Фото"), ("voice", "🎙 Голос")]
+    items = [("video", "🎬 Видео"), ("image", "🖼 Фото"), ("motion", "🕺 Motion")]
     row = []
     for key, label in items:
         if key == active:
@@ -138,42 +139,26 @@ def build_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeybo
     menu_mode = draft.get("menu_mode", "video")
     if menu_mode == "image":
         return build_image_settings_keyboard(draft, owner_id)
-    if menu_mode == "voice":
-        return build_voice_settings_keyboard(draft, owner_id)
+    if menu_mode == "motion":
+        return build_motion_settings_keyboard(draft, owner_id)
     return build_video_settings_keyboard(draft, owner_id)
 
 
-def build_voice_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeyboardMarkup:
-    """Voice tab: mode (text→voice / revoice), voice picker, generate."""
-    mode = draft.get("voice_mode", "tts")
-    cur_voice = draft.get("voice_id", DEFAULT_VOICE_ID)
-    rows = [tabs_row("voice", owner_id)]
-
-    tts_on, ch_on = mode == "tts", mode == "changer"
-    rows.append([
-        InlineKeyboardButton(text=("✅ " if tts_on else "") + "✍️ Текст → голос", callback_data=f"vmode:tts:{owner_id}", **({"style": "primary"} if tts_on else {})),
-        InlineKeyboardButton(text=("✅ " if ch_on else "") + "🎤 Переозвучка", callback_data=f"vmode:changer:{owner_id}", **({"style": "primary"} if ch_on else {})),
-    ])
-
-    row = []
-    for i, v in enumerate(VOICES):
-        active = v["id"] == cur_voice
-        lbl = f"{v['emoji']} {v['name']}"
-        if active:
-            lbl = f"✅ {lbl}"
-        row.append(InlineKeyboardButton(text=lbl, callback_data=f"vvoice:{i}:{owner_id}", **({"style": "primary"} if active else {})))
-        if len(row) == 3:
-            rows.append(row)
-            row = []
-    if row:
-        rows.append(row)
-
-    ready = bool(draft.get("audio_bytes")) if mode == "changer" else bool(voice_text_of(draft))
-    cost = calculate_credit_cost(VOICE_MODEL_KEY, 0, "")
-    label = "🎙 Озвучить" if mode == "tts" else "🎤 Переозвучить"
-    if cost > 0:
-        label += f" · ~{cost} кр."
-    rows.append([InlineKeyboardButton(text=label, callback_data=f"gen:{owner_id}", **({"style": "success"} if ready else {}))])
+def build_motion_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeyboardMarkup:
+    """Motion Control: resolution, launch, cancel. Photo and video are sent into the chat."""
+    cur_res = draft.get("resolution", "720p")
+    rows = [tabs_row("motion", owner_id)]
+    res_row = []
+    for r in ("720p", "1080p"):
+        active = r == cur_res
+        res_row.append(InlineKeyboardButton(
+            text=("✅ " if active else "") + r,
+            callback_data=f"mres:{r}:{owner_id}",
+            **({"style": "primary"} if active else {}),
+        ))
+    rows.append(res_row)
+    ready = bool(draft.get("image_bytes")) and bool(draft.get("ref_video"))
+    rows.append([InlineKeyboardButton(text="🕺 Запустить", callback_data=f"gen:{owner_id}", **({"style": "success"} if ready else {}))])
     rows.append([InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}", style="danger")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -516,27 +501,27 @@ def format_draft_text(draft: Dict[str, Any]) -> str:
     menu_mode = draft.get("menu_mode", "video")
     if menu_mode == "image":
         return format_image_draft_text(draft)
-    if menu_mode == "voice":
-        return format_voice_draft_text(draft)
+    if menu_mode == "motion":
+        return format_motion_draft_text(draft)
     return format_video_draft_text(draft)
 
 
-def format_voice_draft_text(draft: Dict[str, Any]) -> str:
-    mode = draft.get("voice_mode", "tts")
-    voice = next((v for v in VOICES if v["id"] == draft.get("voice_id")), VOICES[0])
-    if mode == "changer":
-        has_audio = bool(draft.get("audio_bytes"))
-        body = (
-            "🎤 <b>Переозвучка</b> — голос из записи меняется на выбранный\n"
-            + ("Запись получена ✅" if has_audio else "Отправь голосовое или аудио в чат 👇")
-        )
+def format_motion_draft_text(draft: Dict[str, Any]) -> str:
+    has_img = bool(draft.get("image_bytes"))
+    has_vid = bool(draft.get("ref_video"))
+    res = draft.get("resolution", "720p")
+    step1 = "✅ Фото персонажа" if has_img else "1️⃣ Пришли фото персонажа"
+    if has_vid:
+        step2 = "✅ Видео с движением"
+    elif has_img:
+        step2 = "2️⃣ Пришли видео с движением"
     else:
-        text = voice_text_of(draft)
-        body = (
-            "✍️ <b>Текст → голос</b>\n"
-            + (f"<blockquote expandable>{html.escape(text[:500])}</blockquote>" if text else "Напиши текст сообщением в чат 👇")
-        )
-    return f"🎙 <b>Голос</b> · {voice['emoji']} {voice['name']}\n\n{body}"
+        step2 = "2️⃣ Видео с движением (после фото)"
+    return (
+        f"🕺 <b>Motion Control</b> · {res}\n\n"
+        f"{step1}\n{step2}\n\n"
+        "<i>Персонаж повторит движения из видео. Длительность берётся из видео.</i>"
+    )
 
 
 def format_video_draft_text(draft: Dict[str, Any]) -> str:
@@ -674,6 +659,22 @@ def format_image_draft_text(draft: Dict[str, Any]) -> str:
     )
 
 
+DRAFT_IDLE_SEC = 15 * 60  # черновик живёт 15 минут без действий
+
+
+def touch_draft(draft: Dict[str, Any]) -> None:
+    draft["touched_at"] = time.time()
+
+
+def fresh_draft(user_id: int) -> Optional[Dict[str, Any]]:
+    """Active draft only. Stale drafts are dropped so old menus stop catching new messages."""
+    d = user_drafts.get(user_id)
+    if d and time.time() - d.get("touched_at", 0) > DRAFT_IDLE_SEC:
+        user_drafts.pop(user_id, None)
+        return None
+    return d
+
+
 def create_draft_for_user(
     user_id: int,
     prompt: str,
@@ -685,7 +686,7 @@ def create_draft_for_user(
     audio_bytes: Optional[bytes] = None,
     ref_video: Optional[bytes] = None,
 ) -> Dict[str, Any]:
-    prev_draft = user_drafts.get(user_id)
+    prev_draft = fresh_draft(user_id)
     if ref_video is None and prev_draft:
         ref_video = prev_draft.get("ref_video")
     if audio_bytes is None and prev_draft:
@@ -699,8 +700,8 @@ def create_draft_for_user(
         refs.append(image_bytes)
 
     active_model = prefs["image_model_key"] if menu_mode == "image" else prefs["model_key"]
-    if menu_mode == "voice":
-        active_model = VOICE_MODEL_KEY
+    if menu_mode == "motion":
+        active_model = MOTION_MODEL_KEY
     if menu_mode == "image" and active_model not in IMAGE_MODEL_KEYS:
         active_model = DEFAULT_IMAGE_MODEL
     elif menu_mode == "video" and active_model not in VIDEO_MODEL_KEYS:
@@ -724,8 +725,6 @@ def create_draft_for_user(
         "ref_mode": prefs.get("ref_mode", "ref"),
         "menu_mode": menu_mode,
         "step": "model" if menu_mode == "video" else "main",
-        "voice_id": prefs.get("voice_id", DEFAULT_VOICE_ID),
-        "voice_mode": "changer" if (menu_mode == "voice" and audio_bytes) else prefs.get("voice_mode", "tts"),
         "model_key": active_model,
         "duration": init_dur,
         "resolution": prefs["resolution"],
@@ -741,8 +740,11 @@ def create_draft_for_user(
         "menu_message_id": None,
         "menu_chat_id": None,
     }
+    if menu_mode == "motion":
+        draft["resolution"] = "720p"
     sync_draft_references(draft)
     user_drafts[user_id] = draft
+    touch_draft(draft)
     return draft
 
 
@@ -759,7 +761,7 @@ async def handle_start_and_help(message: Message, state: FSMContext):
         [
             InlineKeyboardButton(text="🎬 Видео", callback_data=f"open_menu:video:{uid}", style="success"),
             InlineKeyboardButton(text="🖼 Фото", callback_data=f"open_menu:image:{uid}", style="primary"),
-            InlineKeyboardButton(text="🎙 Голос", callback_data=f"open_menu:voice:{uid}", style="primary"),
+            InlineKeyboardButton(text="🕺 Motion", callback_data=f"open_menu:motion:{uid}", style="primary"),
         ]
     ])
 
@@ -771,7 +773,7 @@ async def handle_start_and_help(message: Message, state: FSMContext):
     )
     text = (
         f"👋 <b>{html.escape(first_name)}, это Poco AI</b>\n"
-        f"Видео, фото и озвучка за пару тапов.\n\n"
+        f"Видео, фото и Motion за пару тапов.\n\n"
         f"{how} 👇\n\n"
         f"<blockquote>📎 Фото с подписью станет референсом\n"
         f"💳 /balance · 🔲 /grid · 🤖 /model</blockquote>"
@@ -1522,7 +1524,7 @@ async def handle_balance_command(message: Message, queue: GenerationQueue):
         auto_refill = "Включено ✅" if data["auto_refill"] else "Выключено ❌"
 
         text = (
-            f"💳 <b>Баланс аккаунта DaVinci AI</b>\n\n"
+            f"💳 <b>Баланс Poco AI</b>\n\n"
             f"💰 <b>Всего кредитов:</b> <code>{total:,}</code>\n"
             f"├ <i>Пополняемые (Consumable):</i> <code>{consumable:,}</code>\n"
             f"└ <i>Тарифные (Plan):</i> <code>{plan:,}</code>\n\n"
@@ -1549,6 +1551,7 @@ MEDIA_GROUP_DEBOUNCE_SEC = 1.5
 
 
 async def show_or_update_menu(message: Message, bot: Bot, draft: Dict[str, Any], user_id: int):
+    touch_draft(draft)
     """Edit the already open settings menu in place (no duplicate menus), or send a new one."""
     text = format_draft_text(draft)
     kb = build_settings_keyboard(draft, user_id)
@@ -1632,7 +1635,7 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
             or f"@{bot_info.username}".lower() in caption.lower()
             or (message.reply_to_message and message.reply_to_message.from_user
                 and message.reply_to_message.from_user.id == bot_info.id)
-            or user_id in user_drafts
+            or fresh_draft(user_id) is not None
         )
         if not addressed:
             return
@@ -1650,13 +1653,20 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
     if not video_bytes:
         return
 
+    draft_m = fresh_draft(user_id)
+    if draft_m and draft_m.get("menu_mode") == "motion":
+        draft_m["ref_video"] = video_bytes
+        draft_m["model_key"] = MOTION_MODEL_KEY
+        await show_or_update_menu(message, bot, draft_m, user_id)
+        return
+
     logger.info(f"[refs] video reference from user {user_id}: {len(video_bytes)} bytes, caption={bool(clean_prompt)}")
 
     # Extract first frame and audio track from the reference video
     first_frame = await extract_frame_from_video(video_bytes)
     video_audio = await extract_audio_from_video(video_bytes)
 
-    draft = user_drafts.get(user_id)
+    draft = fresh_draft(user_id)
     if draft and draft.get("menu_mode", "video") == "video":
         if clean_prompt:
             draft["prompt"] = clean_prompt
@@ -1737,6 +1747,14 @@ async def handle_photo(message: Message, bot: Bot, state: FSMContext):
             img_bytes=img_bytes,
         )
 
+    draft_m = fresh_draft(message.from_user.id)
+    if img_bytes and draft_m and draft_m.get("menu_mode") == "motion":
+        draft_m["image_bytes"] = img_bytes
+        draft_m["ref_images"] = [img_bytes]
+        draft_m["model_key"] = MOTION_MODEL_KEY
+        await show_or_update_menu(message, bot, draft_m, message.from_user.id)
+        return
+
     group_id = message.media_group_id
     # Buffer both albums and rapid multi-photo uploads by the same user
     key = f"{message.chat.id}:{group_id}" if group_id else f"{message.chat.id}:user_{message.from_user.id}"
@@ -1800,7 +1818,7 @@ async def process_photo_batch(
 
     logger.info(
         f"[refs] batch from user {user_id}: {len(messages)} msg(s), {len(images)} image(s), "
-        f"unique={len(set(images))}, has_draft={user_id in user_drafts}"
+        f"unique={len(set(images))}, has_draft={fresh_draft(user_id) is not None}"
     )
 
     # In groups, process photos if addressed OR if the user currently has an active draft open
@@ -1812,7 +1830,7 @@ async def process_photo_batch(
             caption.startswith(("/video", "/gen", "/prompt", "/v", "/s2", "/image", "/poster", "/img", "/pic", "/photo", "/banana", "/qwen", "/voice", "/tts", "/eleven", "/elevenlabs", "/grid", "/сетка", "/mesh"))
             or bot_username in cap_lower
             or (message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id)
-            or (not caption and user_id in user_drafts)
+            or (not caption and fresh_draft(user_id) is not None)
         )
         if not addressed:
             return
@@ -1824,7 +1842,7 @@ async def process_photo_batch(
         return
 
     is_image_cmd = bool(re.search(r"^/(image|poster|img|pic|photo|banana|qwen)", caption, re.I))
-    is_voice_cmd = bool(re.search(r"^/(voice|tts|eleven|elevenlabs)", caption, re.I))
+    is_voice_cmd = bool(re.search(r"^/(motion|mc|dance)", caption, re.I))
     clean_prompt = re.sub(
         r"^/(video|gen|prompt|v|s2|image|poster|img|pic|photo|banana|qwen|voice|tts|eleven|elevenlabs)(@\w+)?\s*",
         "",
@@ -1842,7 +1860,7 @@ async def process_photo_batch(
         clean_prompt = (message.reply_to_message.text or message.reply_to_message.caption or "").strip()
 
     # If user already has an active draft open -> attach photos to draft!
-    if user_id in user_drafts:
+    if fresh_draft(user_id) is not None:
         draft = user_drafts[user_id]
         if clean_prompt:
             draft["prompt"] = clean_prompt
@@ -1899,7 +1917,7 @@ async def process_photo_batch(
             else "Анимировать фото, реалистичное кинематографичное видео"
         )
 
-    menu_mode = "image" if is_image_cmd else ("voice" if is_voice_cmd else "video")
+    menu_mode = "image" if is_image_cmd else ("motion" if is_voice_cmd else "video")
     cur_prefs = get_user_prefs(user_id)
     cur_model = cur_prefs.get("image_model_key" if menu_mode == "image" else "model_key", DEFAULT_IMAGE_MODEL if menu_mode == "image" else DEFAULT_MODEL)
     minfo = MODELS.get(cur_model, MODELS[DEFAULT_MODEL])
@@ -1917,7 +1935,7 @@ async def process_photo_batch(
         message_id=message.message_id,
         menu_mode=menu_mode,
     )
-    draft["model_key"] = VOICE_MODEL_KEY if is_voice_cmd else cur_model
+    draft["model_key"] = MOTION_MODEL_KEY if is_voice_cmd else cur_model
 
     sync_draft_references(draft)
     await show_or_update_menu(message, bot, draft, user_id)
@@ -1941,9 +1959,9 @@ async def handle_voice_or_audio(message: Message, bot: Bot, state: FSMContext):
         return
 
     user_id = message.from_user.id
-    draft = user_drafts.get(user_id)
+    draft = fresh_draft(user_id)
 
-    if draft and draft.get("menu_mode", "video") == "voice":
+    if False:  # вкладка голоса отключена
         # Voice tab: the recording is the source for revoicing
         draft["audio_bytes"] = audio_bytes
         draft["voice_mode"] = "changer"
@@ -1960,10 +1978,9 @@ async def handle_voice_or_audio(message: Message, bot: Bot, state: FSMContext):
             prompt=caption_text,
             user_name=get_user_display_name(message.from_user),
             message_id=message.message_id,
-            menu_mode="voice",
+            menu_mode="video",
             audio_bytes=audio_bytes,
         )
-        draft["voice_mode"] = "changer"
     else:
         prompt = caption_text or "Сгенерируй видео под прикрепленный звук"
         draft = create_draft_for_user(
@@ -2009,7 +2026,7 @@ async def handle_waiting_prompt(message: Message, bot: Bot, state: FSMContext):
             target_mode = "video"
             text = cmd_arg
         elif cmd in ("/voice", "/tts", "/eleven", "/elevenlabs"):
-            target_mode = "voice"
+            target_mode = "video"
             text = cmd_arg
         else:
             await state.clear()
@@ -2017,7 +2034,7 @@ async def handle_waiting_prompt(message: Message, bot: Bot, state: FSMContext):
 
     await state.clear()
 
-    if not text and target_mode != "voice":
+    if not text:
         text = (
             "Стилизовать изображение по референсу в высоком качестве"
             if target_mode == "image"
@@ -2042,7 +2059,7 @@ async def handle_waiting_prompt(message: Message, bot: Bot, state: FSMContext):
 @router.message(UserInputState.waiting_for_duration, F.text)
 async def handle_custom_duration_input(message: Message, bot: Bot, state: FSMContext):
     user_id = message.from_user.id
-    draft = user_drafts.get(user_id)
+    draft = fresh_draft(user_id)
     text = (message.text or "").strip().lower()
     m = re.search(r'\b(\d{1,2})\b', text)
     if m:
@@ -2070,7 +2087,7 @@ async def handle_custom_duration_input(message: Message, bot: Bot, state: FSMCon
 @router.message(Command("dur", "duration"), ~F.photo, ~F.document)
 async def handle_duration_command(message: Message, command: CommandObject, bot: Bot):
     user_id = message.from_user.id
-    draft = user_drafts.get(user_id)
+    draft = fresh_draft(user_id)
     arg = (command.args or "").strip()
     if not arg:
         await message.reply("⏱ Укажите секунды: например <code>/dur 3</code> или <code>/dur 7</code>", parse_mode="HTML")
@@ -2190,22 +2207,25 @@ async def handle_image_command(message: Message, command: CommandObject, bot: Bo
 
 
 @router.message(Command("voice", "tts", "eleven", "elevenlabs"), ~F.photo, ~F.document)
-async def handle_voice_command(message: Message, command: CommandObject, bot: Bot, state: FSMContext):
-    """Open ElevenLabs TTS V3 menu directly."""
+async def handle_voice_command(message: Message, bot: Bot, state: FSMContext):
+    await state.clear()
+    await message.reply("🎙 Озвучка временно отключена, скоро вернём. Пока доступны 🎬 Видео, 🖼 Фото и 🕺 Motion.")
+
+
+@router.message(Command("motion", "mc", "dance", ignore_case=True, ignore_mention=True), ~F.photo, ~F.document)
+async def handle_motion_command(message: Message, bot: Bot, state: FSMContext):
+    """Open Motion Control: photo of the character first, then a video with the movement."""
     await state.clear()
     user_id = message.from_user.id
-    user_name = get_user_display_name(message.from_user)
-    prompt_args = (command.args or "").strip()
-    if not prompt_args and message.reply_to_message:
-        prompt_args = (message.reply_to_message.text or message.reply_to_message.caption or "").strip()
     draft = create_draft_for_user(
         user_id=user_id,
-        prompt=prompt_args,
-        user_name=user_name,
+        prompt="",
+        user_name=get_user_display_name(message.from_user),
         message_id=message.message_id,
-        menu_mode="voice",
+        menu_mode="motion",
     )
-    draft["model_key"] = VOICE_MODEL_KEY
+    draft["model_key"] = MOTION_MODEL_KEY
+    draft["resolution"] = "720p"
     await show_or_update_menu(message, bot, draft, user_id)
 
 
@@ -2675,7 +2695,7 @@ async def handle_text(message: Message, bot: Bot, state: FSMContext):
             return
 
         # If user already has an active draft open in this chat, update its prompt without wiping references!
-        if user_id in user_drafts:
+        if fresh_draft(user_id) is not None:
             draft = user_drafts[user_id]
             draft["prompt"] = clean_prompt
             await show_or_update_menu(message, bot, draft, user_id)
@@ -2694,8 +2714,12 @@ async def handle_text(message: Message, bot: Bot, state: FSMContext):
         return
 
     # Private chat:
+    draft_m = fresh_draft(user_id)
+    if draft_m and draft_m.get("menu_mode") == "motion":
+        await message.reply("🕺 В Motion текст не нужен: пришлите фото персонажа, потом видео с движением.")
+        return
     # If user already has an active draft open, update its prompt without wiping references!
-    if user_id in user_drafts:
+    if fresh_draft(user_id) is not None:
         draft = user_drafts[user_id]
         draft["prompt"] = text
         await show_or_update_menu(message, bot, draft, user_id)
@@ -2730,6 +2754,8 @@ async def verify_callback_owner(call: CallbackQuery, owner_id: int) -> bool:
 async def on_open_menu_from_button(call: CallbackQuery, state: FSMContext):
     parts = call.data.split(":")
     target_mode = parts[1]
+    if target_mode == "voice":  # старые кнопки из прошлых сообщений
+        target_mode = "video"
     owner_id = int(parts[2]) if len(parts) > 2 else call.from_user.id
     if not await verify_callback_owner(call, owner_id):
         return
@@ -2742,16 +2768,16 @@ async def on_open_menu_from_button(call: CallbackQuery, state: FSMContext):
     default_prompt = (
         "Фотореалистичное изображение в высоком разрешении"
         if target_mode == "image"
-        else "" if target_mode == "voice"
+        else "" if target_mode == "motion"
         else "Кинематографичное видео с плавной динамикой"
     )
     draft = user_drafts.get(uid)
     if draft:
         draft["menu_mode"] = target_mode
         draft["step"] = "model" if target_mode == "video" else "main"
-        if target_mode == "voice":
-            draft["model_key"] = VOICE_MODEL_KEY
-            draft["voice_mode"] = "changer" if draft.get("audio_bytes") else draft.get("voice_mode", "tts")
+        if target_mode == "motion":
+            draft["model_key"] = MOTION_MODEL_KEY
+            draft["resolution"] = draft.get("resolution", "720p")
         if ref_images:
             draft["ref_images"] = list(ref_images)
             draft["image_bytes"] = ref_images[0]
@@ -2809,10 +2835,9 @@ async def on_switch_menu_tab(call: CallbackQuery):
     prefs = get_user_prefs(owner_id)
     if target_mode == "image":
         draft["model_key"] = prefs.get("image_model_key", DEFAULT_IMAGE_MODEL)
-    elif target_mode == "voice":
-        draft["model_key"] = VOICE_MODEL_KEY
-        draft.setdefault("voice_id", prefs.get("voice_id", DEFAULT_VOICE_ID))
-        draft["voice_mode"] = "changer" if draft.get("audio_bytes") else draft.get("voice_mode") or prefs.get("voice_mode", "tts")
+    elif target_mode == "motion":
+        draft["model_key"] = MOTION_MODEL_KEY
+        draft.setdefault("resolution", "720p")
     else:
         mk = prefs.get("model_key", DEFAULT_MODEL)
         draft["model_key"] = mk if mk in VIDEO_MODEL_KEYS else DEFAULT_MODEL
@@ -2827,46 +2852,26 @@ async def on_switch_menu_tab(call: CallbackQuery):
         )
     except Exception:
         pass
-    await call.answer({"image": "🖼 Фото", "voice": "🎙 Голос"}.get(target_mode, "🎬 Видео"))
+    await call.answer({"image": "🖼 Фото", "motion": "🕺 Motion"}.get(target_mode, "🎬 Видео"))
 
 
-@router.callback_query(F.data.startswith("vmode:"))
-async def on_voice_mode(call: CallbackQuery):
-    _, mode, owner = call.data.split(":")
+@router.callback_query(F.data.startswith("mres:"))
+async def on_motion_resolution(call: CallbackQuery):
+    _, res, owner = call.data.split(":")
     owner_id = int(owner)
     if not await verify_callback_owner(call, owner_id):
         return
-    draft = user_drafts.get(owner_id)
-    if not draft:
-        await call.answer("Откройте меню заново: /voice", show_alert=True)
+    draft = fresh_draft(owner_id)
+    if not draft or draft.get("menu_mode") != "motion":
+        await call.answer("Откройте Motion заново: /motion", show_alert=True)
         return
-    draft["voice_mode"] = mode if mode in ("tts", "changer") else "tts"
-    get_user_prefs(owner_id)["voice_mode"] = draft["voice_mode"]
+    draft["resolution"] = res if res in ("720p", "1080p") else "720p"
+    get_user_prefs(owner_id)["resolution"] = draft["resolution"]
     try:
         await call.message.edit_text(text=format_draft_text(draft), reply_markup=build_settings_keyboard(draft, owner_id), parse_mode="HTML")
     except Exception:
         pass
-    await call.answer("🎤 Отправьте голосовое" if mode == "changer" else "✍️ Напишите текст")
-
-
-@router.callback_query(F.data.startswith("vvoice:"))
-async def on_voice_pick(call: CallbackQuery):
-    _, idx, owner = call.data.split(":")
-    owner_id = int(owner)
-    if not await verify_callback_owner(call, owner_id):
-        return
-    draft = user_drafts.get(owner_id)
-    i = int(idx)
-    if not draft or not (0 <= i < len(VOICES)):
-        await call.answer("Откройте меню заново: /voice", show_alert=True)
-        return
-    draft["voice_id"] = VOICES[i]["id"]
-    get_user_prefs(owner_id)["voice_id"] = draft["voice_id"]
-    try:
-        await call.message.edit_text(text=format_draft_text(draft), reply_markup=build_settings_keyboard(draft, owner_id), parse_mode="HTML")
-    except Exception:
-        pass
-    await call.answer(f"Голос: {VOICES[i]['name']}")
+    await call.answer(f"🕺 {draft['resolution']}")
 
 
 @router.callback_query(F.data.startswith("ref_hint:"))
@@ -3400,12 +3405,12 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
         return
 
     peek = user_drafts.get(owner_id)
-    if peek and peek.get("menu_mode") == "voice":
-        if peek.get("voice_mode", "tts") == "changer" and not peek.get("audio_bytes"):
-            await call.answer("🎤 Сначала отправьте голосовое или аудио в чат", show_alert=True)
+    if peek and peek.get("menu_mode") == "motion":
+        if not peek.get("image_bytes"):
+            await call.answer("📸 Сначала пришлите фото персонажа", show_alert=True)
             return
-        if peek.get("voice_mode", "tts") == "tts" and not voice_text_of(peek):
-            await call.answer("✍️ Сначала напишите текст сообщением в чат", show_alert=True)
+        if not peek.get("ref_video"):
+            await call.answer("🎞 Теперь пришлите видео с движением", show_alert=True)
             return
 
     draft = user_drafts.pop(owner_id, None)
@@ -3420,10 +3425,10 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
     sync_draft_references(draft)
     menu_mode = draft.get("menu_mode", "video")
     model_key = draft.get("model_key", DEFAULT_IMAGE_MODEL if menu_mode == "image" else DEFAULT_MODEL)
-    if menu_mode == "voice":
-        model_key = VOICE_MODEL_KEY
+    if menu_mode == "motion":
+        model_key = MOTION_MODEL_KEY
     model_info = MODELS.get(model_key, MODELS[DEFAULT_MODEL])
-    prompt = voice_text_of(draft) if menu_mode == "voice" else draft["prompt"]
+    prompt = draft.get("prompt", "")
     duration = draft["duration"]
     resolution = draft["image_resolution"] if menu_mode == "image" else draft["resolution"]
     ratio = draft["image_ratio"] if menu_mode == "image" else draft["ratio"]
@@ -3462,10 +3467,8 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
     chips = []
     if menu_mode == "image":
         chips.append(f"{resolution} · {ratio}")
-    elif menu_mode == "voice":
-        v = next((x for x in VOICES if x["id"] == draft.get("voice_id")), VOICES[0])
-        chips.append(f"{v['emoji']} {v['name']}")
-        chips.append("🎤 переозвучка" if job.voice_mode == "changer" else "✍️ текст")
+    elif menu_mode == "motion":
+        chips.append(f"🕺 {resolution}")
     else:
         dur_label = "Авто" if duration == -1 else f"{duration} сек"
         chips.append(f"{dur_label} · {resolution} · {ratio}")

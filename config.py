@@ -36,6 +36,16 @@ API_MINIMAX_BASE_URL = os.getenv("API_MINIMAX_BASE_URL", "http://120.55.55.62/ec
 
 # Available Models (Video, Voice, and Image)
 MODELS = {
+    # --- MOTION CONTROL (вкладка Motion: фото персонажа + видео с движением) ---
+    "klingMotionControl3": {
+        "name": "Kling Motion Control 3.0",
+        "short": "🕺 Motion",
+        "category": "motion",
+        "backend": "davinci_motion",
+        "api_id": "klingMotionControl3",
+        "desc": "Фото персонажа + видео с движением",
+        "video_ref": True,
+    },
     # --- SEEDANCE MODELS (All replaced with DaVinci AI site versions) ---
     "s2_5": {
         "name": "Seedance 2.5",
@@ -494,6 +504,8 @@ def calculate_credit_cost(model_key: str, duration: int = 5, resolution: str = "
     backend = model_info.get("backend")
     api_id = model_info.get("api_id")
     dur = max(4, duration) if duration > 0 else 5
+    if model_info.get("backend") == "davinci_motion":
+        return 0  # цена пока не задана: в интерфейсе кредиты не показываем
 
     # 1. Video models on DaVinci backend
     if backend == "davinci":
@@ -595,7 +607,8 @@ VIDEO_MODEL_KEYS = [
 IMAGE_MODEL_KEYS = [k for k, v in MODELS.items() if v.get("category") == "image"]
 
 # --- Voice tab (ElevenLabs) ---
-VOICE_MODEL_KEY = "elevenlabs"
+VOICE_MODEL_KEY = "elevenlabs"  # вкладка голоса временно отключена
+MOTION_MODEL_KEY = "klingMotionControl3"
 # Голоса для вкладки «Голос». id — ElevenLabs voice_id. Первый — тот, что бот использовал раньше.
 # Если сайт не принимает какой-то id, просто удали строку — остальные продолжат работать.
 VOICES = [
