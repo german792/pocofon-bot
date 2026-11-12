@@ -1140,7 +1140,7 @@ class DaVinciClient:
             "luma-ray-3-2",
         )
         if video_bucket_path:
-            payload["referenceVideos"] = [video_bucket_path]
+            payload["inputVideos"] = [video_bucket_path]
 
         if audio_bucket_path and not (video_bucket_path and model_id in ("seedance25", "seedance2", "seedance2Fast", "seedance2Mini", "seedance")):
             payload["audio"] = audio_bucket_path
