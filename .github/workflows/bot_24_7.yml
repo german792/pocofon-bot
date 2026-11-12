@@ -1,23 +1,19 @@
 name: POCO AI Bot 24/7
 
+# Один бот за раз: новый запуск сам останавливает старый.
 concurrency:
   group: poco-ai-bot
-  # push / ручной запуск сразу заменяют работающего бота новой версией,
-  # а плановые запуски встают в очередь и стартуют, как только текущий прогон закончится
-  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+  cancel-in-progress: true
 
 on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
   schedule:
-    # Каждый час в очередь ставится запасной запуск: он ждёт, пока текущий
-    # прогон упрётся в лимит времени, и сразу подхватывает бота. Если GitHub
-    # пропустит один плановый запуск, через час будет следующий.
-    - cron: '17 * * * *'
+    # перезапуск каждые 5 часов — лимит одного job 6 часов
+    - cron: '0 */5 * * *'
 
 permissions:
-  actions: write
   contents: read
 
 jobs:
@@ -31,20 +27,23 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
 
-      - name: Set up FFmpeg (static build, fast)
-        uses: FedericoCarboni/setup-ffmpeg@v3
-        continue-on-error: true
-        id: setup-ffmpeg
+      - name: Install FFmpeg
+        run: |
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
+          ffmpeg -version | head -1
 
       - name: Install dependencies
         run: |
-          if ! command -v ffmpeg >/dev/null 2>&1; then
-            sudo apt-get install -y --no-install-recommends ffmpeg
-          fi
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
+          python -c "import aiogram; print('aiogram', aiogram.__version__)"
 
       - name: Run POCO AI Bot
         env:
@@ -55,5 +54,5 @@ jobs:
           KEY_SIGNING_SECRET: ${{ secrets.KEY_SIGNING_SECRET || secrets.ADMIN_PASSWORD || secrets.TOKEN4 }}
           API_PASSWORD: ${{ secrets.API_PASSWORD || secrets.TOKEN5 }}
           GH_PAT: ${{ secrets.GH_PAT }}
-        run: |
-          python bot.py
+          PYTHONUNBUFFERED: "1"
+        run: python bot.py

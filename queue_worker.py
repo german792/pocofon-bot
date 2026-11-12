@@ -4,7 +4,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from aiogram import Bot
 from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from api_client import (
@@ -32,13 +32,58 @@ VIDEOS_DIR = BASE_DIR / "videos"
 VIDEOS_DIR.mkdir(exist_ok=True)
 
 
-def render_progress_bar(percent: int, width: int = 16) -> str:
-    """Render an ASCII/Unicode progress bar for Telegram HTML messages."""
+def render_progress_bar(percent: int, width: int = 12) -> str:
+    """Render a compact modern progress bar for Telegram HTML messages."""
     percent = max(0, min(100, percent))
     filled = int(round(width * percent / 100))
     empty = width - filled
-    bar = "█" * filled + "░" * empty
-    return f"<code>[{bar}] {percent}%</code>"
+    bar = "▰" * filled + "▱" * empty
+    return f"{bar}  <b>{percent}%</b>"
+
+
+def _quote(text: str, limit: int = 500) -> str:
+    """Prompt as a collapsible blockquote (keeps cards short on a phone screen)."""
+    text = (text or "").strip()
+    if len(text) > limit:
+        text = text[:limit].rstrip() + "…"
+    return f"<blockquote expandable>{html.escape(text)}</blockquote>"
+
+
+RESULT_EFFECT_ID = "5046509860389126442"  # 🎉 message effect (private chats only)
+SPINNER_FRAMES = ("🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘")
+
+
+async def _make_cover(video_path) -> Optional[Path]:
+    """Grab a nice poster frame (~1 s in) so the video looks good in the chat list."""
+    try:
+        cover = Path(str(video_path)).with_suffix(".cover.jpg")
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-loglevel", "error", "-ss", "1", "-i", str(video_path),
+            "-frames:v", "1", "-vf", "scale='min(1280,iw)':-2", "-q:v", "3", str(cover),
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(proc.wait(), timeout=20)
+        if cover.exists() and cover.stat().st_size > 0:
+            return cover
+    except Exception as e:
+        logger.debug(f"cover extraction failed: {e}")
+    return None
+
+
+def _result_keyboard(user_id: int, kind: str = "video", extra_rows=None) -> InlineKeyboardMarkup:
+    """Buttons under a finished result: quick way to start the next generation."""
+    rows = list(extra_rows or [])
+    if kind == "image":
+        rows.append([
+            InlineKeyboardButton(text="🖼 Ещё фото", callback_data=f"open_menu:image:{user_id}", style="success"),
+            InlineKeyboardButton(text="🎬 В видео", callback_data=f"open_menu:video:{user_id}", style="primary"),
+        ])
+    else:
+        rows.append([
+            InlineKeyboardButton(text="🎬 Ещё видео", callback_data=f"open_menu:video:{user_id}", style="success"),
+            InlineKeyboardButton(text="🖼 Фото", callback_data=f"open_menu:image:{user_id}", style="primary"),
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def estimate_progress(elapsed: int, duration: int, status: str, server_progress: Optional[float] = None) -> int:
@@ -78,6 +123,8 @@ class GenerationJob:
     ref_mode: str = "ref"
     audio_bytes: Optional[bytes] = None
     ref_video: Optional[bytes] = None
+    voice_id: str = ""
+    voice_mode: str = "tts"
     job_id: str = field(default_factory=lambda: f"tg_{uuid.uuid4().hex[:12]}")
 
     def get_all_ref_images(self) -> List[bytes]:
@@ -166,58 +213,41 @@ class GenerationQueue:
 
     def _format_progress_message(self, job: GenerationJob, pct: int, elapsed: int, stage: str) -> str:
         model_info = MODELS.get(job.model_key, MODELS[DEFAULT_MODEL])
-        model_name = model_info["name"]
+        model_name = html.escape(str(model_info["name"]))
         backend = model_info["backend"]
         dur_label = "Авто" if job.duration == -1 else f"{job.duration} сек"
         bar = render_progress_bar(pct)
-        safe_prompt = html.escape(job.prompt)
         safe_stage = html.escape(str(stage))
         ref_count = len(job.get_all_ref_images())
-        ref_line = f"📎 <b>Референсы:</b> {ref_count} фото\n" if ref_count > 0 else ""
-        user_line = f"👤 <b>Автор:</b> {job.user_name}\n" if job.user_name else ""
         cost = calculate_credit_cost(job.model_key, job.duration, job.resolution)
-        cost_line = f"💳 <b>Стоимость:</b> ~{cost} кр.\n" if cost > 0 else ""
+        user_line = f"👤 {job.user_name}\n" if job.user_name else ""
 
+        chips = []
         if backend in ("davinci_image", "qwen_image"):
-            return (
-                f"🖼️ <b>Генерация изображения ({model_name})</b>\n\n"
-                f"{user_line}"
-                f"📝 <b>Промпт:</b> <i>{safe_prompt}</i>\n"
-                f"📐 <b>Параметры:</b> {job.resolution} | {job.ratio}\n"
-                f"{ref_line}"
-                f"{cost_line}\n"
-                f"{bar}\n"
-                f"⚙️ <b>Статус:</b> {safe_stage} <i>({elapsed} сек)</i>"
-            )
-
-        if backend == "davinci_voice":
-            return (
-                f"🎙 <b>Генерация озвучки ({model_name})</b>\n\n"
-                f"{user_line}"
-                f"📝 <b>Текст:</b> <i>{safe_prompt}</i>\n"
-                f"{ref_line}"
-                f"{cost_line}\n"
-                f"{bar}\n"
-                f"⚙️ <b>Статус:</b> {safe_stage} <i>({elapsed} сек)</i>"
-            )
-
-        if backend == "minimax":
-            audio_line = "🔊 <b>Звук:</b> Музыка и саундтрек (Вкл) ✅\n"
-        elif model_info.get("has_audio"):
-            audio_line = f"🔊 <b>Звук:</b> {'Вкл' if job.generate_audio else 'Выкл'}\n"
+            head = f"🖼 <b>{model_name}</b> · создаю изображение"
+            chips.append(f"{job.resolution} · {job.ratio}")
+        elif backend == "davinci_voice":
+            head = f"🎙 <b>{model_name}</b> · озвучиваю текст"
         else:
-            audio_line = ""
+            head = f"🎬 <b>{model_name}</b> · создаю видео"
+            chips.append(f"{dur_label} · {job.resolution} · {job.ratio}")
+            if backend == "minimax":
+                chips.append("🔊 музыка")
+            elif model_info.get("has_audio"):
+                chips.append("🔊 звук" if job.generate_audio else "🔇 без звука")
+        if ref_count > 0:
+            chips.append(f"📎 {ref_count}")
+        if cost > 0:
+            chips.append(f"💳 ~{cost} кр.")
+        chips_line = "   ".join(chips)
 
         return (
-            f"🎬 <b>Генерация видео ({model_name})</b>\n\n"
-            f"{user_line}"
-            f"📝 <b>Промпт:</b> <i>{safe_prompt}</i>\n"
-            f"⏱ <b>Параметры:</b> {dur_label} | {job.resolution} | {job.ratio}\n"
-            f"{ref_line}"
-            f"{audio_line}"
-            f"{cost_line}\n"
+            f"{head}\n"
+            f"{user_line}\n"
+            f"{_quote(job.prompt)}\n"
             f"{bar}\n"
-            f"⚙️ <b>Статус:</b> {safe_stage} <i>({elapsed} сек)</i>"
+            f"<i>{SPINNER_FRAMES[(elapsed // 3) % len(SPINNER_FRAMES)]} {safe_stage} · {elapsed} с</i>\n\n"
+            f"{chips_line}"
         )
 
     async def _worker_loop(self, worker_id: int = 1):
@@ -338,23 +368,21 @@ class GenerationQueue:
                 )
             )
 
-            user_line = f"👤 <b>Автор:</b> {job.user_name}\n" if job.user_name else ""
-            ref_info = f"📎 <b>Референсов:</b> {ref_count} фото\n" if ref_count > 0 else ""
+            user_line = f"👤 {job.user_name}\n" if job.user_name else ""
+            ref_part = f"  ·  📎 {ref_count}" if ref_count > 0 else ""
             caption = (
-                f"✨ <b>Ваше изображение готово!</b>\n\n"
-                f"{user_line}"
-                f"🤖 <b>Модель:</b> {model_name}\n"
-                f"📝 <b>Промпт:</b> <i>{html.escape(job.prompt[:600])}</i>\n"
-                f"📐 <b>Формат:</b> {job.resolution} | {job.ratio}\n"
-                f"{ref_info}"
-                f"⚡ <b>Время генерации:</b> {total_elapsed} сек"
+                f"🖼 <b>Изображение готово</b>\n"
+                f"{user_line}\n"
+                f"{_quote(job.prompt)}\n"
+                f"<b>{html.escape(str(model_name))}</b>  ·  {job.resolution} · {job.ratio}{ref_part}  ·  ⚡ {total_elapsed} с"
             )
 
             if temp_file and temp_file.exists():
                 photo_input = FSInputFile(str(temp_file), filename=f"image_{job.user_id}.png")
-                grid_kb = InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="🔲 Наложить толстую сетку", callback_data=f"grid_gen:{job.user_id}")
-                ]])
+                grid_kb = _result_keyboard(
+                    job.user_id, "image",
+                    extra_rows=[[InlineKeyboardButton(text="🔲 Наложить толстую сетку", callback_data=f"grid_gen:{job.user_id}")]],
+                )
                 for attempt in range(1, 3):
                     try:
                         await self.bot.send_photo(
@@ -420,13 +448,12 @@ class GenerationQueue:
                 )
             )
 
-            user_line = f"👤 <b>Автор:</b> {job.user_name}\n" if job.user_name else ""
+            user_line = f"👤 {job.user_name}\n" if job.user_name else ""
             caption = (
-                f"🎙 <b>Ваша озвучка ElevenLabs готова!</b>\n\n"
-                f"{user_line}"
-                f"🤖 <b>Модель:</b> {model_name}\n"
-                f"📝 <b>Текст:</b> <i>{html.escape(job.prompt[:600])}</i>\n"
-                f"⚡ <b>Время генерации:</b> {total_elapsed} сек"
+                f"🎙 <b>Озвучка готова</b>\n"
+                f"{user_line}\n"
+                f"{_quote(job.prompt)}\n"
+                f"<b>{html.escape(str(model_name))}</b>  ·  ⚡ {total_elapsed} с"
             )
 
             audio_input = FSInputFile(str(audio_file), filename=f"elevenlabs_{job.user_id}.mp3")
@@ -527,26 +554,29 @@ class GenerationQueue:
         except Exception:
             pass
 
-        user_line = f"👤 <b>Автор:</b> {job.user_name}\n" if job.user_name else ""
-        ref_info = f"📎 <b>Референсов:</b> {ref_count} фото\n" if ref_count > 0 else ""
-        audio_ref_info = "🎵 <b>Звуковой референс:</b> наложен на видео ✅\n" if job.audio_bytes else ""
+        user_line = f"👤 {job.user_name}\n" if job.user_name else ""
+        ref_part = f"  ·  📎 {ref_count}" if ref_count > 0 else ""
         caption = (
-            f"✨ <b>Ваше видео готово!</b>\n\n"
-            f"{user_line}"
-            f"🤖 <b>Модель:</b> {model_name}\n"
-            f"📝 <b>Промпт:</b> <i>{html.escape(job.prompt[:600])}</i>\n"
-            f"⏱ <b>Параметры:</b> {dur_label} | {job.resolution} | {job.ratio}\n"
-            f"{ref_info}"
-            f"{audio_ref_info}"
-            f"⚡ <b>Время генерации:</b> {total_elapsed} сек"
+            f"🎬 <b>Видео готово</b>\n"
+            f"{user_line}\n"
+            f"{_quote(job.prompt)}\n"
+            f"<b>{html.escape(str(model_name))}</b>  ·  {dur_label} · {job.resolution} · {job.ratio}{ref_part}  ·  ⚡ {total_elapsed} с"
         )
 
         video_input = FSInputFile(str(temp_file), filename=f"video_{job.user_id}.mp4")
 
         sent_successfully = False
+        cover_path = await _make_cover(temp_file)
         for attempt in range(1, 3):
             try:
                 logger.info(f"Sending video to Telegram (attempt {attempt})...")
+                # First attempt: with poster frame and 🎉 effect (private chats). Fallback: plain send.
+                extra: Dict[str, Any] = {}
+                if attempt == 1:
+                    if cover_path:
+                        extra["cover"] = FSInputFile(str(cover_path))
+                    if job.chat_id > 0:
+                        extra["message_effect_id"] = RESULT_EFFECT_ID
                 await asyncio.wait_for(
                     self.bot.send_video(
                         chat_id=job.chat_id,
@@ -556,7 +586,9 @@ class GenerationQueue:
                         supports_streaming=True,
                         request_timeout=90.0,
                         reply_to_message_id=job.reply_to_message_id,
-                        allow_sending_without_reply=True
+                        allow_sending_without_reply=True,
+                        reply_markup=_result_keyboard(job.user_id, "video"),
+                        **extra,
                     ),
                     timeout=95.0
                 )
@@ -569,6 +601,8 @@ class GenerationQueue:
 
         try:
             temp_file.unlink(missing_ok=True)
+            if cover_path:
+                cover_path.unlink(missing_ok=True)
         except Exception:
             pass
 
@@ -633,9 +667,11 @@ class GenerationQueue:
                 )
 
             elif backend == "davinci_voice":
+                voice_kwargs = {"voice_id": job.voice_id} if job.voice_id else {}
                 task_id = await self.davinci_client.create_voice_task(
                     prompt=job.prompt,
-                    audio_bytes=job.audio_bytes,
+                    audio_bytes=job.audio_bytes if job.voice_mode == "changer" else None,
+                    **voice_kwargs,
                 )
 
             elif backend == "v2":
@@ -852,10 +888,9 @@ class GenerationQueue:
                     raw_file.unlink(missing_ok=True)
 
                 caption = (
-                    f"✨ <b>Готовое изображение с сайта!</b>\n\n"
-                    f"🤖 <b>Модель:</b> {html.escape(str(model_name))}\n"
-                    f"📝 <b>Промпт:</b> <i>{html.escape(prompt[:600])}</i>\n"
-                    f"📐 <b>Формат:</b> {res} | {dim}"
+                    f"🖼 <b>Изображение готово</b>\n\n"
+                    f"{_quote(prompt)}\n"
+                    f"<b>{html.escape(str(model_name))}</b>  ·  {res} · {dim}"
                 )
                 await self.bot.send_photo(
                     chat_id=chat_id,
@@ -879,10 +914,9 @@ class GenerationQueue:
                     raw_file.unlink(missing_ok=True)
 
                 caption = (
-                    f"✨ <b>Готовое видео с сайта!</b>\n\n"
-                    f"🤖 <b>Модель:</b> {html.escape(str(model_name))}\n"
-                    f"📝 <b>Промпт:</b> <i>{html.escape(prompt[:600])}</i>\n"
-                    f"⏱ <b>Параметры:</b> {dur} сек | {res} | {dim}"
+                    f"🎬 <b>Видео готово</b>\n\n"
+                    f"{_quote(prompt)}\n"
+                    f"<b>{html.escape(str(model_name))}</b>  ·  {dur} сек · {res} · {dim}"
                 )
                 await self.bot.send_video(
                     chat_id=chat_id,

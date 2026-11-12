@@ -321,15 +321,15 @@ MODELS = {
         "desc": "Pika 2.2 (быстрое видео до 10с, 1080p, визуальные эффекты)"
     },
     "elevenlabs": {
-        "name": "ElevenLabs TTS V3",
+        "name": "ElevenLabs V3",
         "short": "🎙 ElevenLabs",
-        "category": "video",
+        "category": "video",  # остаётся "video" ради web.py/истории; в боте голос вынесен во вкладку «Голос»
         "backend": "davinci_voice",
         "api_id": "eleven-v3",
         "has_audio": True,
         "multi_ref": True,
         "ref_limit": 5,
-        "desc": "ElevenLabs V3: студийная озвучка текста и обработка референсов"
+        "desc": "Текст в голос и переозвучка"
     },
 
     # --- EXISTING GROK & MINIMAX VIDEO MODELS ---
@@ -591,9 +591,22 @@ VIDEO_MODEL_KEYS = [
     "runway_alpha",
     "luma_dream_machine",
     "luma_ray_32",
-    "elevenlabs",
 ]
 IMAGE_MODEL_KEYS = [k for k, v in MODELS.items() if v.get("category") == "image"]
+
+# --- Voice tab (ElevenLabs) ---
+VOICE_MODEL_KEY = "elevenlabs"
+# Голоса для вкладки «Голос». id — ElevenLabs voice_id. Первый — тот, что бот использовал раньше.
+# Если сайт не принимает какой-то id, просто удали строку — остальные продолжат работать.
+VOICES = [
+    {"id": "UGTtbzgh3HObxRjWaSpr", "name": "Основной", "emoji": "🎙"},
+    {"id": "21m00Tcm4TlvDq8ikWAM", "name": "Rachel", "emoji": "👩"},
+    {"id": "EXAVITQu4vr4xnSehpDI", "name": "Bella", "emoji": "👧"},
+    {"id": "pNInz6obpgDQGcFmaJgB", "name": "Adam", "emoji": "👨"},
+    {"id": "TxGEqnHWrfWFTfGW9XjX", "name": "Josh", "emoji": "🧑"},
+    {"id": "ErXwobaYiN019PkySvjV", "name": "Antoni", "emoji": "🎩"},
+]
+DEFAULT_VOICE_ID = VOICES[0]["id"]
 
 DEFAULT_MODEL = "s2_5"
 DEFAULT_IMAGE_MODEL = "nano_banana_2_1"

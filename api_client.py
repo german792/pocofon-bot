@@ -1214,12 +1214,14 @@ class DaVinciClient:
                 "removeBackgroundNoise": True,
             }
         else:
-            clean_text = (prompt or "").strip() or "Привет! Это тестовая озвучка ElevenLabs в боте Poco AI."
+            clean_text = (prompt or "").strip() or "Привет! Это тестовая озвучка в боте Poco AI."
+            # Язык по тексту: раньше всегда стоял "en", из-за чего русский звучал странно
+            lang = "ru" if any("а" <= ch.lower() <= "я" or ch.lower() == "ё" for ch in clean_text) else "en"
             payload = {
                 "modelKey": "eleven-v3",
                 "text": clean_text,
                 "voice": voice_id,
-                "languageCode": "en",
+                "languageCode": lang,
                 "stability": 0.5,
             }
 

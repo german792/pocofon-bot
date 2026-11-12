@@ -19,6 +19,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     BufferedInputFile,
     InputMediaPhoto,
+    User,
 )
 import image_utils
 import access_manager
@@ -45,6 +46,9 @@ from config import (
     RATIO_OPTIONS,
     IMAGE_RATIO_OPTIONS,
     calculate_credit_cost,
+    VOICE_MODEL_KEY,
+    VOICES,
+    DEFAULT_VOICE_ID,
 )
 from api_client import (
     SeedanceAPIClient,
@@ -94,8 +98,38 @@ def get_user_prefs(user_id: int) -> Dict[str, Any]:
             "image_ratio": DEFAULT_IMAGE_RATIO,
             "audio": DEFAULT_AUDIO,
             "ref_mode": "ref",
+            "voice_id": DEFAULT_VOICE_ID,
+            "voice_mode": "tts",
         }
     return user_prefs[user_id]
+
+
+PLACEHOLDER_PROMPTS = (
+    "Кинематографичное видео с плавной динамикой",
+    "Фотореалистичное изображение в высоком разрешении",
+    "Анимировать фото, реалистичное кинематографичное видео",
+    "Стилизовать изображение по референсу в высоком качестве",
+    "Анимировать сцену, плавное движение",
+    "Сгенерируй видео под прикрепленный звук",
+)
+
+
+def voice_text_of(draft: Dict[str, Any]) -> str:
+    """Text to speak. Video/photo placeholder prompts are not speech."""
+    text = (draft.get("prompt") or "").strip()
+    return "" if text in PLACEHOLDER_PROMPTS else text
+
+
+def tabs_row(active: str, owner_id: int) -> List[InlineKeyboardButton]:
+    """Three top tabs: video / photo / voice. ✅ stays for old clients, style=primary colors it on new ones."""
+    items = [("video", "🎬 Видео"), ("image", "🖼 Фото"), ("voice", "🎙 Голос")]
+    row = []
+    for key, label in items:
+        if key == active:
+            row.append(InlineKeyboardButton(text=f"✅ {label}", callback_data=f"tab:{key}:{owner_id}", style="primary"))
+        else:
+            row.append(InlineKeyboardButton(text=label, callback_data=f"tab:{key}:{owner_id}"))
+    return row
 
 
 def build_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeyboardMarkup:
@@ -104,7 +138,44 @@ def build_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeybo
     menu_mode = draft.get("menu_mode", "video")
     if menu_mode == "image":
         return build_image_settings_keyboard(draft, owner_id)
+    if menu_mode == "voice":
+        return build_voice_settings_keyboard(draft, owner_id)
     return build_video_settings_keyboard(draft, owner_id)
+
+
+def build_voice_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeyboardMarkup:
+    """Voice tab: mode (text→voice / revoice), voice picker, generate."""
+    mode = draft.get("voice_mode", "tts")
+    cur_voice = draft.get("voice_id", DEFAULT_VOICE_ID)
+    rows = [tabs_row("voice", owner_id)]
+
+    tts_on, ch_on = mode == "tts", mode == "changer"
+    rows.append([
+        InlineKeyboardButton(text=("✅ " if tts_on else "") + "✍️ Текст → голос", callback_data=f"vmode:tts:{owner_id}", **({"style": "primary"} if tts_on else {})),
+        InlineKeyboardButton(text=("✅ " if ch_on else "") + "🎤 Переозвучка", callback_data=f"vmode:changer:{owner_id}", **({"style": "primary"} if ch_on else {})),
+    ])
+
+    row = []
+    for i, v in enumerate(VOICES):
+        active = v["id"] == cur_voice
+        lbl = f"{v['emoji']} {v['name']}"
+        if active:
+            lbl = f"✅ {lbl}"
+        row.append(InlineKeyboardButton(text=lbl, callback_data=f"vvoice:{i}:{owner_id}", **({"style": "primary"} if active else {})))
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+
+    ready = bool(draft.get("audio_bytes")) if mode == "changer" else bool(voice_text_of(draft))
+    cost = calculate_credit_cost(VOICE_MODEL_KEY, 0, "")
+    label = "🎙 Озвучить" if mode == "tts" else "🎤 Переозвучить"
+    if cost > 0:
+        label += f" · ~{cost} кр."
+    rows.append([InlineKeyboardButton(text=label, callback_data=f"gen:{owner_id}", **({"style": "success"} if ready else {}))])
+    rows.append([InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}", style="danger")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeyboardMarkup:
@@ -140,11 +211,7 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     # STEP 1: Model Selection
     if step == "model":
         rows = [
-            # Switcher row (✅ text kept for older Telegram clients; style="primary" colors it on new ones)
-            [
-                InlineKeyboardButton(text="✅ 🎬 Видео / Озвучка", callback_data=f"tab:video:{owner_id}", style="primary"),
-                InlineKeyboardButton(text="🖼 Генерация Фото", callback_data=f"tab:image:{owner_id}"),
-            ]
+            tabs_row("video", owner_id)
         ]
         # Video Models grid (2 per row)
         cur_row = []
@@ -317,10 +384,7 @@ def build_image_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     ref_images: List[bytes] = draft.get("ref_images", [])
 
     # Top Switcher Row: Video Menu vs Image Menu
-    switcher_row = [
-        InlineKeyboardButton(text="🎬 Видео / Озвучка", callback_data=f"tab:video:{owner_id}"),
-        InlineKeyboardButton(text="✅ 🖼 Генерация Фото", callback_data=f"tab:image:{owner_id}", style="primary"),
-    ]
+    switcher_row = tabs_row("image", owner_id)
 
     # Image Models grid (2 per row)
     model_rows = []
@@ -452,7 +516,27 @@ def format_draft_text(draft: Dict[str, Any]) -> str:
     menu_mode = draft.get("menu_mode", "video")
     if menu_mode == "image":
         return format_image_draft_text(draft)
+    if menu_mode == "voice":
+        return format_voice_draft_text(draft)
     return format_video_draft_text(draft)
+
+
+def format_voice_draft_text(draft: Dict[str, Any]) -> str:
+    mode = draft.get("voice_mode", "tts")
+    voice = next((v for v in VOICES if v["id"] == draft.get("voice_id")), VOICES[0])
+    if mode == "changer":
+        has_audio = bool(draft.get("audio_bytes"))
+        body = (
+            "🎤 <b>Переозвучка</b> — голос из записи меняется на выбранный\n"
+            + ("Запись получена ✅" if has_audio else "Отправь голосовое или аудио в чат 👇")
+        )
+    else:
+        text = voice_text_of(draft)
+        body = (
+            "✍️ <b>Текст → голос</b>\n"
+            + (f"<blockquote expandable>{html.escape(text[:500])}</blockquote>" if text else "Напиши текст сообщением в чат 👇")
+        )
+    return f"🎙 <b>Голос</b> · {voice['emoji']} {voice['name']}\n\n{body}"
 
 
 def format_video_draft_text(draft: Dict[str, Any]) -> str:
@@ -615,6 +699,8 @@ def create_draft_for_user(
         refs.append(image_bytes)
 
     active_model = prefs["image_model_key"] if menu_mode == "image" else prefs["model_key"]
+    if menu_mode == "voice":
+        active_model = VOICE_MODEL_KEY
     if menu_mode == "image" and active_model not in IMAGE_MODEL_KEYS:
         active_model = DEFAULT_IMAGE_MODEL
     elif menu_mode == "video" and active_model not in VIDEO_MODEL_KEYS:
@@ -638,6 +724,8 @@ def create_draft_for_user(
         "ref_mode": prefs.get("ref_mode", "ref"),
         "menu_mode": menu_mode,
         "step": "model" if menu_mode == "video" else "main",
+        "voice_id": prefs.get("voice_id", DEFAULT_VOICE_ID),
+        "voice_mode": "changer" if (menu_mode == "voice" and audio_bytes) else prefs.get("voice_mode", "tts"),
         "model_key": active_model,
         "duration": init_dur,
         "resolution": prefs["resolution"],
@@ -669,71 +757,29 @@ async def handle_start_and_help(message: Message, state: FSMContext):
 
     start_kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🎬 Меню генерации видео", callback_data=f"open_menu:video:{uid}", style="success"),
-            InlineKeyboardButton(text="🖼 Меню генерации фото", callback_data=f"open_menu:image:{uid}", style="primary"),
+            InlineKeyboardButton(text="🎬 Видео", callback_data=f"open_menu:video:{uid}", style="success"),
+            InlineKeyboardButton(text="🖼 Фото", callback_data=f"open_menu:image:{uid}", style="primary"),
+            InlineKeyboardButton(text="🎙 Голос", callback_data=f"open_menu:voice:{uid}", style="primary"),
         ]
     ])
 
-    admin_block = ""
-    if user_access.is_admin(message.from_user):
-        admin_block = (
-            "\n\n👑 <b>Команды администратора:</b>\n"
-            "• <code>/allow all</code> — открыть доступ сразу всем в группе\n"
-            "• <code>/allow @username</code> — выдать доступ пользователю (в ЛС или группе)\n"
-            "• <code>/revoke all</code> — закрыть общий доступ группы\n"
-            "• <code>/revoke @username</code> — закрыть доступ пользователю\n"
-            "• <code>/allowed</code> — список допущенных пользователей и групп"
-        )
-
-    if message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
-        group_text = (
-            f"👋 <b>Привет, {first_name}!</b> Я мультимодельный ИИ-бот <b>Poco AI</b>.\n\n"
-            f"🎬 <b>Видео модели (все с поддержкой референсов!):</b>\n"
-            f"• <b>Seedance 2.5 / 2.0 / Fast / Mini / 1.5 Pro</b> (с нашего сайта)\n"
-            f"• <b>Kling 4.0 & Kling 4.0 Flash</b>\n"
-            f"• <b>Flux 3 & Flux 3 Max</b>\n"
-            f"• <b>LTX 2.5 Pro & Gemini OmniFlash 1.2</b>\n"
-            f"• <b>ElevenLabs TTS V3</b> (озвучка)\n\n"
-            f"🖼 <b>Отдельное меню генерации фото (с референсами!):</b>\n"
-            f"• <b>Nano Banana 2.1 / Pro / Standard</b>\n"
-            f"• <b>☀️ GPT Image 2.6 Sunburst & ✨ Flare</b>\n"
-            f"• <b>Flux 3 Image & Flux 3 Klein</b>\n"
-            f"• <b>Qwen Image 3.0 & Постеры</b>\n\n"
-            f"📌 <b>Команды в группе:</b>\n"
-            f"• <code>/video промпт</code> (или фото с подписью <code>/video</code>) — меню генерации видео\n"
-            f"• <code>/image промпт</code> (или фото с подписью <code>/image</code>) — отдельное меню генерации фото\n"
-            f"• <code>/grid</code> (или <code>/сетка</code>) — наложить толстую сетку (2×2, 3×3, 4×4...) на фото\n"
-            f"• <code>/balance</code> — просмотр баланса кредитов DaVinci AI\n"
-            f"• <code>/last</code> — забрать последнее готовое видео с сайта\n"
-            f"• <code>/model</code> — выбор модели по умолчанию"
-            f"{admin_block}"
-        )
-        await message.reply(group_text, reply_markup=start_kb, parse_mode="HTML")
-        return
-
-    welcome_text = (
-        f"👋 <b>Привет, {first_name}!</b>\n\n"
-        f"Я мультимодельный ИИ-бот <b>Poco AI</b> для генерации видео, фото и озвучки!\n\n"
-        f"🎬 <b>Видео и Аудио модели:</b>\n"
-        f"• <b>✨ Seedance 2.5 / 2.0 / 2.0 Fast / 2.0 Mini / 1.5 Pro</b> — полная линейка с нашего сайта со звуком и мульти-референсами\n"
-        f"• <b>🎥 Kling 4.0 & ⚡ Kling 4.0 Flash</b> — кинематографичное видео (до 30с и 10 референсов)\n"
-        f"• <b>🌊 Flux 3 & 🔥 Flux 3 Max</b> — новые видео-модели Flux со звуком\n"
-        f"• <b>🎞 LTX 2.5 Pro</b> — реалистичное видео со звуком\n"
-        f"• <b>💎 Gemini OmniFlash 1.2</b> — видео до 4K с мульти-референсами\n"
-        f"• <b>🎙 ElevenLabs V3</b> — студийная озвучка текста и референсов\n"
-        f"• <b>🌌 Grok Imagine / 1.5 & MiniMax H3</b>\n\n"
-        f"🖼 <b>Отдельное меню Изображений (<code>/image</code>):</b>\n"
-        f"• <b>🍌 Nano Banana 2.1 / Pro / Standard</b> (до 4K и до 14 референсов!)\n"
-        f"• <b>☀️ GPT Image 2.6 Sunburst & ✨ Flare</b> (OpenAI, до 10 референсов, 1 кредит)\n"
-        f"• <b>🎨 Flux 3 Image & ✨ Flux 3 Klein</b> (до 4K и 10 референсов)\n"
-        f"• <b>🖼 Qwen Image 3.0 & Qwen Постер</b>\n\n"
-        f"💳 <b>Просмотр баланса:</b> команда <code>/balance</code> или <code>/credits</code>\n"
-        f"🔲 <b>Сетка на изображение:</b> команда <code>/grid</code> или <code>/сетка</code>\n\n"
-        f"📎 <b>Референсы для всех моделей:</b>\n"
-        f"Отправьте одно или несколько фото с подписью или прямо во время настройки меню — они прикрепятся как референс!"
-        f"{admin_block}"
+    in_group = message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP)
+    how = (
+        "Напишите <code>/video текст</code>, <code>/image текст</code> или <code>/voice текст</code>"
+        if in_group
+        else "Просто напишите, что создать, или выберите ниже"
     )
-    await message.answer(welcome_text, reply_markup=start_kb, parse_mode="HTML")
+    text = (
+        f"👋 <b>{html.escape(first_name)}, это Poco AI</b>\n"
+        f"Видео, фото и озвучка за пару тапов.\n\n"
+        f"{how} 👇\n\n"
+        f"<blockquote>📎 Фото с подписью станет референсом\n"
+        f"💳 /balance · 🔲 /grid · 🤖 /model</blockquote>"
+    )
+    if in_group:
+        await message.reply(text, reply_markup=start_kb, parse_mode="HTML")
+    else:
+        await message.answer(text, reply_markup=start_kb, parse_mode="HTML")
 
 
 async def extract_image_bytes(message: Message, bot: Bot) -> Optional[bytes]:
@@ -949,11 +995,13 @@ async def handle_id_command(message: Message):
     user_un = message.from_user.username
     chat_id = message.chat.id
     chat_type = message.chat.type
+    access_status = "👑 Создатель/Администратор" if user_access.is_admin(message.from_user) else ("✅ Доступ разрешен" if user_access.is_user_allowed(message.from_user) else "⛔ Нет индивидуального доступа в ЛС")
     await message.reply(
         f"👤 <b>Ваш профиль в Telegram:</b>\n"
         f"• <b>ID:</b> <code>{user_id}</code>\n"
         f"• <b>Username:</b> @{user_un or 'отсутствует'}\n"
         f"• <b>Имя:</b> {html.escape(message.from_user.full_name or '')}\n"
+        f"• <b>Статус доступа:</b> {access_status}\n"
         f"• <b>Чат ID:</b> <code>{chat_id}</code> ({chat_type})",
         parse_mode="HTML",
     )
@@ -967,17 +1015,14 @@ async def handle_admin_auth_command(message: Message, command: CommandObject):
     user_un = (message.from_user.username or "").lower().strip()
 
     if access_manager.verify_admin_password(raw) or user_access.authenticate_admin(message.from_user, raw):
+        user_access.authenticate_admin(message.from_user, raw)
         if user_id not in config.ADMIN_TELEGRAM_IDS:
             config.ADMIN_TELEGRAM_IDS.append(user_id)
-        user_access.authenticate_admin(message.from_user, raw)
         await message.reply(
             f"👑 <b>Вы успешно авторизованы как Администратор!</b>\n\n"
             f"👤 <b>Username:</b> @{user_un or 'не задан'}\n"
             f"🆔 <b>Ваш ID:</b> <code>{user_id}</code>\n\n"
             f"✨ Теперь вам доступны команды:\n"
-            f"• <code>/allow @username</code> — выдать доступ к боту\n"
-            f"• <code>/revoke @username</code> — отозвать доступ\n"
-            f"• <code>/allowed</code> — список допущенных пользователей\n"
             f"• <code>/genkey [заметка]</code> — генерация ключа доступа\n"
             f"• <code>/keys</code> — просмотр активных ключей\n"
             f"• <code>/token [x-token]</code> — обновление токена DaVinci",
@@ -991,6 +1036,103 @@ async def handle_admin_auth_command(message: Message, command: CommandObject):
             f"<i>Ваш ID: <code>{user_id}</code>, Username: @{user_un or 'не задан'}</i>",
             parse_mode="HTML",
         )
+
+
+@router.message(Command("genkey", "key", "createkey", "создатьключ", ignore_case=True, ignore_mention=True))
+async def handle_genkey_command(message: Message, command: CommandObject):
+    """Generate a new random access key for POCO AI Studio (restricted to German / Admins)."""
+    user_un = (message.from_user.username or "").lower().strip()
+    user_id = message.from_user.id
+    args = (command.args or "").strip()
+
+    is_admin = (
+        user_un in [u.lower() for u in getattr(config, "ADMIN_TELEGRAM_USERNAMES", [])]
+        or user_id in getattr(config, "ADMIN_TELEGRAM_IDS", [])
+        or access_manager.verify_admin_password(args)
+    )
+    if not is_admin:
+        await message.reply(
+            f"🔒 <b>Доступ запрещен.</b>\n"
+            f"Генерация ключей доступна только создателю бота @GermanUstinf.\n\n"
+            f"👤 Ваш username: @{user_un or 'отсутствует'}\n"
+            f"🆔 Ваш ID: <code>{user_id}</code>\n\n"
+            f"💡 Чтобы войти с паролем создателя, введите: <code>/admin ваш_пароль</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    note = "" if access_manager.verify_admin_password(args) else args
+    note = note or f"Telegram от @{message.from_user.username or user_id}"
+    new_key = access_manager.generate_key(note=note, created_by=f"@{message.from_user.username or user_id}")
+
+    await message.reply(
+        f"✨ <b>Новый ключ доступа к POCO AI Studio сгенерирован:</b>\n\n"
+        f"🔑 <code>{new_key}</code>\n\n"
+        f"📝 <b>Заметка:</b> {html.escape(note)}\n"
+        f"🌐 <b>Сайт студии:</b> http://localhost:7860\n\n"
+        f"<i>Нажмите на ключ в сообщении выше, чтобы скопировать и отправить пользователю!</i>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("keys", "ключи", ignore_case=True, ignore_mention=True))
+async def handle_list_keys_command(message: Message):
+    """List recent access keys (restricted to German / Admins)."""
+    user_un = (message.from_user.username or "").lower().strip()
+    user_id = message.from_user.id
+
+    is_admin = (
+        user_un in [u.lower() for u in getattr(config, "ADMIN_TELEGRAM_USERNAMES", [])]
+        or user_id in getattr(config, "ADMIN_TELEGRAM_IDS", [])
+    )
+    if not is_admin:
+        await message.reply(
+            f"🔒 Доступ только для создателя @GermanUstinf.\n"
+            f"Авторизация: <code>/admin ваш_пароль</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    keys = access_manager.get_all_keys()[:15]
+    if not keys:
+        await message.reply("Список ключей пуст. Создайте ключ командой /genkey [заметка]", parse_mode="HTML")
+        return
+
+    lines = ["🔑 <b>Последние ключи доступа к сайту:</b>\n"]
+    for k in keys:
+        status_icon = "🟢" if k.get("active", True) else "🔴"
+        bind_status = "📱 <i>Используется</i>" if k.get("bound_client_id") else "⚪ <i>Свободен</i>"
+        lines.append(
+            f"{status_icon} <code>{k['key']}</code> — <i>{html.escape(k.get('note', ''))}</i> ({bind_status}, входов: {k.get('used_count', 0)})"
+        )
+    lines.append("\n<i>Создать новый: <code>/genkey [заметка]</code></i>")
+    lines.append("<i>Сбросить привязку: <code>/unbind КЛЮЧ</code></i>")
+    await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("unbind", "resetkey", "сброситьключ", ignore_case=True, ignore_mention=True))
+async def handle_unbind_key_command(message: Message, command: CommandObject):
+    """Unbind a key from its device so another person can use it."""
+    user_un = (message.from_user.username or "").lower().strip()
+    user_id = message.from_user.id
+    is_admin = (
+        user_un in [u.lower() for u in getattr(config, "ADMIN_TELEGRAM_USERNAMES", [])]
+        or user_id in getattr(config, "ADMIN_TELEGRAM_IDS", [])
+    )
+    if not is_admin:
+        await message.reply("🔒 Доступ только для создателя @GermanUstinf.", parse_mode="HTML")
+        return
+
+    target_key = (command.args or "").strip().upper()
+    if not target_key:
+        await message.reply("Использование: <code>/unbind POCO-XXXX-XXXX-XXXX</code>", parse_mode="HTML")
+        return
+
+    ok = access_manager.unbind_key(target_key)
+    if ok:
+        await message.reply(f"✅ Привязка ключа <code>{target_key}</code> сброшена! Теперь его можно активировать на новом устройстве.", parse_mode="HTML")
+    else:
+        await message.reply(f"❌ Ключ <code>{target_key}</code> не найден в базе.", parse_mode="HTML")
 
 
 @router.message(Command("allow", "allowall", "allow_all"), ~F.photo, ~F.document)
@@ -1331,107 +1473,7 @@ async def handle_allowed_users_list_command(message: Message):
             display = f"<b>{u.get('name') or uname or uid}</b> {uname if u.get('name') != uname else ''} {uid}{role_badge}"
             lines.append(f"{i}. {display.strip()}")
 
-    lines.append("\n<i>Выдать группе: <code>/allow all</code> (в группе)</i>")
-    lines.append("<i>Выдать пользователю: <code>/allow @username</code></i>")
-    lines.append("<i>Отозвать: <code>/revoke @username</code> или <code>/revoke all</code></i>")
     await message.reply("\n".join(lines), parse_mode="HTML")
-
-
-@router.message(Command("genkey", "key", "createkey", "создатьключ", ignore_case=True, ignore_mention=True))
-async def handle_genkey_command(message: Message, command: CommandObject):
-    """Generate a new random access key for POCO AI Studio (restricted to German / Admins)."""
-    user_un = (message.from_user.username or "").lower().strip()
-    user_id = message.from_user.id
-    args = (command.args or "").strip()
-
-    is_admin = (
-        user_un in [u.lower() for u in getattr(config, "ADMIN_TELEGRAM_USERNAMES", [])]
-        or user_id in getattr(config, "ADMIN_TELEGRAM_IDS", [])
-        or access_manager.verify_admin_password(args)
-    )
-    if not is_admin:
-        await message.reply(
-            f"🔒 <b>Доступ запрещен.</b>\n"
-            f"Генерация ключей доступна только создателю бота @GermanUstinf.\n\n"
-            f"👤 Ваш username: @{user_un or 'отсутствует'}\n"
-            f"🆔 Ваш ID: <code>{user_id}</code>\n\n"
-            f"💡 Чтобы войти с паролем создателя, введите: <code>/admin ваш_пароль</code>",
-            parse_mode="HTML",
-        )
-        return
-
-    note = "" if access_manager.verify_admin_password(args) else args
-    note = note or f"Telegram от @{message.from_user.username or user_id}"
-    new_key = access_manager.generate_key(note=note, created_by=f"@{message.from_user.username or user_id}")
-
-    await message.reply(
-        f"✨ <b>Новый ключ доступа к POCO AI Studio сгенерирован:</b>\n\n"
-        f"🔑 <code>{new_key}</code>\n\n"
-        f"📝 <b>Заметка:</b> {html.escape(note)}\n"
-        f"🌐 <b>Сайт студии:</b> http://localhost:7860\n\n"
-        f"<i>Нажмите на ключ в сообщении выше, чтобы скопировать и отправить пользователю!</i>",
-        parse_mode="HTML",
-    )
-
-
-@router.message(Command("keys", "ключи", ignore_case=True, ignore_mention=True))
-async def handle_list_keys_command(message: Message):
-    """List recent access keys (restricted to German / Admins)."""
-    user_un = (message.from_user.username or "").lower().strip()
-    user_id = message.from_user.id
-
-    is_admin = (
-        user_un in [u.lower() for u in getattr(config, "ADMIN_TELEGRAM_USERNAMES", [])]
-        or user_id in getattr(config, "ADMIN_TELEGRAM_IDS", [])
-    )
-    if not is_admin:
-        await message.reply(
-            f"🔒 Доступ только для создателя @GermanUstinf.\n"
-            f"Авторизация: <code>/admin ваш_пароль</code>",
-            parse_mode="HTML",
-        )
-        return
-
-    keys = access_manager.get_all_keys()[:15]
-    if not keys:
-        await message.reply("Список ключей пуст. Создайте ключ командой /genkey [заметка]", parse_mode="HTML")
-        return
-
-    lines = ["🔑 <b>Последние ключи доступа к сайту:</b>\n"]
-    for k in keys:
-        status_icon = "🟢" if k.get("active", True) else "🔴"
-        bind_status = "📱 <i>Используется</i>" if k.get("bound_client_id") else "⚪ <i>Свободен</i>"
-        lines.append(
-            f"{status_icon} <code>{k['key']}</code> — <i>{html.escape(k.get('note', ''))}</i> ({bind_status}, входов: {k.get('used_count', 0)})"
-        )
-    lines.append("\n<i>Создать новый: <code>/genkey [заметка]</code></i>")
-    lines.append("<i>Сбросить привязку: <code>/unbind КЛЮЧ</code></i>")
-    await message.reply("\n".join(lines), parse_mode="HTML")
-
-
-@router.message(Command("unbind", "resetkey", "сброситьключ", ignore_case=True, ignore_mention=True))
-async def handle_unbind_key_command(message: Message, command: CommandObject):
-    """Unbind a key from its device so another person can use it."""
-    user_un = (message.from_user.username or "").lower().strip()
-    user_id = message.from_user.id
-    is_admin = (
-        user_un in [u.lower() for u in getattr(config, "ADMIN_TELEGRAM_USERNAMES", [])]
-        or user_id in getattr(config, "ADMIN_TELEGRAM_IDS", [])
-    )
-    if not is_admin:
-        await message.reply("🔒 Доступ только для создателя @GermanUstinf.", parse_mode="HTML")
-        return
-
-    target_key = (command.args or "").strip().upper()
-    if not target_key:
-        await message.reply("Использование: <code>/unbind POCO-XXXX-XXXX-XXXX</code>", parse_mode="HTML")
-        return
-
-    ok = access_manager.unbind_key(target_key)
-    if ok:
-        await message.reply(f"✅ Привязка ключа <code>{target_key}</code> сброшена! Теперь его можно активировать на новом устройстве.", parse_mode="HTML")
-    else:
-        await message.reply(f"❌ Ключ <code>{target_key}</code> не найден в базе.", parse_mode="HTML")
 
 
 @router.message(Command("last", "sync"))
@@ -1670,6 +1712,9 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
 async def handle_photo(message: Message, bot: Bot, state: FSMContext):
     if message.document:
         doc = message.document
+        is_img = (doc.mime_type and doc.mime_type.startswith("image/")) or (
+            doc.file_name and doc.file_name.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
+        )
         is_audio = (doc.mime_type and doc.mime_type.startswith("audio/")) or (
             doc.file_name and doc.file_name.lower().endswith(
                 (".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".opus", ".wma", ".oga")
@@ -1678,10 +1723,6 @@ async def handle_photo(message: Message, bot: Bot, state: FSMContext):
         if is_audio:
             await handle_voice_or_audio(message, bot, state)
             return
-
-        is_img = (doc.mime_type and doc.mime_type.startswith("image/")) or (
-            doc.file_name and doc.file_name.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
-        )
         if not is_img:
             return
 
@@ -1858,7 +1899,7 @@ async def process_photo_batch(
             else "Анимировать фото, реалистичное кинематографичное видео"
         )
 
-    menu_mode = "image" if is_image_cmd else "video"
+    menu_mode = "image" if is_image_cmd else ("voice" if is_voice_cmd else "video")
     cur_prefs = get_user_prefs(user_id)
     cur_model = cur_prefs.get("image_model_key" if menu_mode == "image" else "model_key", DEFAULT_IMAGE_MODEL if menu_mode == "image" else DEFAULT_MODEL)
     minfo = MODELS.get(cur_model, MODELS[DEFAULT_MODEL])
@@ -1876,9 +1917,7 @@ async def process_photo_batch(
         message_id=message.message_id,
         menu_mode=menu_mode,
     )
-    draft["model_key"] = cur_model
-    if is_voice_cmd:
-        draft["model_key"] = "elevenlabs"
+    draft["model_key"] = VOICE_MODEL_KEY if is_voice_cmd else cur_model
 
     sync_draft_references(draft)
     await show_or_update_menu(message, bot, draft, user_id)
@@ -1886,100 +1925,55 @@ async def process_photo_batch(
 
 @router.message(F.voice | F.audio)
 async def handle_voice_or_audio(message: Message, bot: Bot, state: FSMContext):
-    """Support attaching voice/audio reference for ANY video model or ElevenLabs, with or without prompt."""
+    """Support attaching voice/audio reference for ANY video model or ElevenLabs."""
+    is_group = message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP)
+    raw_caption = (message.caption or "").strip()
+    clean_caption = re.sub(r"^/(?:video|gen|prompt|v|s2|voice|tts|eleven|elevenlabs)(?:@[A-Za-z0-9_]+)?\s*", "", raw_caption, flags=re.IGNORECASE).strip()
+    caption_text = clean_caption or raw_caption
+    is_eleven = "eleven" in caption_text.lower() or "озвуч" in caption_text.lower()
+
+    if is_group and not is_eleven and not (caption_text and "видео" in caption_text.lower()):
+        if message.from_user.id not in user_drafts:
+            return
+
     audio_bytes = await extract_audio_bytes(message, bot)
     if not audio_bytes:
         return
 
-    is_group = message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP)
     user_id = message.from_user.id
-    caption = (message.caption or "").strip()
+    draft = user_drafts.get(user_id)
 
-    # In groups, check if addressed or if user already has an active draft open
-    if is_group:
-        bot_info = await bot.me()
-        bot_username = f"@{bot_info.username}".lower()
-        cap_lower = caption.lower()
-        addressed = (
-            caption.startswith(("/video", "/gen", "/prompt", "/v", "/s2", "/voice", "/tts", "/eleven", "/elevenlabs"))
-            or bot_username in cap_lower
-            or (message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id)
-            or (user_id in user_drafts)
-            or (caption and any(w in cap_lower for w in ("видео", "клип", "музык", "трек", "песн", "звук", "анимир", "video", "clip", "music", "song", "audio")))
-        )
-        if not addressed:
-            return
-
-    # Clean prompt from commands and bot mentions (just like with photos)
-    clean_prompt = re.sub(
-        r"^/(video|gen|prompt|v|s2|image|poster|img|pic|photo|banana|qwen|voice|tts|eleven|elevenlabs)(@\w+)?\s*",
-        "",
-        caption,
-        flags=re.I,
-    )
-    if is_group:
-        bot_info = await bot.me()
-        bot_username = f"@{bot_info.username}".lower()
-        clean_prompt = clean_prompt.replace(f"@{bot_info.username}", "").replace(bot_username, "").strip()
-    else:
-        clean_prompt = clean_prompt.strip()
-
-    if not clean_prompt and message.reply_to_message:
-        clean_prompt = (message.reply_to_message.text or message.reply_to_message.caption or "").strip()
-
-    is_eleven = bool(re.search(r"^/(voice|tts|eleven|elevenlabs)", caption, re.I)) or "eleven" in caption.lower() or "озвуч" in caption.lower()
-
-    # Case 1: User already has an active draft open -> attach audio reference to draft!
-    if user_id in user_drafts:
-        draft = user_drafts[user_id]
+    if draft and draft.get("menu_mode", "video") == "voice":
+        # Voice tab: the recording is the source for revoicing
         draft["audio_bytes"] = audio_bytes
-        if clean_prompt:
-            draft["prompt"] = clean_prompt
-        if is_eleven:
-            draft["model_key"] = "elevenlabs"
-            draft["menu_mode"] = "video"
-        sync_draft_references(draft)
-        await show_or_update_menu(message, bot, draft, user_id)
-        return
-
-    # Case 2: In private chat without a prompt -> save in state and prompt user for prompt
-    if not is_group and not clean_prompt:
-        await state.set_state(UserInputState.waiting_for_prompt)
-        await state.update_data(audio_bytes=audio_bytes)
-        quick_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🎬 Открыть меню Видео со звуком", callback_data=f"open_menu:video:{user_id}", style="success"),
-            ]
-        ])
-        await message.answer(
-            "🎵 <b>Аудио-референс получен!</b>\n\n"
-            "• Напишите текстом описание сцены (что должно происходить в видео под эту музыку/голос)\n"
-            "• Или отправьте фото, чтобы анимировать изображение под этот звук\n"
-            "• Или сразу откройте меню видео кнопкой ниже:",
-            reply_markup=quick_kb,
-            parse_mode="HTML"
+        draft["voice_mode"] = "changer"
+        get_user_prefs(user_id)["voice_mode"] = "changer"
+    elif draft and draft.get("menu_mode", "video") == "video" and not is_eleven:
+        # Attach audio reference to the user's active video draft!
+        draft["audio_bytes"] = audio_bytes
+        if caption_text:
+            draft["prompt"] = caption_text
+    elif is_eleven:
+        # "озвуч"/eleven in caption → open the Voice tab in revoice mode
+        draft = create_draft_for_user(
+            user_id=user_id,
+            prompt=caption_text,
+            user_name=get_user_display_name(message.from_user),
+            message_id=message.message_id,
+            menu_mode="voice",
+            audio_bytes=audio_bytes,
         )
-        return
-
-    # Case 3: Prompt is present
-    if not clean_prompt:
-        clean_prompt = "Динамичное кинематографичное видео под прикрепленный аудио-трек"
-
-    cur_prefs = get_user_prefs(user_id)
-    cur_model = cur_prefs.get("model_key", DEFAULT_MODEL)
-
-    draft = create_draft_for_user(
-        user_id=user_id,
-        prompt=clean_prompt,
-        user_name=get_user_display_name(message.from_user),
-        message_id=message.message_id,
-        menu_mode="video",
-        audio_bytes=audio_bytes,
-    )
-    if is_eleven:
-        draft["model_key"] = "elevenlabs"
+        draft["voice_mode"] = "changer"
     else:
-        draft["model_key"] = cur_model
+        prompt = caption_text or "Сгенерируй видео под прикрепленный звук"
+        draft = create_draft_for_user(
+            user_id=user_id,
+            prompt=prompt,
+            user_name=get_user_display_name(message.from_user),
+            message_id=message.message_id,
+            menu_mode="video",
+            audio_bytes=audio_bytes,
+        )
 
     sync_draft_references(draft)
     await show_or_update_menu(message, bot, draft, user_id)
@@ -1991,7 +1985,6 @@ async def handle_waiting_prompt(message: Message, bot: Bot, state: FSMContext):
     data = await state.get_data()
     ref_images: List[bytes] = list(data.get("ref_images") or [])
     image_bytes = data.get("image_bytes")
-    audio_bytes = data.get("audio_bytes")
     if image_bytes and not ref_images:
         ref_images = [image_bytes]
     if not ref_images:
@@ -2016,8 +2009,7 @@ async def handle_waiting_prompt(message: Message, bot: Bot, state: FSMContext):
             target_mode = "video"
             text = cmd_arg
         elif cmd in ("/voice", "/tts", "/eleven", "/elevenlabs"):
-            target_mode = "video"
-            model_override = "elevenlabs"
+            target_mode = "voice"
             text = cmd_arg
         else:
             await state.clear()
@@ -2025,7 +2017,7 @@ async def handle_waiting_prompt(message: Message, bot: Bot, state: FSMContext):
 
     await state.clear()
 
-    if not text:
+    if not text and target_mode != "voice":
         text = (
             "Стилизовать изображение по референсу в высоком качестве"
             if target_mode == "image"
@@ -2040,7 +2032,6 @@ async def handle_waiting_prompt(message: Message, bot: Bot, state: FSMContext):
         user_name=get_user_display_name(message.from_user),
         message_id=message.message_id,
         menu_mode=target_mode,
-        audio_bytes=audio_bytes,
     )
     if model_override:
         draft["model_key"] = model_override
@@ -2145,10 +2136,6 @@ async def handle_video_command(message: Message, command: CommandObject, bot: Bo
     if not prompt_args and not ref_images:
         prompt_args = "Кинематографичная сцена, высокая детализация"
 
-    reply_audio: Optional[bytes] = None
-    if message.reply_to_message:
-        reply_audio = await extract_audio_bytes(message.reply_to_message, bot)
-
     draft = create_draft_for_user(
         user_id=user_id,
         prompt=prompt_args,
@@ -2157,7 +2144,6 @@ async def handle_video_command(message: Message, command: CommandObject, bot: Bo
         user_name=user_name,
         message_id=message.message_id,
         menu_mode="video",
-        audio_bytes=reply_audio,
     )
     if reply_video:
         draft["ref_video"] = reply_video
@@ -2212,19 +2198,14 @@ async def handle_voice_command(message: Message, command: CommandObject, bot: Bo
     prompt_args = (command.args or "").strip()
     if not prompt_args and message.reply_to_message:
         prompt_args = (message.reply_to_message.text or message.reply_to_message.caption or "").strip()
-    if not prompt_args:
-        prompt_args = "Привет! Это студийная озвучка ElevenLabs в боте Poco AI."
-
-    image_bytes = await extract_image_bytes(message, bot)
     draft = create_draft_for_user(
         user_id=user_id,
         prompt=prompt_args,
-        image_bytes=image_bytes,
         user_name=user_name,
         message_id=message.message_id,
-        menu_mode="video",
+        menu_mode="voice",
     )
-    draft["model_key"] = "elevenlabs"
+    draft["model_key"] = VOICE_MODEL_KEY
     await show_or_update_menu(message, bot, draft, user_id)
 
 
@@ -2701,15 +2682,13 @@ async def handle_text(message: Message, bot: Bot, state: FSMContext):
             return
 
         found_refs = await get_all_photos_for_message_or_reply(message, bot)
-        found_audio = await extract_audio_bytes(message, bot)
         draft = create_draft_for_user(
             user_id=message.from_user.id,
             prompt=clean_prompt,
             image_bytes=found_refs[0] if found_refs else None,
             ref_images=found_refs,
             user_name=get_user_display_name(message.from_user),
-            message_id=message.message_id,
-            audio_bytes=found_audio,
+            message_id=message.message_id
         )
         await show_or_update_menu(message, bot, draft, message.from_user.id)
         return
@@ -2722,17 +2701,15 @@ async def handle_text(message: Message, bot: Bot, state: FSMContext):
         await show_or_update_menu(message, bot, draft, user_id)
         return
 
-    # If replying to a photo/album/audio in private chat:
+    # If replying to a photo/album in private chat:
     found_refs = await get_all_photos_for_message_or_reply(message, bot)
-    found_audio = await extract_audio_bytes(message, bot)
     draft = create_draft_for_user(
         user_id=message.from_user.id,
         prompt=text,
         image_bytes=found_refs[0] if found_refs else None,
         ref_images=found_refs,
         user_name=get_user_display_name(message.from_user),
-        message_id=message.message_id,
-        audio_bytes=found_audio,
+        message_id=message.message_id
     )
     await show_or_update_menu(message, bot, draft, message.from_user.id)
 
@@ -2759,24 +2736,25 @@ async def on_open_menu_from_button(call: CallbackQuery, state: FSMContext):
 
     data = await state.get_data()
     ref_images: List[bytes] = list(data.get("ref_images") or [])
-    audio_bytes = data.get("audio_bytes")
     await state.clear()
 
     uid = call.from_user.id
     default_prompt = (
         "Фотореалистичное изображение в высоком разрешении"
         if target_mode == "image"
+        else "" if target_mode == "voice"
         else "Кинематографичное видео с плавной динамикой"
     )
     draft = user_drafts.get(uid)
     if draft:
         draft["menu_mode"] = target_mode
         draft["step"] = "model" if target_mode == "video" else "main"
+        if target_mode == "voice":
+            draft["model_key"] = VOICE_MODEL_KEY
+            draft["voice_mode"] = "changer" if draft.get("audio_bytes") else draft.get("voice_mode", "tts")
         if ref_images:
             draft["ref_images"] = list(ref_images)
             draft["image_bytes"] = ref_images[0]
-        if audio_bytes and not draft.get("audio_bytes"):
-            draft["audio_bytes"] = audio_bytes
         if target_mode == "image" and draft.get("model_key") not in IMAGE_MODEL_KEYS:
             draft["model_key"] = get_user_prefs(uid).get("image_model_key", DEFAULT_IMAGE_MODEL)
         elif target_mode == "video" and draft.get("model_key") not in VIDEO_MODEL_KEYS:
@@ -2789,7 +2767,6 @@ async def on_open_menu_from_button(call: CallbackQuery, state: FSMContext):
             user_name=get_user_display_name(call.from_user),
             message_id=call.message.message_id,
             menu_mode=target_mode,
-            audio_bytes=audio_bytes,
         )
 
     draft["menu_message_id"] = call.message.message_id
@@ -2832,8 +2809,13 @@ async def on_switch_menu_tab(call: CallbackQuery):
     prefs = get_user_prefs(owner_id)
     if target_mode == "image":
         draft["model_key"] = prefs.get("image_model_key", DEFAULT_IMAGE_MODEL)
+    elif target_mode == "voice":
+        draft["model_key"] = VOICE_MODEL_KEY
+        draft.setdefault("voice_id", prefs.get("voice_id", DEFAULT_VOICE_ID))
+        draft["voice_mode"] = "changer" if draft.get("audio_bytes") else draft.get("voice_mode") or prefs.get("voice_mode", "tts")
     else:
-        draft["model_key"] = prefs.get("model_key", DEFAULT_MODEL)
+        mk = prefs.get("model_key", DEFAULT_MODEL)
+        draft["model_key"] = mk if mk in VIDEO_MODEL_KEYS else DEFAULT_MODEL
 
     sync_draft_references(draft)
 
@@ -2845,11 +2827,46 @@ async def on_switch_menu_tab(call: CallbackQuery):
         )
     except Exception:
         pass
-    await call.answer(
-        "🖼 Открыто меню генерации изображений"
-        if target_mode == "image"
-        else "🎬 Открыто меню генерации видео"
-    )
+    await call.answer({"image": "🖼 Фото", "voice": "🎙 Голос"}.get(target_mode, "🎬 Видео"))
+
+
+@router.callback_query(F.data.startswith("vmode:"))
+async def on_voice_mode(call: CallbackQuery):
+    _, mode, owner = call.data.split(":")
+    owner_id = int(owner)
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = user_drafts.get(owner_id)
+    if not draft:
+        await call.answer("Откройте меню заново: /voice", show_alert=True)
+        return
+    draft["voice_mode"] = mode if mode in ("tts", "changer") else "tts"
+    get_user_prefs(owner_id)["voice_mode"] = draft["voice_mode"]
+    try:
+        await call.message.edit_text(text=format_draft_text(draft), reply_markup=build_settings_keyboard(draft, owner_id), parse_mode="HTML")
+    except Exception:
+        pass
+    await call.answer("🎤 Отправьте голосовое" if mode == "changer" else "✍️ Напишите текст")
+
+
+@router.callback_query(F.data.startswith("vvoice:"))
+async def on_voice_pick(call: CallbackQuery):
+    _, idx, owner = call.data.split(":")
+    owner_id = int(owner)
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = user_drafts.get(owner_id)
+    i = int(idx)
+    if not draft or not (0 <= i < len(VOICES)):
+        await call.answer("Откройте меню заново: /voice", show_alert=True)
+        return
+    draft["voice_id"] = VOICES[i]["id"]
+    get_user_prefs(owner_id)["voice_id"] = draft["voice_id"]
+    try:
+        await call.message.edit_text(text=format_draft_text(draft), reply_markup=build_settings_keyboard(draft, owner_id), parse_mode="HTML")
+    except Exception:
+        pass
+    await call.answer(f"Голос: {VOICES[i]['name']}")
 
 
 @router.callback_query(F.data.startswith("ref_hint:"))
@@ -3382,6 +3399,15 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
     if not await verify_callback_owner(call, owner_id):
         return
 
+    peek = user_drafts.get(owner_id)
+    if peek and peek.get("menu_mode") == "voice":
+        if peek.get("voice_mode", "tts") == "changer" and not peek.get("audio_bytes"):
+            await call.answer("🎤 Сначала отправьте голосовое или аудио в чат", show_alert=True)
+            return
+        if peek.get("voice_mode", "tts") == "tts" and not voice_text_of(peek):
+            await call.answer("✍️ Сначала напишите текст сообщением в чат", show_alert=True)
+            return
+
     draft = user_drafts.pop(owner_id, None)
     if not draft:
         await call.answer("Параметры устарели. Отправьте новый запрос /video или /image.", show_alert=True)
@@ -3394,8 +3420,10 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
     sync_draft_references(draft)
     menu_mode = draft.get("menu_mode", "video")
     model_key = draft.get("model_key", DEFAULT_IMAGE_MODEL if menu_mode == "image" else DEFAULT_MODEL)
+    if menu_mode == "voice":
+        model_key = VOICE_MODEL_KEY
     model_info = MODELS.get(model_key, MODELS[DEFAULT_MODEL])
-    prompt = draft["prompt"]
+    prompt = voice_text_of(draft) if menu_mode == "voice" else draft["prompt"]
     duration = draft["duration"]
     resolution = draft["image_resolution"] if menu_mode == "image" else draft["resolution"]
     ratio = draft["image_ratio"] if menu_mode == "image" else draft["ratio"]
@@ -3425,36 +3453,35 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
         ref_mode=draft.get("ref_mode", "ref"),
         audio_bytes=draft.get("audio_bytes"),
         ref_video=draft.get("ref_video"),
+        voice_id=draft.get("voice_id", "") if menu_mode == "voice" else "",
+        voice_mode=draft.get("voice_mode", "tts") if menu_mode == "voice" else "tts",
     )
 
     pos = await queue.add_job(job)
-    dur_label = "Авто" if duration == -1 else f"{duration} сек"
-    ref_line = f"📎 <b>Референсов:</b> {len(ref_images)} фото\n" if ref_images else ""
-    video_line = "🎞 <b>Видео-референс:</b> прикреплен к задаче ✅\n" if job.ref_video else ""
-    audio_line = "🎵 <b>Аудио-референс:</b> прикреплен к задаче ✅\n" if job.audio_bytes else ""
-    user_tag = f"👤 <b>Автор:</b> {job.user_name}\n" if job.user_name else ""
     cost = calculate_credit_cost(model_key, duration, resolution)
-    cost_line = f"💳 <b>Стоимость:</b> ~{cost} кредитов\n" if cost > 0 else ""
-
-    param_line = (
-        f"📐 <b>Формат:</b> {resolution} | {ratio}\n"
-        if menu_mode == "image"
-        else f"⏱ <b>Параметры:</b> {dur_label} | {resolution} | {ratio}\n"
-    )
+    chips = []
+    if menu_mode == "image":
+        chips.append(f"{resolution} · {ratio}")
+    elif menu_mode == "voice":
+        v = next((x for x in VOICES if x["id"] == draft.get("voice_id")), VOICES[0])
+        chips.append(f"{v['emoji']} {v['name']}")
+        chips.append("🎤 переозвучка" if job.voice_mode == "changer" else "✍️ текст")
+    else:
+        dur_label = "Авто" if duration == -1 else f"{duration} сек"
+        chips.append(f"{dur_label} · {resolution} · {ratio}")
+    if ref_images:
+        chips.append(f"📎 {len(ref_images)}")
+    if job.ref_video:
+        chips.append("🎞 видео-реф")
+    if cost > 0:
+        chips.append(f"💳 ~{cost} кр.")
+    quote = f"\n<blockquote expandable>{html.escape(prompt[:500])}</blockquote>" if prompt else ""
 
     try:
         await call.message.edit_text(
-            f"⏳ <b>Задача поставлена в очередь!</b>\n\n"
-            f"{user_tag}"
-            f"🔢 <b>Ваша позиция:</b> #{pos}\n"
-            f"🤖 <b>Модель:</b> {model_info['name']}\n"
-            f"📝 <b>Промпт:</b> <i>{html.escape(prompt)}</i>\n"
-            f"{param_line}"
-            f"{ref_line}"
-            f"{video_line}"
-            f"{audio_line}"
-            f"{cost_line}\n"
-            f"<i>Как только очередь дойдет до вас, начнется генерация...</i>",
+            f"⏳ <b>В очереди #{pos}</b>\n"
+            f"<b>{html.escape(model_info['name'])}</b>  ·  " + "  ·  ".join(chips) +
+            f"{quote}",
             parse_mode="HTML"
         )
     except Exception:
