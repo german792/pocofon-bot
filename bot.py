@@ -1633,8 +1633,6 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
         addressed = (
             caption.lower().startswith(("/video", "/gen", "/prompt", "/v", "/s2"))
             or f"@{bot_info.username}".lower() in caption.lower()
-            or (message.reply_to_message and message.reply_to_message.from_user
-                and message.reply_to_message.from_user.id == bot_info.id)
             or fresh_draft(user_id) is not None
         )
         if not addressed:
@@ -1829,7 +1827,6 @@ async def process_photo_batch(
         addressed = (
             caption.startswith(("/video", "/gen", "/prompt", "/v", "/s2", "/image", "/poster", "/img", "/pic", "/photo", "/banana", "/qwen", "/voice", "/tts", "/eleven", "/elevenlabs", "/grid", "/сетка", "/mesh"))
             or bot_username in cap_lower
-            or (message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id)
             or (not caption and fresh_draft(user_id) is not None)
         )
         if not addressed:
@@ -2674,9 +2671,7 @@ async def handle_text(message: Message, bot: Bot, state: FSMContext):
         bot_info = await bot.me()
         bot_username = f"@{bot_info.username}".lower()
         text_lower = text.lower()
-        is_mentioned = bot_username in text_lower or (
-            message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id
-        )
+        is_mentioned = bot_username in text_lower
         if not is_mentioned:
             return
 
@@ -3462,7 +3457,7 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
         voice_mode=draft.get("voice_mode", "tts") if menu_mode == "voice" else "tts",
     )
 
-    pos = await queue.add_job(job)
+    await queue.add_job(job)
     cost = calculate_credit_cost(model_key, duration, resolution)
     chips = []
     if menu_mode == "image":
@@ -3482,7 +3477,7 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
 
     try:
         await call.message.edit_text(
-            f"⏳ <b>В очереди #{pos}</b>\n"
+            f"🚀 <b>Генерация запущена</b>\n"
             f"<b>{html.escape(model_info['name'])}</b>  ·  " + "  ·  ".join(chips) +
             f"{quote}",
             parse_mode="HTML"
