@@ -25,7 +25,8 @@
     "darzam",
     "mrdryfixorg",
     "xammammc",
-    "kumpitau"
+    "kumpitau",
+    "kyza_333"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -41,7 +42,8 @@
     8797766770,
     8286111227,
     8548769968,
-    8330068222
+    8330068222,
+    7699247025
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -177,6 +179,14 @@
       "username": "KUMPITAU",
       "name": "𝕀𝕥𝕫ℝ𝕖𝕒𝕝𝕄𝕖",
       "added_at": 1794483585.1323667,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "kyza_333": {
+      "user_id": 7699247025,
+      "username": "KYZA_333",
+      "name": "GGF ivan",
+      "added_at": 1794486445.8135462,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
