@@ -27,7 +27,8 @@
     "xammammc",
     "kumpitau",
     "kyza_333",
-    "trashpvv"
+    "trashpvv",
+    "mekandev"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -45,7 +46,8 @@
     8548769968,
     8330068222,
     7699247025,
-    7699481303
+    7699481303,
+    8107687181
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -198,6 +200,14 @@
       "name": "@trashPvv",
       "added_at": 1794489939.183954,
       "added_by": "@GermanUstinf",
+      "role": "user"
+    },
+    "mekandev": {
+      "user_id": 8107687181,
+      "username": "MekanDev",
+      "name": "Mekan",
+      "added_at": 1794492904.1162336,
+      "added_by": "group_-1004328649380",
       "role": "user"
     }
   }
