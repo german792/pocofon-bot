@@ -28,7 +28,8 @@
     "kumpitau",
     "kyza_333",
     "trashpvv",
-    "mekandev"
+    "mekandev",
+    "skysava"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -208,6 +209,14 @@
       "name": "Mekan",
       "added_at": 1794492904.1162336,
       "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "skysava": {
+      "user_id": null,
+      "username": "skysava",
+      "name": "@skysava",
+      "added_at": 1794493107.933593,
+      "added_by": "@GermanUstinf",
       "role": "user"
     }
   }
