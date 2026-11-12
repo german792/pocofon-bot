@@ -35,7 +35,8 @@
     "prime_bellinghamtfb",
     "puluhu",
     "kirill_ustinov",
-    "ustfilipp"
+    "ustfilipp",
+    "m8lk8s"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -277,6 +278,14 @@
       "username": "UstFilipp",
       "name": "@UstFilipp",
       "added_at": 1794510057.6670442,
+      "added_by": "@GermanUstinf",
+      "role": "user"
+    },
+    "m8lk8s": {
+      "user_id": null,
+      "username": "M8lk8s",
+      "name": "@M8lk8s",
+      "added_at": 1794511586.4762347,
       "added_by": "@GermanUstinf",
       "role": "user"
     }
