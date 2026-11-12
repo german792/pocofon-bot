@@ -58,7 +58,8 @@
     6621100704,
     7929447959,
     6088597327,
-    8370764855
+    8370764855,
+    143516364
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -262,7 +263,7 @@
       "role": "user"
     },
     "kirill_ustinov": {
-      "user_id": null,
+      "user_id": 143516364,
       "username": "Kirill_Ustinov",
       "name": "@Kirill_Ustinov",
       "added_at": 1794508873.8801274,
