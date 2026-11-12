@@ -34,7 +34,8 @@
     "paveldurov1123",
     "prime_bellinghamtfb",
     "puluhu",
-    "kirill_ustinov"
+    "kirill_ustinov",
+    "ustfilipp"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -267,6 +268,14 @@
       "username": "Kirill_Ustinov",
       "name": "@Kirill_Ustinov",
       "added_at": 1794508873.8801274,
+      "added_by": "@GermanUstinf",
+      "role": "user"
+    },
+    "ustfilipp": {
+      "user_id": null,
+      "username": "UstFilipp",
+      "name": "@UstFilipp",
+      "added_at": 1794510057.6670442,
       "added_by": "@GermanUstinf",
       "role": "user"
     }
