@@ -29,7 +29,8 @@
     "kyza_333",
     "trashpvv",
     "mekandev",
-    "skysava"
+    "skysava",
+    "l982expirement"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -49,7 +50,8 @@
     7699247025,
     7699481303,
     8107687181,
-    5021387380
+    5021387380,
+    6621100704
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -218,6 +220,14 @@
       "name": "@skysava",
       "added_at": 1794493107.933593,
       "added_by": "@GermanUstinf",
+      "role": "user"
+    },
+    "l982expirement": {
+      "user_id": 6621100704,
+      "username": "L982expirement",
+      "name": "Meelky",
+      "added_at": 1794504846.1037183,
+      "added_by": "group_-1004328649380",
       "role": "user"
     }
   }
