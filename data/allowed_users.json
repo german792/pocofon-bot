@@ -26,7 +26,8 @@
     "mrdryfixorg",
     "xammammc",
     "kumpitau",
-    "kyza_333"
+    "kyza_333",
+    "trashpvv"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -188,6 +189,14 @@
       "name": "GGF ivan",
       "added_at": 1794486445.8135462,
       "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "trashpvv": {
+      "user_id": null,
+      "username": "trashPvv",
+      "name": "@trashPvv",
+      "added_at": 1794489939.183954,
+      "added_by": "@GermanUstinf",
       "role": "user"
     }
   }
