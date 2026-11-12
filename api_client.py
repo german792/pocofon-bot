@@ -3,6 +3,8 @@ import base64
 import html
 import json
 import logging
+import shutil
+import tempfile
 import time
 import urllib.parse
 import uuid
@@ -904,7 +906,7 @@ class DaVinciClient:
         try:
             await self.client.post(
                 f"{self.base_url}/uploaded-assets",
-                json={"paths": [final_path]},
+                json={"path": final_path},
                 headers=self._headers(),
             )
         except Exception:
@@ -953,6 +955,61 @@ class DaVinciClient:
             raise RuntimeError("Сервер не вернул id задачи Motion Control")
         return process_id
 
+    async def _trim_video_for_ref(self, video_bytes: bytes, max_seconds: float = 15.0) -> bytes:
+        """Trim reference video cleanly to max_seconds only if its duration exceeds the provider limit."""
+        if not video_bytes or len(video_bytes) < 1024 or max_seconds <= 0:
+            return video_bytes
+        ffprobe_bin = shutil.which("ffprobe")
+        ffmpeg_bin = shutil.which("ffmpeg")
+        if not ffprobe_bin or not ffmpeg_bin:
+            return video_bytes
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                in_path = Path(tmpdir) / "in.mp4"
+                in_path.write_bytes(video_bytes)
+
+                async def _probe(p: Path) -> Optional[float]:
+                    proc = await asyncio.create_subprocess_exec(
+                        ffprobe_bin, "-v", "error", "-show_entries", "format=duration",
+                        "-of", "default=noprint_wrappers=1:nokey=1", str(p),
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    )
+                    out, _ = await asyncio.wait_for(proc.communicate(), timeout=20.0)
+                    txt = out.decode("utf-8", "ignore").strip()
+                    return float(txt) if txt and txt != "N/A" else None
+
+                orig_dur = await _probe(in_path)
+                if orig_dur is None or orig_dur <= max_seconds + 0.25:
+                    return video_bytes
+
+                out_copy = Path(tmpdir) / "out_copy.mp4"
+                proc = await asyncio.create_subprocess_exec(
+                    ffmpeg_bin, "-y", "-i", str(in_path), "-t", f"{max_seconds:.2f}",
+                    "-c", "copy", "-movflags", "+faststart", str(out_copy),
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                )
+                await asyncio.wait_for(proc.communicate(), timeout=30.0)
+                if out_copy.exists() and out_copy.stat().st_size > 1024:
+                    copied_dur = await _probe(out_copy)
+                    if copied_dur is not None and copied_dur <= max_seconds + 0.5:
+                        logger.info(f"[video/process] Trimmed reference video {orig_dur:.2f}s -> {copied_dur:.2f}s (stream copy)")
+                        return out_copy.read_bytes()
+
+                out_re = Path(tmpdir) / "out_re.mp4"
+                proc2 = await asyncio.create_subprocess_exec(
+                    ffmpeg_bin, "-y", "-i", str(in_path), "-t", f"{max_seconds:.2f}",
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "22",
+                    "-c:a", "aac", "-movflags", "+faststart", str(out_re),
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                )
+                await asyncio.wait_for(proc2.communicate(), timeout=60.0)
+                if out_re.exists() and out_re.stat().st_size > 1024:
+                    logger.info(f"[video/process] Trimmed reference video {orig_dur:.2f}s -> {max_seconds:.2f}s (re-encode)")
+                    return out_re.read_bytes()
+        except Exception as trim_err:
+            logger.warning(f"[video/process] Reference video duration check/trim skipped: {trim_err}")
+        return video_bytes
+
     async def create_video_task(
         self,
         model_id: str,
@@ -969,12 +1026,33 @@ class DaVinciClient:
         """Submit video generation task to POST /video/process. Returns processId."""
         await self.ensure_valid_token()
 
+        # Route Seedance video-reference jobs to Enterprise v2 Fast (seedance25 / seedance2 upstream
+        # rejects video_edit unpredictably, whereas seedance2Fast succeeds consistently).
+        effective_model_id = model_id
+        if ref_video and model_id in ("seedance25", "seedance2", "seedance"):
+            logger.info(
+                f"[video/process] Routing video-ref {model_id} -> seedance2Fast "
+                "(reliable Seedance enterprise reference-to-video engine)"
+            )
+            effective_model_id = "seedance2Fast"
+
         video_bucket_path: Optional[str] = None
         if ref_video:
-            video_bucket_path = await self.upload_media(ref_video, ext=".mp4", content_type="video/mp4")
+            max_vid_sec = 15.0
+            if effective_model_id in ("minimaxH3", "geminiOmniFlash11"):
+                max_vid_sec = 10.0
+            elif effective_model_id == "kling4Flash":
+                max_vid_sec = 20.0
+            elif effective_model_id in ("seedance25", "kling4"):
+                max_vid_sec = 30.0
+            trimmed_ref_video = await self._trim_video_for_ref(ref_video, max_seconds=max_vid_sec)
+            video_bucket_path = await self.upload_media(trimmed_ref_video, ext=".mp4", content_type="video/mp4")
 
+        seedance_or_wan_ref = effective_model_id in (
+            "seedance25", "seedance2", "seedance2Fast", "seedance2Mini", "seedance", "wan30", "wan30Prime"
+        )
         audio_bucket_path: Optional[str] = None
-        if audio_bytes:
+        if audio_bytes and not (video_bucket_path and seedance_or_wan_ref):
             audio_bucket_path = await self.upload_media(audio_bytes, ext=".mp3", content_type="audio/mpeg")
 
         bucket_paths: List[str] = []
@@ -984,32 +1062,30 @@ class DaVinciClient:
                     bp = await self.upload_media(img_b, ext=".jpg", content_type="image/jpeg")
                     bucket_paths.append(bp)
 
-        # Normalize duration per model for the upstream API call
+        # Normalize duration per effective model for the upstream API call
         dur = max(1, min(60, duration if duration > 0 else 5))
         api_dur = dur
-        if model_id == "seedance25":
-            if api_dur < 4:
-                api_dur = 4
-            elif api_dur > 30:
-                api_dur = 30
-        elif model_id in ("seedance2", "seedance2Fast", "seedance2Mini", "seedance"):
-            if api_dur < 4:
-                api_dur = 4
-        elif model_id in ("kling4", "kling4Flash"):
+        if effective_model_id == "seedance25":
+            api_dur = max(4, min(30, api_dur))
+        elif effective_model_id in ("seedance2", "seedance2Fast", "seedance2Mini", "seedance"):
+            api_dur = max(4, min(15, api_dur))
+        elif effective_model_id in ("wan30",):
+            api_dur = max(2, min(15 if video_bucket_path else 30, api_dur))
+        elif effective_model_id in ("kling4", "kling4Flash"):
             if api_dur < 3:
                 api_dur = 3
-        elif model_id in ("ltx25Pro", "ltx25Fast"):
+        elif effective_model_id in ("ltx25Pro", "ltx25Fast"):
             if api_dur <= 6:
                 api_dur = 6
             elif api_dur <= 8:
                 api_dur = 8
             else:
                 api_dur = 10
-        elif model_id == "pika22":
+        elif effective_model_id == "pika22":
             api_dur = 5 if api_dur <= 5 else 10
-        elif model_id == "minimax-hailuo-2-3":
+        elif effective_model_id == "minimax-hailuo-2-3":
             api_dur = 5 if api_dur <= 5 else (6 if api_dur <= 6 else 10)
-        elif model_id in (
+        elif effective_model_id in (
             "wan26",
             "wan30Prime",
             "minimaxH3",
@@ -1023,33 +1099,33 @@ class DaVinciClient:
             # These accept 1, 2, 3, 4, 5... directly without minimum clamping
             api_dur = dur
 
-        # Normalize resolution per model
+        # Normalize resolution per effective model
         res: Optional[str] = resolution
-        if model_id in ("kling4Flash", "ltx25Pro", "ltx25Fast"):
+        if effective_model_id in ("kling4Flash", "ltx25Pro", "ltx25Fast"):
             res = None
-        elif model_id == "minimaxH3":
+        elif effective_model_id == "minimaxH3":
             res = "2K" if str(res).lower() in ("1080p", "2k", "4k") else "768P"
-        elif model_id in ("seedance2Fast", "seedance2Mini", "wan30Prime", "wan26", "grok"):
+        elif effective_model_id in ("seedance2Fast", "seedance2Mini", "wan30", "wan30Prime", "wan26", "grok"):
             if res not in ("480p", "720p"):
                 res = "720p"
-        elif model_id in ("kling4", "flux3", "flux3Max", "pixversev6", "minimax-hailuo-2-3", "pika22", "luma-dream-machine", "luma-ray-3-2"):
+        elif effective_model_id in ("kling4", "flux3", "flux3Max", "pixversev6", "minimax-hailuo-2-3", "pika22", "luma-dream-machine", "luma-ray-3-2"):
             if res not in ("720p", "1080p"):
                 res = "720p"
-        elif model_id in ("geminiOmniFlash12", "geminiOmniFlash11"):
+        elif effective_model_id in ("geminiOmniFlash12", "geminiOmniFlash11"):
             if res not in ("360p", "720p", "1080p", "4k"):
                 res = "720p"
         else:
             if res not in ("480p", "720p", "1080p", "4k"):
                 res = "720p"
 
-        # Normalize dimension (aspect ratio) per model
+        # Normalize dimension (aspect ratio) per effective model
         dim = ratio if ratio in ("16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "auto") else "16:9"
-        if model_id in ("ltx25Pro", "ltx25Fast", "geminiOmniFlash12", "geminiOmniFlash11") and dim not in ("16:9", "9:16"):
+        if effective_model_id in ("ltx25Pro", "ltx25Fast", "geminiOmniFlash12", "geminiOmniFlash11") and dim not in ("16:9", "9:16"):
             dim = "16:9"
-        elif model_id in ("kling4", "kling4Flash") and dim not in ("16:9", "9:16", "1:1", "21:9"):
+        elif effective_model_id in ("kling4", "kling4Flash") and dim not in ("16:9", "9:16", "1:1", "21:9"):
             dim = "16:9"
 
-        # Audio support per model
+        # Audio support per effective model
         models_without_audio = (
             "kling4",
             "geminiOmniFlash12",
@@ -1058,7 +1134,7 @@ class DaVinciClient:
             "minimax-hailuo-2-3",
             "pika22",
         )
-        audio_enabled = False if model_id in models_without_audio else bool(generate_audio)
+        audio_enabled = False if effective_model_id in models_without_audio else bool(generate_audio)
 
         # Reference images vs startFrame
         multi_ref_models = (
@@ -1071,6 +1147,7 @@ class DaVinciClient:
             "geminiOmniFlash12",
             "geminiOmniFlash11",
             "minimaxH3",
+            "wan30",
             "wan30Prime",
             "wan26",
             "grok",
@@ -1082,7 +1159,7 @@ class DaVinciClient:
         reference_images_payload: Optional[List[str]] = None
 
         if bucket_paths:
-            if model_id in multi_ref_models:
+            if effective_model_id in multi_ref_models:
                 if ref_mode == "start" and len(bucket_paths) == 1 and not video_bucket_path:
                     start_frame = bucket_paths[0]
                 else:
@@ -1091,7 +1168,7 @@ class DaVinciClient:
                 start_frame = bucket_paths[0]
 
         clean_prompt = (prompt or "").strip() or "Animate this scene with smooth cinematic motion"
-        if video_bucket_path and model_id in ("seedance25", "seedance2", "seedance2Fast", "seedance2Mini", "seedance"):
+        if video_bucket_path and effective_model_id in ("seedance25", "seedance2", "seedance2Fast", "seedance2Mini", "seedance", "wan30", "wan30Prime"):
             has_vid_tag = "@video1" in clean_prompt.lower()
             has_img_tag = "@image1" in clean_prompt.lower()
             if reference_images_payload:
@@ -1110,7 +1187,7 @@ class DaVinciClient:
                 clean_prompt = f"@Video1 следуй видео-референсу @Video1. {clean_prompt}"
 
         payload: Dict[str, Any] = {
-            "modelId": model_id,
+            "modelId": effective_model_id,
             "prompt": clean_prompt,
             "duration": api_dur,
             "dimension": dim,
@@ -1122,33 +1199,17 @@ class DaVinciClient:
             payload["startFrame"] = start_frame
         if reference_images_payload is not None:
             payload["referenceImages"] = reference_images_payload
-        video_ref_models = (
-            "seedance25",
-            "seedance2",
-            "seedance2Fast",
-            "seedance2Mini",
-            "kling4",
-            "kling4Flash",
-            "geminiOmniFlash12",
-            "geminiOmniFlash11",
-            "minimaxH3",
-            "wan30Prime",
-            "wan26",
-            "grok",
-            "runway-aleph",
-            "luma-dream-machine",
-            "luma-ray-3-2",
-        )
         if video_bucket_path:
             payload["inputVideos"] = [video_bucket_path]
 
-        if audio_bucket_path and not (video_bucket_path and model_id in ("seedance25", "seedance2", "seedance2Fast", "seedance2Mini", "seedance")):
+        if audio_bucket_path:
             payload["audio"] = audio_bucket_path
             payload["referenceAudios"] = [audio_bucket_path]
 
         logger.info(
-            f"[video/process] model={model_id} payload keys={sorted(payload.keys())} "
-            f"images={len(reference_images_payload or [])} video={'yes' if video_bucket_path else 'no'}"
+            f"[video/process] model={effective_model_id} (req={model_id}) payload keys={sorted(payload.keys())} "
+            f"images={len(reference_images_payload or [])} video={'yes' if video_bucket_path else 'no'} "
+            f"res={res} dur={api_dur}"
         )
         resp = await self.client.post(
             f"{self.base_url}/video/process",
