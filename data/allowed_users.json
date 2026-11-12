@@ -32,7 +32,8 @@
     "skysava",
     "l982expirement",
     "paveldurov1123",
-    "prime_bellinghamtfb"
+    "prime_bellinghamtfb",
+    "puluhu"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -55,7 +56,8 @@
     5021387380,
     6621100704,
     7929447959,
-    6088597327
+    6088597327,
+    8370764855
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -247,6 +249,14 @@
       "username": "PRIME_BELLINGHAMTFB",
       "name": "BELLIXBroski",
       "added_at": 1794506631.6409776,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "puluhu": {
+      "user_id": 8370764855,
+      "username": "puluhu",
+      "name": "puluhu",
+      "added_at": 1794506751.1498215,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
