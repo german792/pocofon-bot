@@ -1660,21 +1660,27 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
 
     logger.info(f"[refs] video reference from user {user_id}: {len(video_bytes)} bytes, caption={bool(clean_prompt)}")
 
-    # Extract first frame and audio track from the reference video
-    first_frame = await extract_frame_from_video(video_bytes)
+    # Extract audio track from the reference video (do NOT inject first_frame into ref_images so character photo stays @Image1)
     video_audio = await extract_audio_from_video(video_bytes)
 
     draft = fresh_draft(user_id)
     if draft and draft.get("menu_mode", "video") == "video":
         if clean_prompt:
             draft["prompt"] = clean_prompt
+        elif draft.get("ref_images"):
+            draft["prompt"] = "Замени персонажа на видео на персонажа с фото, сохранив движения и композицию"
     else:
         photos = get_recent_photos_for_user(message.chat.id, user_id, max_age_sec=60.0)
+        default_v_prompt = (
+            "Замени персонажа на видео на персонажа с фото, сохранив движения и композицию"
+            if photos
+            else "Измени видео, сохранив движение и композицию"
+        )
         draft = create_draft_for_user(
             user_id=user_id,
-            prompt=clean_prompt or "Измени видео, сохранив движение и композицию",
-            image_bytes=photos[0] if photos else first_frame,
-            ref_images=photos if photos else ([first_frame] if first_frame else []),
+            prompt=clean_prompt or default_v_prompt,
+            image_bytes=photos[0] if photos else None,
+            ref_images=photos if photos else [],
             user_name=get_user_display_name(message.from_user),
             message_id=message.message_id,
             menu_mode="video",
@@ -1682,10 +1688,6 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
         )
 
     draft["ref_video"] = video_bytes
-    if first_frame and not draft.get("ref_images") and not draft.get("image_bytes"):
-        draft["image_bytes"] = first_frame
-        draft["ref_images"] = [first_frame]
-        draft["all_uploaded_refs"] = [first_frame]
     if video_audio and not draft.get("audio_bytes"):
         draft["audio_bytes"] = video_audio
 
@@ -1695,16 +1697,16 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
         get_user_prefs(user_id)["model_key"] = DEFAULT_MODEL
     sync_draft_references(draft)
 
-    info_parts = []
-    if first_frame:
-        info_parts.append("• 🖼 Извлечен первый кадр (старт-кадр сцены)")
+    info_parts = ["• 🎞 Видео-референс прикреплен к задаче (@Video1)"]
+    if draft.get("ref_images"):
+        info_parts.append(f"• 🧑 Персонаж с фото прикреплен ({len(draft['ref_images'])} шт.)")
     if video_audio:
         info_parts.append("• 🎵 Извлечена звуковая дорожка из видео")
     hint_text = "\n".join(info_parts)
     try:
         await message.reply(
-            f"🎞 <b>Видео принято в работу!</b>\n\n{hint_text}\n\n"
-            f"💡 <i>Модели Seedance 2.5 и Kling 4.0 генерируют анимацию по фото и промпту (Image-to-Video). Опишите в промпте, что должен делать персонаж (например: «персонаж танцует брейк-данс под эту музыку»)!</i>",
+            f"🎞 <b>Видео-референс принят!</b>\n\n{hint_text}\n\n"
+            f"💡 <i>Для замены персонажа просто отправьте в чат фото нового героя и нажмите <b>Запустить</b> — Seedance 2.5 перенесёт движения с видео на вашего персонажа.</i>",
             parse_mode="HTML"
         )
     except Exception:
@@ -1861,6 +1863,8 @@ async def process_photo_batch(
         draft = user_drafts[user_id]
         if clean_prompt:
             draft["prompt"] = clean_prompt
+        elif draft.get("ref_video") and draft.get("prompt") in (*PLACEHOLDER_PROMPTS, "Измени видео, сохранив движение и композицию"):
+            draft["prompt"] = "Замени персонажа на видео на персонажа с фото, сохранив движения и композицию"
 
         all_refs = list(draft.get("all_uploaded_refs") or draft.get("orig_ref_images") or draft.get("ref_images") or [])
         for img in images:

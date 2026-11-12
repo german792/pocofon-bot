@@ -1083,7 +1083,7 @@ class DaVinciClient:
 
         if bucket_paths:
             if model_id in multi_ref_models:
-                if ref_mode == "start" and len(bucket_paths) == 1:
+                if ref_mode == "start" and len(bucket_paths) == 1 and not video_bucket_path:
                     start_frame = bucket_paths[0]
                 else:
                     reference_images_payload = bucket_paths
@@ -1091,6 +1091,24 @@ class DaVinciClient:
                 start_frame = bucket_paths[0]
 
         clean_prompt = (prompt or "").strip() or "Animate this scene with smooth cinematic motion"
+        if video_bucket_path and model_id in ("seedance25", "seedance2", "seedance2Fast", "seedance2Mini", "seedance"):
+            has_vid_tag = "@video1" in clean_prompt.lower()
+            has_img_tag = "@image1" in clean_prompt.lower()
+            if reference_images_payload:
+                img_tags = " ".join(f"@Image{i + 1}" for i in range(len(reference_images_payload)))
+                if not has_vid_tag and not has_img_tag:
+                    clean_prompt = (
+                        f"@Video1 точно повтори все движения, мимику, ракурс и динамику из видео 1. "
+                        f"{img_tags} замени персонажа на видео 1 на персонажа с фото, полностью сохранив его внешность, лицо, прическу, одежду и стиль. "
+                        f"Дополнительные детали: {clean_prompt}"
+                    )
+                elif not has_vid_tag:
+                    clean_prompt = f"@Video1 точно следуй движениям и динамике из видео 1. {clean_prompt}"
+                elif not has_img_tag:
+                    clean_prompt = f"{img_tags} используй внешность персонажа с фото. {clean_prompt}"
+            elif not has_vid_tag:
+                clean_prompt = f"@Video1 следуй видео-референсу @Video1. {clean_prompt}"
+
         payload: Dict[str, Any] = {
             "modelId": model_id,
             "prompt": clean_prompt,
@@ -1124,7 +1142,7 @@ class DaVinciClient:
         if video_bucket_path:
             payload["referenceVideos"] = [video_bucket_path]
 
-        if audio_bucket_path:
+        if audio_bucket_path and not (video_bucket_path and model_id in ("seedance25", "seedance2", "seedance2Fast", "seedance2Mini", "seedance")):
             payload["audio"] = audio_bucket_path
             payload["referenceAudios"] = [audio_bucket_path]
 
