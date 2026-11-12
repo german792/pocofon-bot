@@ -24,7 +24,8 @@
     "antifikusgenai",
     "darzam",
     "mrdryfixorg",
-    "xammammc"
+    "xammammc",
+    "kumpitau"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -39,7 +40,8 @@
     8871319864,
     8797766770,
     8286111227,
-    8548769968
+    8548769968,
+    8330068222
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -167,6 +169,14 @@
       "username": "xammammc",
       "name": ".",
       "added_at": 1794471709.4391265,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "kumpitau": {
+      "user_id": 8330068222,
+      "username": "KUMPITAU",
+      "name": "𝕀𝕥𝕫ℝ𝕖𝕒𝕝𝕄𝕖",
+      "added_at": 1794483585.1323667,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
