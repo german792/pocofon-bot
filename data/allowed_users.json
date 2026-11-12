@@ -30,7 +30,8 @@
     "trashpvv",
     "mekandev",
     "skysava",
-    "l982expirement"
+    "l982expirement",
+    "paveldurov1123"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -51,7 +52,8 @@
     7699481303,
     8107687181,
     5021387380,
-    6621100704
+    6621100704,
+    7929447959
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -227,6 +229,14 @@
       "username": "L982expirement",
       "name": "Meelky",
       "added_at": 1794504846.1037183,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "paveldurov1123": {
+      "user_id": 7929447959,
+      "username": "paveldurov1123",
+      "name": "Дмитрий",
+      "added_at": 1794506292.6669748,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
