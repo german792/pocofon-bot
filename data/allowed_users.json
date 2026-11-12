@@ -33,7 +33,8 @@
     "l982expirement",
     "paveldurov1123",
     "prime_bellinghamtfb",
-    "puluhu"
+    "puluhu",
+    "kirill_ustinov"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -258,6 +259,14 @@
       "name": "puluhu",
       "added_at": 1794506751.1498215,
       "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "kirill_ustinov": {
+      "user_id": null,
+      "username": "Kirill_Ustinov",
+      "name": "@Kirill_Ustinov",
+      "added_at": 1794508873.8801274,
+      "added_by": "@GermanUstinf",
       "role": "user"
     }
   }
