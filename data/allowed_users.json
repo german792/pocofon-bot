@@ -23,7 +23,8 @@
     "dofinini",
     "antifikusgenai",
     "darzam",
-    "mrdryfixorg"
+    "mrdryfixorg",
+    "xammammc"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -37,7 +38,8 @@
     6338680334,
     8871319864,
     8797766770,
-    8286111227
+    8286111227,
+    8548769968
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -158,6 +160,14 @@
       "name": "User 8286111227",
       "added_at": 1794471626.0897157,
       "added_by": "@GermanUstinf",
+      "role": "user"
+    },
+    "xammammc": {
+      "user_id": 8548769968,
+      "username": "xammammc",
+      "name": ".",
+      "added_at": 1794471709.4391265,
+      "added_by": "group_-1004328649380",
       "role": "user"
     }
   }
