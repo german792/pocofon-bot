@@ -41,6 +41,24 @@ def render_progress_bar(percent: int, width: int = 12) -> str:
     return f"{bar}  <b>{percent}%</b>"
 
 
+async def _video_has_audio(video_path: Path) -> bool:
+    """Return True if the media file contains at least one audio stream."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "error",
+            "-select_streams", "a:0",
+            "-show_entries", "stream=codec_type",
+            "-of", "csv=p=0",
+            str(video_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=8.0)
+        return proc.returncode == 0 and bool(stdout.decode("utf-8", "ignore").strip())
+    except Exception:
+        return False
+
+
 def _quote(text: str, limit: int = 500) -> str:
     """Prompt as a collapsible blockquote (keeps cards short on a phone screen)."""
     text = (text or "").strip()
@@ -588,8 +606,12 @@ class GenerationQueue:
             logger.info("Applying watermark and audio to video...")
             temp_audio_ref: Optional[Path] = None
             if job.audio_bytes:
-                temp_audio_ref = VIDEOS_DIR / f"ref_audio_{job.user_id}_{ts}.mp3"
-                temp_audio_ref.write_bytes(job.audio_bytes)
+                # For video-reference jobs, keep the generated video's own synchronized audio if
+                # present; fall back to extracted reference audio only when the output is silent.
+                use_ref_audio = not (job.ref_video and await _video_has_audio(raw_file))
+                if use_ref_audio:
+                    temp_audio_ref = VIDEOS_DIR / f"ref_audio_{job.user_id}_{ts}.mp3"
+                    temp_audio_ref.write_bytes(job.audio_bytes)
 
             try:
                 wm_ok = await apply_watermark(
@@ -707,7 +729,9 @@ class GenerationQueue:
 
         try:
             if backend == "davinci":
-                if not all_refs and job.ref_video:
+                # Only extract a fallback start-frame photo for models WITHOUT native inputVideos
+                # support; otherwise sending the video's first frame as @Image1 confuses video_edit.
+                if not all_refs and job.ref_video and not model_info.get("video_ref"):
                     v_frame = await extract_frame_from_video(job.ref_video)
                     if v_frame:
                         all_refs = [v_frame]

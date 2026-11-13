@@ -958,8 +958,13 @@ class DaVinciClient:
             raise RuntimeError("Сервер не вернул id задачи Motion Control")
         return process_id
 
-    async def _trim_video_for_ref(self, video_bytes: bytes, max_seconds: float = 15.0) -> bytes:
-        """Trim reference video cleanly to max_seconds only if its duration exceeds the provider limit."""
+    async def _trim_video_for_ref(
+        self,
+        video_bytes: bytes,
+        max_seconds: float = 15.0,
+        min_seconds: float = 2.2,
+    ) -> bytes:
+        """Normalize reference video: pad < min_seconds, trim > max_seconds, and ensure even h264/yuv420p MP4."""
         if not video_bytes or len(video_bytes) < 1024 or max_seconds <= 0:
             return video_bytes
         ffprobe_bin = shutil.which("ffprobe")
@@ -971,46 +976,104 @@ class DaVinciClient:
                 in_path = Path(tmpdir) / "in.mp4"
                 in_path.write_bytes(video_bytes)
 
-                async def _probe(p: Path) -> Optional[float]:
+                async def _probe_meta(p: Path) -> Dict[str, Any]:
                     proc = await asyncio.create_subprocess_exec(
-                        ffprobe_bin, "-v", "error", "-show_entries", "format=duration",
-                        "-of", "default=noprint_wrappers=1:nokey=1", str(p),
-                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                        ffprobe_bin, "-v", "error",
+                        "-select_streams", "v:0",
+                        "-show_entries", "stream=codec_name,width,height,pix_fmt,duration",
+                        "-show_entries", "format=duration",
+                        "-of", "json",
+                        str(p),
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
                     )
                     out, _ = await asyncio.wait_for(proc.communicate(), timeout=20.0)
-                    txt = out.decode("utf-8", "ignore").strip()
-                    return float(txt) if txt and txt != "N/A" else None
+                    raw = out.decode("utf-8", "ignore").strip()
+                    if not raw:
+                        return {}
+                    data = json.loads(raw)
+                    streams = data.get("streams") or []
+                    st = streams[0] if streams else {}
+                    fmt = data.get("format") or {}
+                    dur_val = fmt.get("duration") or st.get("duration")
+                    dur: Optional[float] = None
+                    if dur_val and str(dur_val) != "N/A":
+                        try:
+                            dur = float(dur_val)
+                        except (TypeError, ValueError):
+                            dur = None
+                    return {
+                        "duration": dur,
+                        "codec": str(st.get("codec_name") or "").lower(),
+                        "pix_fmt": str(st.get("pix_fmt") or "").lower(),
+                        "width": int(st.get("width") or 0),
+                        "height": int(st.get("height") or 0),
+                    }
 
-                orig_dur = await _probe(in_path)
-                if orig_dur is None or orig_dur <= max_seconds + 0.25:
+                meta = await _probe_meta(in_path)
+                orig_dur = meta.get("duration")
+                codec = meta.get("codec", "")
+                pix_fmt = meta.get("pix_fmt", "")
+                vw = meta.get("width", 0)
+                vh = meta.get("height", 0)
+
+                needs_trim = orig_dur is not None and orig_dur > max_seconds + 0.25
+                needs_extend = min_seconds > 0 and orig_dur is not None and 0 < orig_dur < min_seconds
+                needs_reencode = (
+                    codec != "h264"
+                    or (pix_fmt and pix_fmt != "yuv420p")
+                    or (vw > 0 and vw % 2 != 0)
+                    or (vh > 0 and vh % 2 != 0)
+                )
+
+                if orig_dur is not None and not needs_trim and not needs_extend and not needs_reencode:
                     return video_bytes
 
-                out_copy = Path(tmpdir) / "out_copy.mp4"
-                proc = await asyncio.create_subprocess_exec(
-                    ffmpeg_bin, "-y", "-i", str(in_path), "-t", f"{max_seconds:.2f}",
-                    "-c", "copy", "-movflags", "+faststart", str(out_copy),
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-                await asyncio.wait_for(proc.communicate(), timeout=30.0)
-                if out_copy.exists() and out_copy.stat().st_size > 1024:
-                    copied_dur = await _probe(out_copy)
-                    if copied_dur is not None and copied_dur <= max_seconds + 0.5:
-                        logger.info(f"[video/process] Trimmed reference video {orig_dur:.2f}s -> {copied_dur:.2f}s (stream copy)")
-                        return out_copy.read_bytes()
+                if needs_trim and not needs_extend and not needs_reencode:
+                    out_copy = Path(tmpdir) / "out_copy.mp4"
+                    proc = await asyncio.create_subprocess_exec(
+                        ffmpeg_bin, "-y", "-i", str(in_path), "-t", f"{max_seconds:.2f}",
+                        "-c", "copy", "-movflags", "+faststart", str(out_copy),
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    )
+                    await asyncio.wait_for(proc.communicate(), timeout=30.0)
+                    if out_copy.exists() and out_copy.stat().st_size > 1024:
+                        copied_meta = await _probe_meta(out_copy)
+                        copied_dur = copied_meta.get("duration")
+                        if copied_dur is not None and copied_dur <= max_seconds + 0.5 and (min_seconds <= 0 or copied_dur >= min_seconds):
+                            logger.info(f"[video/process] Trimmed reference video {orig_dur:.2f}s -> {copied_dur:.2f}s (stream copy)")
+                            return out_copy.read_bytes()
+
+                vf_parts = ["scale=trunc(iw/2)*2:trunc(ih/2)*2"]
+                if needs_extend and orig_dur is not None:
+                    target_dur = max(min_seconds + 0.3, 2.5)
+                    pad_sec = max(0.3, target_dur - orig_dur)
+                    vf_parts.append(f"tpad=stop_mode=clone:stop_duration={pad_sec:.2f}")
+                vf_parts.append("format=yuv420p")
 
                 out_re = Path(tmpdir) / "out_re.mp4"
-                proc2 = await asyncio.create_subprocess_exec(
-                    ffmpeg_bin, "-y", "-i", str(in_path), "-t", f"{max_seconds:.2f}",
+                cmd = [ffmpeg_bin, "-y", "-i", str(in_path)]
+                if needs_trim:
+                    cmd.extend(["-t", f"{max_seconds:.2f}"])
+                cmd.extend([
+                    "-vf", ",".join(vf_parts),
                     "-c:v", "libx264", "-preset", "fast", "-crf", "22",
                     "-c:a", "aac", "-movflags", "+faststart", str(out_re),
+                ])
+                proc2 = await asyncio.create_subprocess_exec(
+                    *cmd,
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 )
                 await asyncio.wait_for(proc2.communicate(), timeout=60.0)
                 if out_re.exists() and out_re.stat().st_size > 1024:
-                    logger.info(f"[video/process] Trimmed reference video {orig_dur:.2f}s -> {max_seconds:.2f}s (re-encode)")
+                    out_meta = await _probe_meta(out_re)
+                    logger.info(
+                        f"[video/process] Normalized reference video {orig_dur}s -> {out_meta.get('duration')}s "
+                        f"({vw}x{vh} {codec} -> h264 yuv420p)"
+                    )
                     return out_re.read_bytes()
         except Exception as trim_err:
-            logger.warning(f"[video/process] Reference video duration check/trim skipped: {trim_err}")
+            logger.warning(f"[video/process] Reference video normalization skipped: {trim_err}")
         return video_bytes
 
     async def create_video_task(
@@ -1048,7 +1111,14 @@ class DaVinciClient:
                 max_vid_sec = 20.0
             elif effective_model_id in ("seedance25", "kling4"):
                 max_vid_sec = 30.0
-            trimmed_ref_video = await self._trim_video_for_ref(ref_video, max_seconds=max_vid_sec)
+            min_vid_sec = (
+                2.2
+                if effective_model_id in ("seedance25", "seedance2", "seedance2Fast", "seedance2Mini", "seedance")
+                else 0.0
+            )
+            trimmed_ref_video = await self._trim_video_for_ref(
+                ref_video, max_seconds=max_vid_sec, min_seconds=min_vid_sec
+            )
             video_bucket_path = await self.upload_media(trimmed_ref_video, ext=".mp4", content_type="video/mp4")
 
         seedance_or_wan_ref = effective_model_id in (
@@ -1123,6 +1193,8 @@ class DaVinciClient:
 
         # Normalize dimension (aspect ratio) per effective model
         dim = ratio if ratio in ("16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "auto") else "16:9"
+        if dim == "auto" and effective_model_id not in ("seedance25", "seedance2", "seedance2Fast", "seedance2Mini", "seedance", "wan30", "wan30Prime", "wan26"):
+            dim = "16:9"
         if effective_model_id in ("ltx25Pro", "ltx25Fast", "geminiOmniFlash12", "geminiOmniFlash11") and dim not in ("16:9", "9:16"):
             dim = "16:9"
         elif effective_model_id in ("kling4", "kling4Flash") and dim not in ("16:9", "9:16", "1:1", "21:9"):
@@ -1177,17 +1249,29 @@ class DaVinciClient:
             if reference_images_payload:
                 img_tags = " ".join(f"@Image{i + 1}" for i in range(len(reference_images_payload)))
                 if not has_vid_tag and not has_img_tag:
-                    clean_prompt = (
-                        f"@Video1 точно повтори все движения, мимику, ракурс и динамику из видео 1. "
-                        f"{img_tags} замени персонажа на видео 1 на персонажа с фото, полностью сохранив его внешность, лицо, прическу, одежду и стиль. "
-                        f"Дополнительные детали: {clean_prompt}"
+                    low = clean_prompt.lower()
+                    is_character_swap = any(
+                        w in low for w in ("персонаж", "геро", "человек", "лиц", "свап", "swap", "character", "анимир", "animate", "замен")
                     )
+                    if is_character_swap:
+                        clean_prompt = (
+                            f"@Video1 точно повтори все движения, мимику, ракурс и динамику из видео 1. "
+                            f"{img_tags} замени персонажа на видео 1 на персонажа с фото, полностью сохранив его внешность, лицо, прическу, одежду и стиль. "
+                            f"Дополнительные детали: {clean_prompt}"
+                        )
+                    else:
+                        clean_prompt = (
+                            f"@Video1 сохрани движения, камеру и основу сцены из @Video1; "
+                            f"используй {img_tags} как визуальный референс. Задача: {clean_prompt}"
+                        )
                 elif not has_vid_tag:
                     clean_prompt = f"@Video1 точно следуй движениям и динамике из видео 1. {clean_prompt}"
                 elif not has_img_tag:
-                    clean_prompt = f"{img_tags} используй внешность персонажа с фото. {clean_prompt}"
+                    clean_prompt = f"{img_tags} используй внешность и детали с фото. {clean_prompt}"
             elif not has_vid_tag:
-                clean_prompt = f"@Video1 следуй видео-референсу @Video1. {clean_prompt}"
+                clean_prompt = (
+                    f"Измени видео @Video1, сохранив остальную сцену, камеру, освещение и динамику из @Video1: {clean_prompt}"
+                )
 
         payload: Dict[str, Any] = {
             "modelId": effective_model_id,

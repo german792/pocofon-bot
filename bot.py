@@ -1,6 +1,7 @@
 import asyncio
 import html
 import io
+import json
 import logging
 import re
 import time
@@ -116,6 +117,8 @@ PLACEHOLDER_PROMPTS = (
     "Стилизовать изображение по референсу в высоком качестве",
     "Анимировать сцену, плавное движение",
     "Сгенерируй видео под прикрепленный звук",
+    "Измени видео, сохранив движение и композицию",
+    "Замени персонажа на видео на персонажа с фото, сохранив движения и композицию",
 )
 
 
@@ -318,18 +321,19 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
         ])
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
-    # STEP 2: Duration Selection (every second 1..max_dur is its own button)
+    # STEP 2: Duration Selection
     if step == "duration":
-        model_durs = minfo.get("durations", list(range(1, 31)))
-        max_dur = max(model_durs) if model_durs else 15
+        model_durs = minfo.get("durations") or list(range(1, 31))
+        min_dur = min(model_durs)
+        max_dur = max(model_durs)
         cur_dur = int(draft.get("duration", DEFAULT_DURATION))
-        if cur_dur > max_dur:
-            cur_dur = max_dur
-            draft["duration"] = max_dur
+        if cur_dur < min_dur or cur_dur > max_dur:
+            cur_dur = max(min_dur, min(max_dur, cur_dur))
+            draft["duration"] = cur_dur
 
         rows = []
         cur_row = []
-        for d in range(1, max_dur + 1):
+        for d in model_durs:
             is_active = d == cur_dur
             lbl = f"✅ {d}с" if is_active else f"{d}с"
             btn_kwargs = {"style": "primary"} if is_active else {}
@@ -347,19 +351,32 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
     # STEP 3: Quality & Launch
-    model_durs = minfo.get("durations", list(range(1, 31)))
-    max_dur = max(model_durs) if model_durs else 15
-    dur = max(1, min(max_dur, int(draft.get("duration", DEFAULT_DURATION))))
+    model_durs = minfo.get("durations") or list(range(1, 31))
+    min_dur = min(model_durs)
+    max_dur = max(model_durs)
+    dur = max(min_dur, min(max_dur, int(draft.get("duration", DEFAULT_DURATION))))
     draft["duration"] = dur
+    res_options = minfo.get("resolutions") or RESOLUTION_OPTIONS
     res = draft.get("resolution", DEFAULT_RESOLUTION)
+    if res not in res_options:
+        res = "720p" if "720p" in res_options else res_options[0]
+        draft["resolution"] = res
+    ratio_choices = (
+        ["auto"] + list(RATIO_OPTIONS)
+        if draft.get("ref_video") and cur_model in ("s2_5", "s2_pro", "s2_fast", "s2_mini")
+        else list(RATIO_OPTIONS)
+    )
     ratio = draft.get("ratio", DEFAULT_RATIO)
+    if ratio not in ratio_choices:
+        ratio = DEFAULT_RATIO
+        draft["ratio"] = ratio
     audio = draft.get("audio", DEFAULT_AUDIO)
 
     rows = []
 
     # Resolution Row
     res_buttons = []
-    for r in RESOLUTION_OPTIONS:
+    for r in res_options:
         is_active = r == res
         label = f"✅ {r}" if is_active else r
         btn_kwargs = {"style": "primary"} if is_active else {}
@@ -367,9 +384,9 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     rows.append(res_buttons)
 
     # Ratio Row
-    ratio_labels = {"16:9": "16:9 🖥", "9:16": "9:16 📱", "1:1": "1:1 ⏹"}
+    ratio_labels = {"auto": "🔄 Авто", "16:9": "16:9 🖥", "9:16": "9:16 📱", "1:1": "1:1 ⏹"}
     ratio_buttons = []
-    for rat in RATIO_OPTIONS:
+    for rat in ratio_choices:
         lbl = ratio_labels.get(rat, rat)
         is_active = rat == ratio
         btn_kwargs = {"style": "primary"} if is_active else {}
@@ -633,9 +650,10 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
             f"<code>build: {BUILD_ID}</code>"
         )
 
-    model_durs = minfo.get("durations", list(range(1, 31)))
-    max_dur = max(model_durs) if model_durs else 15
-    dur = max(1, min(max_dur, int(draft.get("duration", DEFAULT_DURATION))))
+    model_durs = minfo.get("durations") or list(range(1, 31))
+    min_dur = min(model_durs)
+    max_dur = max(model_durs)
+    dur = max(min_dur, min(max_dur, int(draft.get("duration", DEFAULT_DURATION))))
     draft["duration"] = dur
 
     if step == "model":
@@ -654,20 +672,25 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
         return (
             f"⏱ <b>Шаг 2 из 3: Выберите длительность видео</b>\n\n"
             f"{user_line}"
-            f"🤖 <b>Модель:</b> {minfo['name']} (максимум {max_dur} сек)\n"
+            f"🤖 <b>Модель:</b> {minfo['name']} ({min_dur}–{max_dur} сек)\n"
             f"📝 <b>Промпт:</b> <i>{html.escape(str(prompt))}</i>\n"
             f"📌 <b>Референсы:</b> {ref_badge}\n"
             f"{video_line}"
             f"{audio_ref_line}\n"
             f"⏱ Выбрано: <b>{dur} сек</b>\n\n"
-            f"👇 <i>Нажмите кнопку с нужным количеством секунд (от 1 до {max_dur}с):</i>\n"
+            f"👇 <i>Нажмите кнопку с нужным количеством секунд (от {min_dur} до {max_dur}с):</i>\n"
             f"<code>build: {BUILD_ID}</code>"
         )
 
     # step == "quality"
     dur_str = f"{dur} сек"
+    res_options = minfo.get("resolutions") or RESOLUTION_OPTIONS
     res = draft.get("resolution", DEFAULT_RESOLUTION)
+    if res not in res_options:
+        res = "720p" if "720p" in res_options else res_options[0]
+        draft["resolution"] = res
     ratio = draft.get("ratio", DEFAULT_RATIO)
+    ratio_display = "Авто (как в видео)" if ratio == "auto" else ratio
     audio = draft.get("audio", DEFAULT_AUDIO)
     audio_line = f"🔊 <b>Звук:</b> {'Включен ✅' if audio else 'Выключен 🔇'}\n" if minfo.get("has_audio") else ""
 
@@ -683,7 +706,7 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
         f"📌 <b>Референсы:</b> {ref_badge}\n"
         f"{video_line}"
         f"{audio_ref_line}"
-        f"📐 <b>Разрешение и формат:</b> {res} | {ratio}\n"
+        f"📐 <b>Разрешение и формат:</b> {res} | {ratio_display}\n"
         f"{audio_line}"
         f"{cost_line}\n"
         f"👇 <i>Выберите настройки качества и нажмите «Сгенерировать видео»:</i>\n"
@@ -727,8 +750,8 @@ def format_image_draft_text(draft: Dict[str, Any]) -> str:
     )
 
 
-async def probe_video_seconds(data: bytes) -> int:
-    """Длительность видео в секундах (ffprobe). 0 — если не удалось определить."""
+async def probe_video_meta(data: bytes) -> Tuple[int, Optional[str]]:
+    """Длительность видео в секундах и подходящий аспект ('9:16'/'1:1'/'16:9') через ffprobe."""
     import os
     import tempfile
     fd, path = tempfile.mkstemp(suffix=".mp4")
@@ -737,19 +760,47 @@ async def probe_video_seconds(data: bytes) -> int:
         with open(path, "wb") as f:
             f.write(data)
         proc = await asyncio.create_subprocess_exec(
-            "ffprobe", "-v", "error", "-show_entries", "format=duration",
-            "-of", "default=nw=1:nk=1", path,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height,duration",
+            "-show_entries", "format=duration",
+            "-of", "json",
+            path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
         )
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
-        return max(1, int(round(float(out.decode().strip()))))
+        info = json.loads(out.decode("utf-8", "ignore").strip() or "{}")
+        streams = info.get("streams") or []
+        st = streams[0] if streams else {}
+        fmt = info.get("format") or {}
+        dur_raw = fmt.get("duration") or st.get("duration")
+        dur_sec = max(1, int(round(float(dur_raw)))) if dur_raw else 0
+        vw = int(st.get("width") or 0)
+        vh = int(st.get("height") or 0)
+        matched_ratio: Optional[str] = None
+        if vw > 0 and vh > 0:
+            ar = vw / vh
+            if ar < 0.85:
+                matched_ratio = "9:16"
+            elif ar <= 1.18:
+                matched_ratio = "1:1"
+            else:
+                matched_ratio = "16:9"
+        return dur_sec, matched_ratio
     except Exception:
-        return 0
+        return 0, None
     finally:
         try:
             os.remove(path)
         except Exception:
             pass
+
+
+async def probe_video_seconds(data: bytes) -> int:
+    """Длительность видео в секундах (ffprobe). 0 — если не удалось определить."""
+    dur_sec, _ = await probe_video_meta(data)
+    return dur_sec
 
 
 DRAFT_IDLE_SEC = 15 * 60  # черновик живёт 15 минут без действий
@@ -1746,8 +1797,10 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
 
     logger.info(f"[refs] video reference from user {user_id}: {len(video_bytes)} bytes, caption={bool(clean_prompt)}")
 
-    # Extract audio track from the reference video (do NOT inject first_frame into ref_images so character photo stays @Image1)
+    # Extract audio track and video metadata (duration + orientation). Do NOT inject first frame
+    # into ref_images so video-only editing stays pure @Video1 and character photos stay @Image1.
     video_audio = await extract_audio_from_video(video_bytes)
+    vid_dur, vid_ratio = await probe_video_meta(video_bytes)
 
     draft = fresh_draft(user_id)
     if draft and draft.get("menu_mode", "video") == "video":
@@ -1755,6 +1808,8 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
             draft["prompt"] = clean_prompt
         elif draft.get("ref_images"):
             draft["prompt"] = "Замени персонажа на видео на персонажа с фото, сохранив движения и композицию"
+        elif not draft.get("prompt") or draft.get("prompt") in PLACEHOLDER_PROMPTS:
+            draft["prompt"] = "Измени видео, сохранив движение и композицию"
     else:
         photos = get_recent_photos_for_user(message.chat.id, user_id, max_age_sec=60.0)
         default_v_prompt = (
@@ -1777,22 +1832,51 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
     if video_audio and not draft.get("audio_bytes"):
         draft["audio_bytes"] = video_audio
 
+    # Prefer Seedance 2.0 Fast (s2_fast) when a reference video is attached if user was on
+    # the default Seedance text-to-video preset or on a model without native video_ref support.
     cur_model = draft.get("model_key", DEFAULT_MODEL)
-    if not MODELS.get(cur_model, {}).get("video_ref"):
-        draft["model_key"] = DEFAULT_MODEL
-        get_user_prefs(user_id)["model_key"] = DEFAULT_MODEL
+    if cur_model in (DEFAULT_MODEL, "s2_pro", "s2_mini") or not MODELS.get(cur_model, {}).get("video_ref"):
+        if "s2_fast" in MODELS:
+            draft["model_key"] = "s2_fast"
+            cur_model = "s2_fast"
+
+    minfo_v = MODELS.get(cur_model, MODELS[DEFAULT_MODEL])
+    m_durs = minfo_v.get("durations") or list(range(4, 16))
+    min_d, max_d = min(m_durs), max(m_durs)
+    if vid_dur > 0:
+        draft["duration"] = max(min_d, min(max_d, vid_dur))
+    else:
+        draft["duration"] = max(min_d, min(max_d, int(draft.get("duration", DEFAULT_DURATION))))
+
+    res_opts = minfo_v.get("resolutions") or RESOLUTION_OPTIONS
+    if draft.get("resolution") not in res_opts:
+        draft["resolution"] = "720p" if "720p" in res_opts else res_opts[0]
+    if vid_ratio:
+        draft["ratio"] = vid_ratio
+
     sync_draft_references(draft)
 
-    info_parts = ["• 🎞 Видео-референс прикреплен к задаче (@Video1)"]
+    info_parts = [f"• 🎞 Видео-референс прикреплен к задаче (@Video1, модель: <b>{minfo_v['name']}</b>)"]
+    if vid_dur > 0:
+        meta_str = f"{vid_dur}с"
+        if vid_ratio:
+            meta_str += f", {vid_ratio}"
+        info_parts.append(f"• 📐 Параметры видео: <b>{meta_str}</b>")
+        if vid_dur < 2:
+            info_parts.append("• ⚙️ Короткое видео (<2с) будет автоматически адаптировано до 2.5с для Seedance 2.0 Fast")
+        elif vid_dur > max_d:
+            info_parts.append(f"• ✂️ Для референса будут использованы первые {max_d}с")
     if draft.get("ref_images"):
-        info_parts.append(f"• 🧑 Персонаж с фото прикреплен ({len(draft['ref_images'])} шт.)")
+        info_parts.append(f"• 🧑 Референс-фото прикреплено ({len(draft['ref_images'])} шт.)")
     if video_audio:
         info_parts.append("• 🎵 Извлечена звуковая дорожка из видео")
     hint_text = "\n".join(info_parts)
     try:
         await message.reply(
             f"🎞 <b>Видео-референс принят!</b>\n\n{hint_text}\n\n"
-            f"💡 <i>Для замены персонажа просто отправьте в чат фото нового героя и нажмите <b>Запустить</b> — Seedance 2.5 перенесёт движения с видео на вашего персонажа.</i>",
+            f"💡 <i>Что можно сделать дальше:</i>\n"
+            f"• <b>Изменить само видео:</b> просто напишите в чат, что поменять (например, <i>«удали людей на фоне»</i> или <i>«сделай ночной неон и дождь»</i>) — фото не нужно.\n"
+            f"• <b>Заменить персонажа / объект:</b> отправьте фото нового героя или предмета и нажмите <b>Запустить</b>.",
             parse_mode="HTML"
         )
     except Exception:
@@ -3247,10 +3331,18 @@ async def on_set_model(call: CallbackQuery):
         draft["menu_mode"] = "video"
         get_user_prefs(owner_id)["model_key"] = mkey
         model_durs = minfo.get("durations", [5])
+        min_dur = min(model_durs) if model_durs else 1
         max_dur = max(model_durs) if model_durs else 15
-        if int(draft.get("duration", DEFAULT_DURATION)) > max_dur:
-            draft["duration"] = max_dur
-            get_user_prefs(owner_id)["duration"] = max_dur
+        cur_dur = int(draft.get("duration", DEFAULT_DURATION))
+        if cur_dur < min_dur or cur_dur > max_dur:
+            clamped_dur = max(min_dur, min(max_dur, cur_dur))
+            draft["duration"] = clamped_dur
+            get_user_prefs(owner_id)["duration"] = clamped_dur
+        res_opts = minfo.get("resolutions") or RESOLUTION_OPTIONS
+        if draft.get("resolution") not in res_opts:
+            new_res = "720p" if "720p" in res_opts else res_opts[0]
+            draft["resolution"] = new_res
+            get_user_prefs(owner_id)["resolution"] = new_res
 
         if minfo.get("backend") == "davinci_voice":
             draft["step"] = "quality"

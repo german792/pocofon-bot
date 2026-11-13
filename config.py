@@ -92,8 +92,9 @@ MODELS = {
         "multi_ref": True,
         "video_ref": True,
         "ref_limit": 9,
-        "durations": list(range(1, 16)),
-        "desc": "Быстрая версия Seedance 2.0 со звуком и референсами (до 15с)"
+        "durations": list(range(4, 16)),
+        "resolutions": ["480p", "720p"],
+        "desc": "Быстрая версия Seedance 2.0 со звуком, редактированием видео и референсами (4–15с, 480p/720p)"
     },
     "s2_mini": {
         "name": "Seedance 2.0 Mini",
