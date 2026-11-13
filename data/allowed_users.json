@@ -39,7 +39,8 @@
     "m8lk8s",
     "lopux_petux",
     "matikkkice",
-    "ndn_naxyi67520kak"
+    "ndn_naxyi67520kak",
+    "ggf_123"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -317,6 +318,14 @@
       "username": "NDN_Naxyi67520kak",
       "name": "𝖣𝖤𝖲𝖳𝖱𝖸 𝖠𝖨",
       "added_at": 1794573605.8937614,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "ggf_123": {
+      "user_id": 7699247025,
+      "username": "Ggf_123",
+      "name": "Invincible",
+      "added_at": 1794574513.4951918,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
