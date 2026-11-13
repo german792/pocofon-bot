@@ -112,18 +112,24 @@ def overlay_grid(
     cols = max(1, min(cols, 50))
     min_dim = min(w, h)
 
-    # Calculate thickness: default thick mode is ~1.2% of min dimension
-    # (e.g. 8px on 720p, 12px on 1080p, 22px on 2K/4K)
+    # Calculate thickness: adaptive to image size and cell density so dense grids stay crisp
+    min_cell = min(w / cols, h / rows)
     if thickness and thickness > 0:
         actual_thickness = max(2, min(thickness, int(min_dim * 0.15)))
     else:
         mode_multipliers = {
+            "thin": 0.0035,
             "medium": 0.007,
             "thick": 0.012,
             "heavy": 0.019,
         }
-        mult = mode_multipliers.get(thickness_mode.lower(), 0.012)
-        actual_thickness = max(6, int(round(min_dim * mult)))
+        mode_key = thickness_mode.lower()
+        mult = mode_multipliers.get(mode_key, 0.012)
+        min_px = 2 if mode_key == "thin" else 4 if mode_key == "medium" else 6
+        actual_thickness = max(min_px, int(round(min_dim * mult)))
+        max_for_cell = max(2, int(min_cell * 0.18))
+        if actual_thickness > max_for_cell:
+            actual_thickness = max_for_cell
 
     color_map = {
         "contrast": ((255, 255, 255), (0, 0, 0)),
@@ -136,7 +142,7 @@ def overlay_grid(
     }
     fg_col, bg_col = color_map.get(color.lower(), color_map["contrast"])
 
-    outline_extra = max(2, int(round(actual_thickness * 0.35)))
+    outline_extra = max(1, int(round(actual_thickness * 0.35)))
     total_thickness = actual_thickness + outline_extra * 2 if bg_col else actual_thickness
 
     draw = ImageDraw.Draw(img)
@@ -163,16 +169,21 @@ def overlay_grid(
 
     # 3. Optional cell labels (A1, A2... or numbers)
     if show_labels and min_dim >= 200:
-        font = ImageFont.load_default()
         cell_w = w / cols
         cell_h = h / rows
+        font_size = max(10, min(28, int(min(cell_w, cell_h) * 0.24)))
+        try:
+            font = ImageFont.load_default(size=font_size)
+        except TypeError:
+            font = ImageFont.load_default()
         for r in range(rows):
             for c in range(cols):
                 label = f"{chr(65 + c)}{r + 1}"
-                lx = int(c * cell_w + actual_thickness + 6)
-                ly = int(r * cell_h + actual_thickness + 6)
+                offset = max(3, min(8, int(min(cell_w, cell_h) * 0.08)))
+                lx = int(c * cell_w + actual_thickness + offset)
+                ly = int(r * cell_h + actual_thickness + offset)
                 tb = draw.textbbox((lx, ly), label, font=font)
-                pad = 3
+                pad = 2
                 draw.rectangle([tb[0] - pad, tb[1] - pad, tb[2] + pad, tb[3] + pad], fill=(0, 0, 0))
                 draw.text((lx, ly), label, fill=(255, 255, 255), font=font)
 

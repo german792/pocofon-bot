@@ -280,7 +280,7 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
                 )
             ])
         else:
-            grid_lbl = "✅ 🔲 Сетка 3×3 (снять)" if draft.get("has_grid") else "🔲 Сетка на референс"
+            grid_lbl = ref_grid_button_label(draft)
             if minfo.get("multi_ref"):
                 mode_lbl = (
                     f"🎯 Референс ({ref_count}/{ref_limit} фото)"
@@ -433,7 +433,7 @@ def build_image_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
             )
         ])
     else:
-        grid_lbl = "✅ 🔲 Сетка 3×3 (снять)" if draft.get("has_grid") else "🔲 Сетка на референс"
+        grid_lbl = ref_grid_button_label(draft)
         rows.append([
             InlineKeyboardButton(
                 text=f"📎 Референсы: {ref_count}/{ref_limit} фото ✅",
@@ -472,6 +472,21 @@ def build_image_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+REF_GRID_CYCLE = [0, 3, 6, 8, 12]
+
+
+def get_ref_grid_size(draft: Dict[str, Any]) -> int:
+    size = int(draft.get("grid_size") or 0)
+    if size <= 0 and draft.get("has_grid"):
+        size = 3
+    return size
+
+
+def ref_grid_button_label(draft: Dict[str, Any]) -> str:
+    size = get_ref_grid_size(draft)
+    return f"✅ 🔲 Сетка {size}×{size}" if size > 0 else "🔲 Сетка на референс"
+
+
 def sync_draft_references(draft: Dict[str, Any]) -> None:
     """Ensure draft['ref_images'] matches current model capabilities and preserves all uploaded refs."""
     cur_model = draft.get("model_key", DEFAULT_MODEL)
@@ -499,16 +514,24 @@ def sync_draft_references(draft: Dict[str, Any]) -> None:
     else:
         base_refs = list(all_refs[:1])
 
-    if draft.get("has_grid"):
+    grid_size = get_ref_grid_size(draft)
+    if grid_size > 0:
+        draft["has_grid"] = True
+        draft["grid_size"] = grid_size
         current_orig = draft.get("orig_ref_images") or []
-        if current_orig != base_refs:
+        if current_orig != base_refs or draft.get("orig_ref_grid_size") != grid_size:
             draft["orig_ref_images"] = list(base_refs)
+            draft["orig_ref_grid_size"] = grid_size
+            th_mode = "thin" if grid_size >= 10 else ("medium" if grid_size >= 6 else "thick")
             draft["ref_images"] = [
-                image_utils.overlay_grid(b, rows=3, cols=3, thickness_mode="thick", color="contrast")
+                image_utils.overlay_grid(b, rows=grid_size, cols=grid_size, thickness_mode=th_mode, color="contrast")
                 for b in base_refs if b
             ]
     else:
+        draft["has_grid"] = False
+        draft["grid_size"] = 0
         draft["orig_ref_images"] = None
+        draft["orig_ref_grid_size"] = 0
         draft["ref_images"] = base_refs
 
     draft["image_bytes"] = draft["ref_images"][0] if draft["ref_images"] else None
@@ -581,7 +604,8 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
     ref_mode = draft.get("ref_mode", "ref")
 
     if ref_count > 0:
-        grid_note = " <i>(с толстой сеткой 3×3)</i>" if draft.get("has_grid") else ""
+        g_size = get_ref_grid_size(draft)
+        grid_note = f" <i>(с сеткой {g_size}×{g_size})</i>" if g_size > 0 else ""
         if minfo.get("multi_ref"):
             mode_str = "Референс персонажа/сцены" if ref_mode == "ref" else "Первый кадр (Start Frame)"
             ref_badge = f"📎 Прикреплено: <b>{ref_count} из {ref_limit} фото</b> ({mode_str}){grid_note}"
@@ -681,7 +705,8 @@ def format_image_draft_text(draft: Dict[str, Any]) -> str:
     ref_limit = minfo.get("ref_limit", 10)
 
     if ref_count > 0:
-        grid_note = " <i>(с толстой сеткой 3×3)</i>" if draft.get("has_grid") else ""
+        g_size = get_ref_grid_size(draft)
+        grid_note = f" <i>(с сеткой {g_size}×{g_size})</i>" if g_size > 0 else ""
         ref_badge = f"📎 Прикреплено: <b>{ref_count} из {ref_limit} фото-референсов</b> ✅{grid_note}"
     else:
         ref_badge = f"📝 По тексту <i>(пришлите фото в чат для добавления референса — до {ref_limit} шт.)</i>"
@@ -2351,7 +2376,7 @@ async def on_set_pref_model(call: CallbackQuery):
 
 grid_sessions: Dict[str, Dict[str, Any]] = {}
 
-GRID_DIM_OPTIONS = [(2, 2), (3, 3), (4, 4), (5, 5), (8, 8)]
+GRID_DIM_OPTIONS = [(3, 3), (4, 4), (6, 6), (8, 8), (10, 10), (12, 12), (16, 16), (20, 20)]
 GRID_COLORS = ["contrast", "white", "black", "red", "green", "yellow", "cyan"]
 GRID_COLOR_NAMES = {
     "contrast": "Контраст",
@@ -2362,11 +2387,12 @@ GRID_COLOR_NAMES = {
     "yellow": "Желтый",
     "cyan": "Голубой",
 }
-GRID_THICKNESS_MODES = ["thick", "heavy", "medium"]
+GRID_THICKNESS_MODES = ["thin", "medium", "thick", "heavy"]
 GRID_THICKNESS_NAMES = {
+    "thin": "Тонкая",
+    "medium": "Средняя",
     "thick": "Толстая",
     "heavy": "Очень толстая",
-    "medium": "Средняя",
 }
 
 
@@ -2388,9 +2414,14 @@ def parse_grid_args(arg_str: str) -> Dict[str, Any]:
             res["rows"] = max(2, min(50, int(m.group(1))))
             res["cols"] = max(2, min(50, int(m.group(2))))
             continue
-        if tok.isdigit() and int(tok) in (2, 3, 4, 5, 6, 7, 8, 9, 10):
+        if tok.isdigit() and 2 <= int(tok) <= 50:
             res["rows"] = int(tok)
             res["cols"] = int(tok)
+            continue
+        if tok in ("плотная", "плотно", "dense", "fine"):
+            res["rows"] = 12
+            res["cols"] = 12
+            res["thickness_mode"] = "thin"
             continue
         for c_key in GRID_COLORS:
             if tok in (c_key, GRID_COLOR_NAMES[c_key].lower()):
@@ -2419,6 +2450,7 @@ def build_grid_keyboard(grid_id: str, data: Dict[str, Any]) -> InlineKeyboardMar
         if r == cur_r and c == cur_c:
             text = f"✅ {text}"
         dim_btns.append(InlineKeyboardButton(text=text, callback_data=f"g_dim:{grid_id}:{r}:{c}"))
+    dim_rows = [dim_btns[i:i + 4] for i in range(0, len(dim_btns), 4)]
 
     col_label = f"🎨 Цвет: {GRID_COLOR_NAMES.get(cur_col, cur_col)}"
     th_label = f"📏 Толщина: {GRID_THICKNESS_NAMES.get(cur_th, cur_th)}"
@@ -2437,7 +2469,7 @@ def build_grid_keyboard(grid_id: str, data: Dict[str, Any]) -> InlineKeyboardMar
         InlineKeyboardButton(text="🖼 В меню Фото", callback_data=f"g_use_img:{grid_id}"),
     ]
 
-    return InlineKeyboardMarkup(inline_keyboard=[dim_btns, style_btns, lbl_btns, action_btns])
+    return InlineKeyboardMarkup(inline_keyboard=[*dim_rows, style_btns, lbl_btns, action_btns])
 
 
 def format_grid_caption(session: Dict[str, Any]) -> str:
@@ -2517,9 +2549,9 @@ async def handle_grid_command(message: Message, command: CommandObject, bot: Bot
             "• Отправьте фото с подписью <code>/grid</code> или <code>/сетка</code>\n"
             "• Или <b>ответьте (Reply)</b> на любое фото в чате командой <code>/grid</code>\n\n"
             "<b>Дополнительные параметры (необязательно):</b>\n"
-            "• <code>/grid 2x2</code>, <code>/grid 4x4</code>, <code>/grid 5x5</code> — размер сетки\n"
+            "• <code>/grid 6x6</code>, <code>/grid 12x12</code>, <code>/grid 16x16</code>, <code>/grid плотная</code> — размер сетки (до 50×50)\n"
             "• <code>/grid red</code>, <code>/grid white</code>, <code>/grid yellow</code> — цвет линий\n"
-            "• <code>/grid heavy</code>, <code>/grid medium</code> — толщина линий\n"
+            "• <code>/grid thin</code>, <code>/grid medium</code>, <code>/grid heavy</code> — толщина линий\n"
             "• <code>/grid номера</code> — добавить метки ячеек (A1, A2...)\n\n"
             "<i>Под фото появятся интерактивные кнопки для мгновенной смены размера и стилей!</i>",
             parse_mode="HTML"
@@ -2681,7 +2713,9 @@ async def on_grid_use_video(call: CallbackQuery, bot: Bot):
         menu_mode="video",
     )
     draft["has_grid"] = True
+    draft["grid_size"] = int(session.get("rows") or 3)
     draft["orig_ref_images"] = [session["orig_bytes"]]
+    draft["orig_ref_grid_size"] = draft["grid_size"]
     await show_or_update_menu(call.message, bot, draft, user_id)
     await call.answer("Открыто меню Видео с сеткой на референсе")
 
@@ -2707,7 +2741,9 @@ async def on_grid_use_image(call: CallbackQuery, bot: Bot):
         menu_mode="image",
     )
     draft["has_grid"] = True
+    draft["grid_size"] = int(session.get("rows") or 3)
     draft["orig_ref_images"] = [session["orig_bytes"]]
+    draft["orig_ref_grid_size"] = draft["grid_size"]
     await show_or_update_menu(call.message, bot, draft, user_id)
     await call.answer("Открыто меню Фото с сеткой на референсе")
 
@@ -3026,6 +3062,8 @@ async def on_clear_refs(call: CallbackQuery):
     draft["ref_images"] = []
     draft["orig_ref_images"] = None
     draft["has_grid"] = False
+    draft["grid_size"] = 0
+    draft["orig_ref_grid_size"] = 0
     draft["image_bytes"] = None
     draft["audio_bytes"] = None
 
@@ -3114,10 +3152,20 @@ async def on_toggle_reference_grid(call: CallbackQuery):
         await call.answer("Сначала прикрепите фото-референс", show_alert=True)
         return
 
-    has_grid = not draft.get("has_grid", False)
-    draft["has_grid"] = has_grid
+    cur_size = get_ref_grid_size(draft)
+    try:
+        next_idx = (REF_GRID_CYCLE.index(cur_size) + 1) % len(REF_GRID_CYCLE)
+    except ValueError:
+        next_idx = 1
+    next_size = REF_GRID_CYCLE[next_idx]
+    draft["grid_size"] = next_size
+    draft["has_grid"] = next_size > 0
     sync_draft_references(draft)
-    msg = "🔲 Наложена толстая сетка 3×3 на референсы" if has_grid else "Сетка снята с референсов"
+    msg = (
+        f"🔲 Наложена сетка {next_size}×{next_size} на референсы"
+        if next_size > 0
+        else "Сетка снята с референсов"
+    )
 
     draft["menu_message_id"] = call.message.message_id
     draft["menu_chat_id"] = call.message.chat.id
