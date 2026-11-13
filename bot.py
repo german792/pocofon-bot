@@ -232,6 +232,46 @@ def build_model_grid_rows(
     return grid_rows
 
 
+def align_draft_to_model(
+    draft: Dict[str, Any],
+    minfo: Dict[str, Any],
+    owner_id: Optional[int] = None,
+) -> Tuple[int, int, List[str], List[str]]:
+    """Clamp draft duration, resolution, and ratio to the active model's supported limits."""
+    model_durs = minfo.get("durations") or list(range(1, 31))
+    min_dur, max_dur = min(model_durs), max(model_durs)
+    cur_dur = int(draft.get("duration", DEFAULT_DURATION))
+    dur = max(min_dur, min(max_dur, cur_dur))
+    if dur != cur_dur or "duration" not in draft:
+        draft["duration"] = dur
+        if owner_id is not None:
+            get_user_prefs(owner_id)["duration"] = dur
+
+    res_options = list(minfo.get("resolutions") or RESOLUTION_OPTIONS)
+    res = draft.get("resolution", DEFAULT_RESOLUTION)
+    if res not in res_options:
+        res = "720p" if "720p" in res_options else res_options[0]
+        draft["resolution"] = res
+        if owner_id is not None:
+            get_user_prefs(owner_id)["resolution"] = res
+
+    allowed_ratios = list(minfo.get("ratios") or RATIO_OPTIONS)
+    cur_model = draft.get("model_key", DEFAULT_MODEL)
+    ratio_choices = (
+        ["auto"] + allowed_ratios
+        if draft.get("ref_video") and cur_model in ("s2_5", "s2_pro", "s2_fast", "s2_mini")
+        else allowed_ratios
+    )
+    ratio = draft.get("ratio", DEFAULT_RATIO)
+    if ratio not in ratio_choices:
+        ratio = "16:9" if "16:9" in allowed_ratios else ratio_choices[0]
+        draft["ratio"] = ratio
+        if owner_id is not None and ratio != "auto":
+            get_user_prefs(owner_id)["ratio"] = ratio
+
+    return min_dur, max_dur, res_options, ratio_choices
+
+
 def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeyboardMarkup:
     """Video & Voice 3-step wizard menu:
     Step 1 (model): Choose video model
@@ -351,25 +391,10 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
     # STEP 3: Quality & Launch
-    model_durs = minfo.get("durations") or list(range(1, 31))
-    min_dur = min(model_durs)
-    max_dur = max(model_durs)
-    dur = max(min_dur, min(max_dur, int(draft.get("duration", DEFAULT_DURATION))))
-    draft["duration"] = dur
-    res_options = minfo.get("resolutions") or RESOLUTION_OPTIONS
-    res = draft.get("resolution", DEFAULT_RESOLUTION)
-    if res not in res_options:
-        res = "720p" if "720p" in res_options else res_options[0]
-        draft["resolution"] = res
-    ratio_choices = (
-        ["auto"] + list(RATIO_OPTIONS)
-        if draft.get("ref_video") and cur_model in ("s2_5", "s2_pro", "s2_fast", "s2_mini")
-        else list(RATIO_OPTIONS)
-    )
-    ratio = draft.get("ratio", DEFAULT_RATIO)
-    if ratio not in ratio_choices:
-        ratio = DEFAULT_RATIO
-        draft["ratio"] = ratio
+    _, _, res_options, ratio_choices = align_draft_to_model(draft, minfo)
+    dur = draft["duration"]
+    res = draft["resolution"]
+    ratio = draft["ratio"]
     audio = draft.get("audio", DEFAULT_AUDIO)
 
     rows = []
@@ -1761,13 +1786,14 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
     is_group = message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP)
 
     clean_prompt = re.sub(
-        r"^/(video|gen|prompt|v|s2)(@\w+)?\s*", "", caption, flags=re.I
+        r"^/(video|gen|prompt|v|s2|omni)(@\w+)?\s*", "", caption, flags=re.I
     )
+    wants_omni = caption.lower().startswith("/omni")
     if is_group:
         bot_info = await bot.me()
         clean_prompt = clean_prompt.replace(f"@{bot_info.username}", "").strip()
         addressed = (
-            caption.lower().startswith(("/video", "/gen", "/prompt", "/v", "/s2"))
+            caption.lower().startswith(("/video", "/gen", "/prompt", "/v", "/s2", "/omni"))
             or f"@{bot_info.username}".lower() in caption.lower()
             or fresh_draft(user_id) is not None
         )
@@ -1832,38 +1858,37 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
     if video_audio and not draft.get("audio_bytes"):
         draft["audio_bytes"] = video_audio
 
-    # Prefer Seedance 2.0 Fast (s2_fast) when a reference video is attached if user was on
-    # the default Seedance text-to-video preset or on a model without native video_ref support.
+    # Prefer Gemini OmniFlash 1.2 if /omni was requested; otherwise prefer Seedance 2.0 Fast (s2_fast)
+    # when user was on the default Seedance text-to-video preset or on a model without video_ref.
     cur_model = draft.get("model_key", DEFAULT_MODEL)
-    if cur_model in (DEFAULT_MODEL, "s2_pro", "s2_mini") or not MODELS.get(cur_model, {}).get("video_ref"):
+    if wants_omni and "gemini_omni_12" in MODELS:
+        draft["model_key"] = "gemini_omni_12"
+        cur_model = "gemini_omni_12"
+    elif cur_model in (DEFAULT_MODEL, "s2_pro", "s2_mini") or not MODELS.get(cur_model, {}).get("video_ref"):
         if "s2_fast" in MODELS:
             draft["model_key"] = "s2_fast"
             cur_model = "s2_fast"
 
     minfo_v = MODELS.get(cur_model, MODELS[DEFAULT_MODEL])
-    m_durs = minfo_v.get("durations") or list(range(4, 16))
-    min_d, max_d = min(m_durs), max(m_durs)
     if vid_dur > 0:
-        draft["duration"] = max(min_d, min(max_d, vid_dur))
-    else:
-        draft["duration"] = max(min_d, min(max_d, int(draft.get("duration", DEFAULT_DURATION))))
-
-    res_opts = minfo_v.get("resolutions") or RESOLUTION_OPTIONS
-    if draft.get("resolution") not in res_opts:
-        draft["resolution"] = "720p" if "720p" in res_opts else res_opts[0]
+        draft["duration"] = vid_dur
     if vid_ratio:
         draft["ratio"] = vid_ratio
+    min_d, max_d, _, _ = align_draft_to_model(draft, minfo_v)
 
     sync_draft_references(draft)
 
-    info_parts = [f"• 🎞 Видео-референс прикреплен к задаче (@Video1, модель: <b>{minfo_v['name']}</b>)"]
+    is_seedance = cur_model.startswith("s2_")
+    min_ref_clip = 2 if is_seedance else (1 if cur_model in ("gemini_omni_12", "gemini_omni_11") else 0)
+    ref_tag = " (@Video1)" if is_seedance else ""
+    info_parts = [f"• 🎞 Видео-референс прикреплен к задаче{ref_tag} · модель: <b>{minfo_v['name']}</b>"]
     if vid_dur > 0:
         meta_str = f"{vid_dur}с"
-        if vid_ratio:
-            meta_str += f", {vid_ratio}"
+        if draft.get("ratio"):
+            meta_str += f", {draft['ratio']}"
         info_parts.append(f"• 📐 Параметры видео: <b>{meta_str}</b>")
-        if vid_dur < 2:
-            info_parts.append("• ⚙️ Короткое видео (<2с) будет автоматически адаптировано до 2.5с для Seedance 2.0 Fast")
+        if min_ref_clip and vid_dur < min_ref_clip:
+            info_parts.append(f"• ⚙️ Короткое видео (<{min_ref_clip}с) будет автоматически адаптировано для {minfo_v['name']}")
         elif vid_dur > max_d:
             info_parts.append(f"• ✂️ Для референса будут использованы первые {max_d}с")
     if draft.get("ref_images"):
@@ -1996,7 +2021,7 @@ async def process_photo_batch(
         bot_username = f"@{bot_info.username}".lower()
         cap_lower = caption.lower()
         addressed = (
-            caption.startswith(("/video", "/gen", "/prompt", "/v", "/s2", "/image", "/poster", "/img", "/pic", "/photo", "/banana", "/qwen", "/voice", "/tts", "/eleven", "/elevenlabs", "/grid", "/сетка", "/mesh"))
+            caption.startswith(("/video", "/gen", "/prompt", "/v", "/s2", "/omni", "/image", "/poster", "/img", "/pic", "/photo", "/banana", "/qwen", "/voice", "/tts", "/eleven", "/elevenlabs", "/grid", "/сетка", "/mesh"))
             or bot_username in cap_lower
             or (not caption and fresh_draft(user_id) is not None)
         )
@@ -2011,8 +2036,9 @@ async def process_photo_batch(
 
     is_image_cmd = bool(re.search(r"^/(image|poster|img|pic|photo|banana|qwen)", caption, re.I))
     is_voice_cmd = bool(re.search(r"^/(motion|mc|dance)", caption, re.I))
+    is_omni_cmd = bool(re.search(r"^/omni\b", caption, re.I))
     clean_prompt = re.sub(
-        r"^/(video|gen|prompt|v|s2|image|poster|img|pic|photo|banana|qwen|voice|tts|eleven|elevenlabs)(@\w+)?\s*",
+        r"^/(video|gen|prompt|v|s2|omni|image|poster|img|pic|photo|banana|qwen|voice|tts|eleven|elevenlabs)(@\w+)?\s*",
         "",
         caption,
         flags=re.I,
@@ -2043,7 +2069,11 @@ async def process_photo_batch(
 
         cur_model = draft.get("model_key", DEFAULT_MODEL)
         minfo = MODELS.get(cur_model, MODELS[DEFAULT_MODEL])
-        if draft.get("menu_mode", "video") == "video" and len(all_refs) > 1 and not minfo.get("multi_ref"):
+        if is_omni_cmd and "gemini_omni_12" in MODELS:
+            draft["menu_mode"] = "video"
+            draft["model_key"] = "gemini_omni_12"
+            align_draft_to_model(draft, MODELS["gemini_omni_12"], owner_id=user_id)
+        elif draft.get("menu_mode", "video") == "video" and len(all_refs) > 1 and not minfo.get("multi_ref"):
             cur_model = DEFAULT_MODEL
             draft["model_key"] = DEFAULT_MODEL
             get_user_prefs(user_id)["model_key"] = DEFAULT_MODEL
@@ -2105,7 +2135,11 @@ async def process_photo_batch(
         message_id=message.message_id,
         menu_mode=menu_mode,
     )
-    draft["model_key"] = MOTION_MODEL_KEY if is_voice_cmd else cur_model
+    if is_omni_cmd and "gemini_omni_12" in MODELS:
+        draft["model_key"] = "gemini_omni_12"
+        align_draft_to_model(draft, MODELS["gemini_omni_12"], owner_id=user_id)
+    else:
+        draft["model_key"] = MOTION_MODEL_KEY if is_voice_cmd else cur_model
 
     sync_draft_references(draft)
     await show_or_update_menu(message, bot, draft, user_id)
@@ -2192,8 +2226,10 @@ async def handle_waiting_prompt(message: Message, bot: Bot, state: FSMContext):
         elif cmd in ("/image", "/poster", "/img", "/pic", "/photo", "/banana", "/qwen"):
             target_mode = "image"
             text = cmd_arg
-        elif cmd in ("/video", "/gen", "/prompt", "/v", "/s2"):
+        elif cmd in ("/video", "/gen", "/prompt", "/v", "/s2", "/omni"):
             target_mode = "video"
+            if cmd == "/omni" and "gemini_omni_12" in MODELS:
+                model_override = "gemini_omni_12"
             text = cmd_arg
         elif cmd in ("/voice", "/tts", "/eleven", "/elevenlabs"):
             target_mode = "video"
@@ -2222,6 +2258,7 @@ async def handle_waiting_prompt(message: Message, bot: Bot, state: FSMContext):
     )
     if model_override:
         draft["model_key"] = model_override
+        align_draft_to_model(draft, MODELS.get(model_override, MODELS[DEFAULT_MODEL]), owner_id=message.from_user.id)
 
     await show_or_update_menu(message, bot, draft, message.from_user.id)
 
@@ -3330,19 +3367,7 @@ async def on_set_model(call: CallbackQuery):
     else:
         draft["menu_mode"] = "video"
         get_user_prefs(owner_id)["model_key"] = mkey
-        model_durs = minfo.get("durations", [5])
-        min_dur = min(model_durs) if model_durs else 1
-        max_dur = max(model_durs) if model_durs else 15
-        cur_dur = int(draft.get("duration", DEFAULT_DURATION))
-        if cur_dur < min_dur or cur_dur > max_dur:
-            clamped_dur = max(min_dur, min(max_dur, cur_dur))
-            draft["duration"] = clamped_dur
-            get_user_prefs(owner_id)["duration"] = clamped_dur
-        res_opts = minfo.get("resolutions") or RESOLUTION_OPTIONS
-        if draft.get("resolution") not in res_opts:
-            new_res = "720p" if "720p" in res_opts else res_opts[0]
-            draft["resolution"] = new_res
-            get_user_prefs(owner_id)["resolution"] = new_res
+        align_draft_to_model(draft, minfo, owner_id=owner_id)
 
         if minfo.get("backend") == "davinci_voice":
             draft["step"] = "quality"

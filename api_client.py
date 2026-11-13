@@ -1111,11 +1111,12 @@ class DaVinciClient:
                 max_vid_sec = 20.0
             elif effective_model_id in ("seedance25", "kling4"):
                 max_vid_sec = 30.0
-            min_vid_sec = (
-                2.2
-                if effective_model_id in ("seedance25", "seedance2", "seedance2Fast", "seedance2Mini", "seedance")
-                else 0.0
-            )
+            if effective_model_id in ("seedance25", "seedance2", "seedance2Fast", "seedance2Mini", "seedance"):
+                min_vid_sec = 2.2
+            elif effective_model_id in ("geminiOmniFlash12", "geminiOmniFlash11"):
+                min_vid_sec = 1.2
+            else:
+                min_vid_sec = 0.0
             trimmed_ref_video = await self._trim_video_for_ref(
                 ref_video, max_seconds=max_vid_sec, min_seconds=min_vid_sec
             )
@@ -1124,8 +1125,20 @@ class DaVinciClient:
         seedance_or_wan_ref = effective_model_id in (
             "seedance25", "seedance2", "seedance2Fast", "seedance2Mini", "seedance", "wan30", "wan30Prime"
         )
+        models_without_audio_input = (
+            "geminiOmniFlash12",
+            "geminiOmniFlash11",
+            "kling4",
+            "kling4Flash",
+            "pika22",
+            "minimax-hailuo-2-3",
+        )
         audio_bucket_path: Optional[str] = None
-        if audio_bytes and not (video_bucket_path and seedance_or_wan_ref):
+        if (
+            audio_bytes
+            and effective_model_id not in models_without_audio_input
+            and not (video_bucket_path and seedance_or_wan_ref)
+        ):
             audio_bucket_path = await self.upload_media(audio_bytes, ext=".mp3", content_type="audio/mpeg")
 
         bucket_paths: List[str] = []
@@ -1158,6 +1171,10 @@ class DaVinciClient:
             api_dur = 5 if api_dur <= 5 else 10
         elif effective_model_id == "minimax-hailuo-2-3":
             api_dur = 5 if api_dur <= 5 else (6 if api_dur <= 6 else 10)
+        elif effective_model_id == "geminiOmniFlash12":
+            api_dur = max(3, min(15, api_dur))
+        elif effective_model_id == "geminiOmniFlash11":
+            api_dur = max(1, min(15, api_dur))
         elif effective_model_id in (
             "wan26",
             "wan30Prime",
@@ -1165,7 +1182,6 @@ class DaVinciClient:
             "grok",
             "flux3",
             "flux3Max",
-            "geminiOmniFlash11",
             "luma-dream-machine",
             "luma-ray-3-2",
         ):
@@ -1243,16 +1259,16 @@ class DaVinciClient:
                 start_frame = bucket_paths[0]
 
         clean_prompt = (prompt or "").strip() or "Animate this scene with smooth cinematic motion"
+        low = clean_prompt.lower()
+        is_character_swap = any(
+            w in low for w in ("персонаж", "геро", "человек", "лиц", "свап", "swap", "character", "анимир", "animate", "замен")
+        )
         if video_bucket_path and effective_model_id in ("seedance25", "seedance2", "seedance2Fast", "seedance2Mini", "seedance", "wan30", "wan30Prime"):
-            has_vid_tag = "@video1" in clean_prompt.lower()
-            has_img_tag = "@image1" in clean_prompt.lower()
+            has_vid_tag = "@video1" in low
+            has_img_tag = "@image1" in low
             if reference_images_payload:
                 img_tags = " ".join(f"@Image{i + 1}" for i in range(len(reference_images_payload)))
                 if not has_vid_tag and not has_img_tag:
-                    low = clean_prompt.lower()
-                    is_character_swap = any(
-                        w in low for w in ("персонаж", "геро", "человек", "лиц", "свап", "swap", "character", "анимир", "animate", "замен")
-                    )
                     if is_character_swap:
                         clean_prompt = (
                             f"@Video1 точно повтори все движения, мимику, ракурс и динамику из видео 1. "
@@ -1271,6 +1287,25 @@ class DaVinciClient:
             elif not has_vid_tag:
                 clean_prompt = (
                     f"Измени видео @Video1, сохранив остальную сцену, камеру, освещение и динамику из @Video1: {clean_prompt}"
+                )
+        elif video_bucket_path and effective_model_id in ("geminiOmniFlash12", "geminiOmniFlash11"):
+            has_vid_ref = any(w in low for w in ("@video", "видео", "video"))
+            has_img_ref = any(w in low for w in ("@image", "фото", "картин", "изображен", "image", "photo"))
+            if reference_images_payload:
+                if is_character_swap and not (has_vid_ref and has_img_ref and len(clean_prompt) > 85):
+                    clean_prompt = (
+                        f"Используя прикреплённое видео как основу, полностью сохрани сцену, камеру, освещение и движения, "
+                        f"но замени персонажа на видео на персонажа с прикреплённого фото, точно сохранив его внешность, лицо и одежду. "
+                        f"Детали: {clean_prompt}"
+                    )
+                elif not has_vid_ref or not has_img_ref:
+                    clean_prompt = (
+                        f"Возьми прикреплённое видео за основу сцены и движений, а прикреплённые фото используй как визуальный референс. "
+                        f"Задача: {clean_prompt}"
+                    )
+            elif not has_vid_ref:
+                clean_prompt = (
+                    f"Отредактируй прикреплённое видео, сохранив остальную сцену, камеру и динамику без изменений: {clean_prompt}"
                 )
 
         payload: Dict[str, Any] = {

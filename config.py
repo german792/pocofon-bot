@@ -207,8 +207,10 @@ MODELS = {
         "multi_ref": True,
         "video_ref": True,
         "ref_limit": 10,
-        "durations": list(range(1, 16)),
-        "desc": "Google Gemini Omni Flash 1.2 (видео до 15с, 4K + мульти-референсы)"
+        "durations": list(range(3, 16)),
+        "resolutions": ["360p", "720p", "1080p", "4k"],
+        "ratios": ["16:9", "9:16"],
+        "desc": "Google Gemini Omni Flash 1.2 (3–15с, 4K, видео- и фото-референсы)"
     },
     "gemini_omni_11": {
         "name": "Gemini OmniFlash 1.1",
@@ -221,7 +223,9 @@ MODELS = {
         "video_ref": True,
         "ref_limit": 10,
         "durations": list(range(1, 16)),
-        "desc": "Google Gemini Omni Flash 1.1 (видео до 15с, 4K + мульти-референсы, от 1с)"
+        "resolutions": ["360p", "720p", "1080p", "4k"],
+        "ratios": ["16:9", "9:16"],
+        "desc": "Google Gemini Omni Flash 1.1 (1–15с, 4K, видео- и фото-референсы)"
     },
     "luma_dream_machine": {
         "name": "Luma Dream Machine",
