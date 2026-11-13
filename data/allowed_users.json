@@ -38,7 +38,8 @@
     "ustfilipp",
     "m8lk8s",
     "lopux_petux",
-    "matikkkice"
+    "matikkkice",
+    "ndn_naxyi67520kak"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -67,7 +68,8 @@
     465968406,
     6909079965,
     7348340691,
-    6685238066
+    6685238066,
+    8479290260
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -307,6 +309,14 @@
       "username": "Matikkkice",
       "name": "Мат😈👻",
       "added_at": 1794572811.5874708,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "ndn_naxyi67520kak": {
+      "user_id": 8479290260,
+      "username": "NDN_Naxyi67520kak",
+      "name": "𝖣𝖤𝖲𝖳𝖱𝖸 𝖠𝖨",
+      "added_at": 1794573605.8937614,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
