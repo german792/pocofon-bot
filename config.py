@@ -593,27 +593,57 @@ def calculate_credit_cost(model_key: str, duration: int = 5, resolution: str = "
     # 4. External models (Grok, MiniMax, Qwen Image Pro, legacy fallbacks)
     return 0
 
+COMPACT_MODEL_LABELS = {
+    "s2_5": "✨ Seed 2.5",
+    "s2_pro": "🎬 Seed 2.0",
+    "s2_fast": "🚀 2.0 Fast",
+    "s2_mini": "⚡ 2.0 Mini",
+    "s1_5_pro": "🎞 Seed 1.5",
+    "kling_4": "🎥 Kling 4.0",
+    "kling_4_flash": "⚡ Kling 4F",
+    "flux_3": "🌊 Flux 3",
+    "flux_3_max": "🔥 Flux 3 Max",
+    "ltx_25_pro": "🎞 LTX 2.5P",
+    "ltx_25_fast": "⚡ LTX 2.5F",
+    "gemini_omni_12": "💎 Omni 1.2",
+    "gemini_omni_11": "⚡ Omni 1.1",
+    "luma_dream_machine": "🌟 Luma DM",
+    "luma_ray_32": "⚡ Luma 3.2",
+    "minimax_h3": "⚡ MiniMax H3",
+    "minimax_hailuo": "🌊 Hailuo 2.3",
+    "pixverse_v6": "🎬 PixVerse 6",
+    "wan_2_6": "✨ Wan 2.6",
+    "wan_3_prime": "✨ Wan 3P",
+    "runway_alpha": "🎬 Runway 2.0",
+    "pika_2_2": "⚡ Pika 2.2",
+    "grok": "🌌 Grok",
+    "grok_15": "🔮 Grok 1.5",
+    "minimax_hero": "🎬 MM Hero",
+    "minimax_cinema": "🎥 MM Cine",
+    "minimax_macro": "🔍 MM Macro",
+    "nano_banana_2_1": "🍌 Banana 2.1",
+    "nano_banana_pro": "🍌 Banana Pro",
+    "nano_banana": "🍌 Banana",
+    "flux_3_img": "🎨 Flux 3",
+    "flux_3_klein": "✨ Flux Klein",
+    "qwen_image_3": "🖼 Qwen 3.0",
+    "gpt_image_2_6_sunburst": "☀️ GPT Sun",
+    "gpt_image_2_6_flare": "✨ GPT Flare",
+    "qwen_image": "🪧 Постер",
+}
+
+
+def get_model_grid_label(model_key: str) -> str:
+    """Return a concise button label for dense 3-column model grids."""
+    if model_key in COMPACT_MODEL_LABELS:
+        return COMPACT_MODEL_LABELS[model_key]
+    m = MODELS.get(model_key, {})
+    return m.get("short") or m.get("name") or model_key
+
+
 VIDEO_MODEL_KEYS = [
-    "s2_5",
-    "s2_pro",
-    "s2_fast",
-    "s2_mini",
-    "s1_5_pro",
-    "kling_4",
-    "kling_4_flash",
-    "flux_3",
-    "flux_3_max",
-    "ltx_25_pro",
-    "ltx_25_fast",
-    "gemini_omni_12",
-    "gemini_omni_11",
-    "grok",
-    "wan_2_6",
-    "wan_3_prime",
-    "minimax_h3",
-    "runway_alpha",
-    "luma_dream_machine",
-    "luma_ray_32",
+    k for k, v in MODELS.items()
+    if v.get("category", "video") == "video" and not v.get("hidden")
 ]
 IMAGE_MODEL_KEYS = [k for k, v in MODELS.items() if v.get("category") == "image"]
 
