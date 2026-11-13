@@ -36,7 +36,8 @@
     "puluhu",
     "kirill_ustinov",
     "ustfilipp",
-    "m8lk8s"
+    "m8lk8s",
+    "lopux_petux"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -63,7 +64,8 @@
     8370764855,
     143516364,
     465968406,
-    6909079965
+    6909079965,
+    7348340691
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -288,6 +290,14 @@
       "name": "@M8lk8s",
       "added_at": 1794511586.4762347,
       "added_by": "@GermanUstinf",
+      "role": "user"
+    },
+    "lopux_petux": {
+      "user_id": 7348340691,
+      "username": "Lopux_Petux",
+      "name": "Лопух",
+      "added_at": 1794553312.5656974,
+      "added_by": "group_-1004328649380",
       "role": "user"
     }
   }
