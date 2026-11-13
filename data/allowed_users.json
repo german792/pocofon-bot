@@ -40,7 +40,8 @@
     "lopux_petux",
     "matikkkice",
     "ndn_naxyi67520kak",
-    "ggf_123"
+    "ggf_123",
+    "geniibaik"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -327,6 +328,14 @@
       "name": "Invincible",
       "added_at": 1794574513.4951918,
       "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "geniibaik": {
+      "user_id": null,
+      "username": "Geniibaik",
+      "name": "@Geniibaik",
+      "added_at": 1794575109.3207746,
+      "added_by": "@GermanUstinf",
       "role": "user"
     }
   }
