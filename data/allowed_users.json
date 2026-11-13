@@ -37,7 +37,8 @@
     "kirill_ustinov",
     "ustfilipp",
     "m8lk8s",
-    "lopux_petux"
+    "lopux_petux",
+    "matikkkice"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -65,7 +66,8 @@
     143516364,
     465968406,
     6909079965,
-    7348340691
+    7348340691,
+    6685238066
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -297,6 +299,14 @@
       "username": "Lopux_Petux",
       "name": "Лопух",
       "added_at": 1794553312.5656974,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "matikkkice": {
+      "user_id": 6685238066,
+      "username": "Matikkkice",
+      "name": "Мат😈👻",
+      "added_at": 1794572811.5874708,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
