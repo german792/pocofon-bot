@@ -24,6 +24,7 @@ from aiogram.types import (
 )
 import image_utils
 import access_manager
+import cameo_manager
 import user_access
 import config
 import history_manager
@@ -82,6 +83,158 @@ BUILD_ID = "poco-v9-merged-2026-11-13"
 class UserInputState(StatesGroup):
     waiting_for_prompt = State()
     waiting_for_duration = State()
+
+
+class CameoState(StatesGroup):
+    waiting_for_photos = State()
+    waiting_for_handle = State()
+    waiting_for_description = State()
+    editing_description = State()
+
+
+def draft_cameo_handles(draft: Dict[str, Any], user_id: int) -> List[str]:
+    """Return ordered list of valid Cameo @handles attached to or mentioned in draft."""
+    found: List[str] = []
+    for raw in list(draft.get("cameo_handles") or []) + cameo_manager.extract_handles_from_text(draft.get("prompt", "")):
+        h = cameo_manager.normalize_handle(raw)
+        if h and h not in found and cameo_manager.get_cameo(h, user_id):
+            found.append(h)
+    return found
+
+
+def cameo_picker_button(draft: Dict[str, Any], owner_id: int) -> InlineKeyboardButton:
+    handles = draft_cameo_handles(draft, owner_id)
+    if handles:
+        label = f"🎭 Камео ({len(handles)} ✅)"
+        return InlineKeyboardButton(text=label, callback_data=f"cameo_pick:{owner_id}", style="success")
+    return InlineKeyboardButton(text="🎭 + Камео", callback_data=f"cameo_pick:{owner_id}", style="primary")
+
+
+# Per-user Cameo creation wizard buffer (prevents FSM race on multi-photo albums)
+cameo_wizard_buffers: Dict[int, Dict[str, Any]] = {}
+
+
+def render_cameo_hub(user_id: int) -> Tuple[str, InlineKeyboardMarkup]:
+    """Render user's personal + public Cameo library hub."""
+    cameos = cameo_manager.list_cameos_for_user(user_id)
+    if cameos:
+        lines = ["🎭 <b>Камео — ваши персонажи</b>\n"]
+        for c in cameos[:25]:
+            badge = "🌐 " if c.get("is_public") else ""
+            n_imgs = len(c.get("images") or [])
+            desc = (c.get("description") or "").strip()
+            desc_part = f" — <i>{html.escape(desc[:48])}{'…' if len(desc) > 48 else ''}</i>" if desc else ""
+            lines.append(f"• {badge}<code>@{html.escape(c['handle'])}</code> ({n_imgs}📷){desc_part}")
+        if len(cameos) > 25:
+            lines.append(f"<i>…и ещё {len(cameos) - 25}</i>")
+        lines.append("\n<i>Упомяните <code>@тег</code> в любом промпте или выберите персонажа кнопкой:</i>")
+        text = "\n".join(lines)
+    else:
+        text = (
+            "🎭 <b>Камео — ваши персонажи</b>\n\n"
+            "Пока нет сохранённых Камео.\n\n"
+            "Сохраните 1–3 фото лица/персонажа под коротким <code>@тегом</code> — и используйте его "
+            "в видео, фото и замене персонажа просто написав <code>@тег</code> в промпте!\n\n"
+            "<i>Быстрый способ: отправьте фото с подписью</i> <code>/cameo @poco описание</code>"
+        )
+
+    rows: List[List[InlineKeyboardButton]] = []
+    for i in range(0, min(len(cameos), 24), 2):
+        row = []
+        for c in cameos[i:i + 2]:
+            badge = "🌐 " if c.get("is_public") else ""
+            n_imgs = len(c.get("images") or [])
+            row.append(InlineKeyboardButton(
+                text=f"{badge}@{c['handle']} ({n_imgs}📷)",
+                callback_data=f"cm_view:{c['id']}:{user_id}",
+            ))
+        rows.append(row)
+    rows.append([InlineKeyboardButton(text="➕ Создать Камео", callback_data=f"cm_new:{user_id}", style="primary")])
+    rows.append([InlineKeyboardButton(text="❌ Закрыть", callback_data=f"cm_close:{user_id}")])
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def render_cameo_picker(draft: Dict[str, Any], owner_id: int) -> Tuple[str, InlineKeyboardMarkup]:
+    """Render inline Cameo selector inside an active generation draft."""
+    cameos = cameo_manager.list_cameos_for_user(owner_id)
+    attached = set(draft_cameo_handles(draft, owner_id))
+    if cameos:
+        lines = [
+            "🎭 <b>Выбор Камео для генерации</b>\n",
+            "Нажмите на персонажа, чтобы прикрепить/открепить его к текущему запросу "
+            "(фото персонажа автоматически подставятся при запуске).\n",
+        ]
+        if attached:
+            lines.append("✅ <b>Выбраны:</b> " + ", ".join(f"<code>@{html.escape(h)}</code>" for h in draft_cameo_handles(draft, owner_id)))
+        text = "\n".join(lines)
+    else:
+        text = (
+            "🎭 <b>Выбор Камео</b>\n\n"
+            "У вас пока нет сохранённых персонажей. Нажмите <b>➕ Создать Камео</b> "
+            "или отправьте фото с подписью <code>/cameo @тег</code>."
+        )
+
+    rows: List[List[InlineKeyboardButton]] = []
+    for i in range(0, min(len(cameos), 24), 2):
+        row = []
+        for c in cameos[i:i + 2]:
+            is_on = c["handle"] in attached
+            badge = "🌐 " if c.get("is_public") else ""
+            prefix = "✅ " if is_on else "➕ "
+            row.append(InlineKeyboardButton(
+                text=f"{prefix}{badge}@{c['handle']}",
+                callback_data=f"cm_tog:{c['id']}:{owner_id}",
+                **({"style": "success"} if is_on else {}),
+            ))
+        rows.append(row)
+    rows.append([InlineKeyboardButton(text="➕ Создать новое Камео", callback_data=f"cm_new:{owner_id}", style="primary")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data=f"cm_back_draft:{owner_id}")])
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def render_cameo_card(cameo: Dict[str, Any], user: Any) -> Tuple[str, InlineKeyboardMarkup]:
+    """Render detailed management card for a single Cameo."""
+    uid = user.id
+    cid = cameo["id"]
+    is_admin = user_access.is_admin(user)
+    is_owner = int(cameo.get("owner_id") or 0) == uid
+    can_manage = is_admin or is_owner
+    vis = "🌐 Публичное (доступно всем)" if cameo.get("is_public") else "🔒 Личное"
+    n_imgs = len(cameo.get("images") or [])
+    desc = (cameo.get("description") or "").strip()
+    desc_block = f"📝 <b>Описание:</b> <i>{html.escape(desc)}</i>\n" if desc else "📝 <b>Описание:</b> <i>не задано</i>\n"
+
+    text = (
+        f"🎭 <b>Камео</b> <code>@{html.escape(cameo['handle'])}</code>\n\n"
+        f"📷 <b>Фото-референсов:</b> {n_imgs} из 3\n"
+        f"{desc_block}"
+        f"👁 <b>Доступ:</b> {vis}\n"
+        f"👤 <b>Автор:</b> {html.escape(cameo.get('owner_name') or str(cameo.get('owner_id') or ''))}\n\n"
+        f"💡 <i>Пишите</i> <code>@{html.escape(cameo['handle'])}</code> <i>в любом промпте или нажмите кнопку ниже:</i>"
+    )
+
+    rows: List[List[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(text="🎬 В Видео", callback_data=f"cm_use:v:{cid}:{uid}", style="primary"),
+            InlineKeyboardButton(text="🖼 В Фото", callback_data=f"cm_use:i:{cid}:{uid}", style="primary"),
+            InlineKeyboardButton(text="🕺 Motion", callback_data=f"cm_use:m:{cid}:{uid}"),
+        ],
+    ]
+    if fresh_draft(uid) is not None:
+        rows.append([InlineKeyboardButton(text="📌 Прикрепить к текущему меню", callback_data=f"cm_attach:{cid}:{uid}", style="success")])
+    rows.append([InlineKeyboardButton(text="🖼 Показать фото", callback_data=f"cm_pics:{cid}:{uid}")])
+    if can_manage:
+        manage_row = [InlineKeyboardButton(text="✏️ Описание", callback_data=f"cm_desc:{cid}:{uid}")]
+        if is_admin:
+            pub_lbl = "🔒 Скрыть" if cameo.get("is_public") else "🌐 Публичное"
+            manage_row.append(InlineKeyboardButton(text=pub_lbl, callback_data=f"cm_pub:{cid}:{uid}"))
+        manage_row.append(InlineKeyboardButton(text="🗑 Удалить", callback_data=f"cm_del:{cid}:{uid}", style="danger"))
+        rows.append(manage_row)
+    rows.append([
+        InlineKeyboardButton(text="⬅️ К списку", callback_data=f"cameo_menu:{uid}"),
+        InlineKeyboardButton(text="❌ Закрыть", callback_data=f"cm_close:{uid}"),
+    ])
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 # Active draft per user
@@ -195,6 +348,7 @@ def build_motion_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inli
             **({"style": "primary"} if active else {}),
         ))
     rows.append(orient_row)
+    rows.append([cameo_picker_button(draft, owner_id)])
     ready = bool(draft.get("motion_image")) and bool(draft.get("ref_video"))
     rows.append([InlineKeyboardButton(text="🕺 Запустить", callback_data=f"gen:{owner_id}", **({"style": "success"} if ready else {}))])
     rows.append([InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}", style="danger")])
@@ -320,7 +474,8 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
                     text=f"📎 + Фото (до {ref_limit} шт.)",
                     callback_data=f"ref_hint:{owner_id}",
                     style="primary"
-                )
+                ),
+                cameo_picker_button(draft, owner_id),
             ])
         else:
             grid_lbl = ref_grid_button_label(draft)
@@ -335,6 +490,7 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
                     InlineKeyboardButton(text=grid_lbl, callback_data=f"rgrid:{owner_id}"),
                     InlineKeyboardButton(text="🗑 Очистить", callback_data=f"rclear:{owner_id}", style="danger"),
                 ])
+                rows.append([cameo_picker_button(draft, owner_id)])
             else:
                 rows.append([
                     InlineKeyboardButton(text=f"📎 Референс: {ref_count} фото ✅", callback_data=f"ref_hint:{owner_id}"),
@@ -469,10 +625,11 @@ def build_image_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     if ref_count == 0:
         rows.append([
             InlineKeyboardButton(
-                text=f"📎 Добавить фото-референс (до {ref_limit} шт.)",
+                text=f"📎 + Фото (до {ref_limit} шт.)",
                 callback_data=f"ref_hint:{owner_id}",
                 style="primary"
-            )
+            ),
+            cameo_picker_button(draft, owner_id),
         ])
     else:
         grid_lbl = ref_grid_button_label(draft)
@@ -484,6 +641,7 @@ def build_image_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
             InlineKeyboardButton(text=grid_lbl, callback_data=f"rgrid:{owner_id}"),
             InlineKeyboardButton(text="🗑 Очистить", callback_data=f"rclear:{owner_id}", style="danger"),
         ])
+        rows.append([cameo_picker_button(draft, owner_id)])
 
     # Image Quality / Resolution Row (1K, 2K, 4K)
     res_buttons = []
@@ -659,6 +817,11 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
     user_line = f"👤 <b>Автор:</b> {draft.get('user_name')}\n" if draft.get("user_name") else ""
     video_line = "🎞 <b>Видео-референс:</b> прикреплен к видео ✅\n" if draft.get("ref_video") else ""
     audio_ref_line = "🎵 <b>Аудио-референс:</b> прикреплен к видео ✅\n" if draft.get("audio_bytes") else ""
+    c_handles = draft_cameo_handles(draft, int(draft.get("owner_id") or 0))
+    cameo_line = (
+        "🎭 <b>Камео:</b> " + ", ".join(f"<code>@{html.escape(h)}</code>" for h in c_handles) + "\n"
+        if c_handles else ""
+    )
 
     if minfo.get("backend") == "davinci_voice":
         audio_ref = "🎵 Аудио-референс прикреплен (Voice Changer)" if draft.get("audio_bytes") else ref_badge
@@ -687,6 +850,7 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
             f"{user_line}"
             f"📝 <b>Промпт:</b> <i>{html.escape(str(prompt))}</i>\n"
             f"📌 <b>Референсы:</b> {ref_badge}\n"
+            f"{cameo_line}"
             f"{video_line}"
             f"{audio_ref_line}\n"
             f"👇 <i>Выберите нейросеть для генерации ниже:</i>\n"
@@ -700,6 +864,7 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
             f"🤖 <b>Модель:</b> {minfo['name']} ({min_dur}–{max_dur} сек)\n"
             f"📝 <b>Промпт:</b> <i>{html.escape(str(prompt))}</i>\n"
             f"📌 <b>Референсы:</b> {ref_badge}\n"
+            f"{cameo_line}"
             f"{video_line}"
             f"{audio_ref_line}\n"
             f"⏱ Выбрано: <b>{dur} сек</b>\n\n"
@@ -729,6 +894,7 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
         f"⏱ <b>Длительность:</b> {dur_str}\n"
         f"📝 <b>Промпт:</b> <i>{html.escape(str(prompt))}</i>\n"
         f"📌 <b>Референсы:</b> {ref_badge}\n"
+        f"{cameo_line}"
         f"{video_line}"
         f"{audio_ref_line}"
         f"📐 <b>Разрешение и формат:</b> {res} | {ratio_display}\n"
@@ -760,6 +926,11 @@ def format_image_draft_text(draft: Dict[str, Any]) -> str:
         ref_badge = f"📝 По тексту <i>(пришлите фото в чат для добавления референса — до {ref_limit} шт.)</i>"
 
     user_line = f"👤 <b>Автор:</b> {draft.get('user_name')}\n" if draft.get("user_name") else ""
+    c_handles = draft_cameo_handles(draft, int(draft.get("owner_id") or 0))
+    cameo_line = (
+        "🎭 <b>Камео:</b> " + ", ".join(f"<code>@{html.escape(h)}</code>" for h in c_handles) + "\n"
+        if c_handles else ""
+    )
     cost = calculate_credit_cost(cur_model, 1, res)
     cost_line = f"💳 <b>Стоимость:</b> ~{cost} кр.\n" if cost > 0 else "💳 <b>Стоимость:</b> Бесплатно\n"
 
@@ -769,6 +940,7 @@ def format_image_draft_text(draft: Dict[str, Any]) -> str:
         f"🤖 <b>Фото-модель:</b> {minfo['name']} — <i>{minfo['desc']}</i>\n"
         f"📝 <b>Промпт:</b> <i>{html.escape(str(prompt))}</i>\n"
         f"📌 <b>Референсы:</b> {ref_badge}\n"
+        f"{cameo_line}"
         f"📐 <b>Качество и пропорции:</b> {res} | {ratio}\n"
         f"{cost_line}\n"
         f"💡 <i>Отправьте фото в чат, чтобы добавить референс, или нажмите «Сгенерировать фото»:</i>"
@@ -931,7 +1103,10 @@ async def handle_start_and_help(message: Message, state: FSMContext):
             InlineKeyboardButton(text="🎬 Видео", callback_data=f"open_menu:video:{uid}", style="success"),
             InlineKeyboardButton(text="🖼 Фото", callback_data=f"open_menu:image:{uid}", style="primary"),
             InlineKeyboardButton(text="🕺 Motion", callback_data=f"open_menu:motion:{uid}", style="primary"),
-        ]
+        ],
+        [
+            InlineKeyboardButton(text="🎭 Камео (@персонажи)", callback_data=f"cameo_menu:{uid}"),
+        ],
     ])
 
     in_group = message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP)
@@ -944,7 +1119,7 @@ async def handle_start_and_help(message: Message, state: FSMContext):
         f"👋 <b>{html.escape(first_name)}, это Poco AI</b>\n"
         f"Видео, фото и Motion за пару тапов.\n\n"
         f"{how} 👇\n\n"
-        f"<blockquote>📎 Фото с подписью станет референсом\n"
+        f"<blockquote>📎 Фото с подписью станет референсом · 🎭 Камео: /cameo\n"
         f"💳 /balance · 🔲 /grid · 🤖 /model</blockquote>"
     )
     if in_group:
@@ -1912,6 +2087,105 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
 
 
 
+async def _save_cameo_shortcut(
+    message: Message,
+    bot: Bot,
+    state: FSMContext,
+    raw_args: str,
+    images: List[bytes],
+):
+    """Handle `/cameo @tag [description]` with attached or replied photos."""
+    uid = message.from_user.id
+    args = (raw_args or "").strip()
+    parts = args.split(maxsplit=1) if args else []
+    handle_raw = parts[0] if parts else ""
+    desc = parts[1].strip() if len(parts) > 1 else ""
+    norm = cameo_manager.normalize_handle(handle_raw)
+
+    if not norm:
+        # Photos provided without a @tag -> enter FSM at waiting_for_handle with photos buffered
+        cameo_wizard_buffers[uid] = {
+            "photos": [cameo_manager.compress_cameo_image(b) for b in images[:3]],
+            "handle": "",
+            "description": "",
+            "last_mg": None,
+        }
+        await state.set_state(CameoState.waiting_for_handle)
+        await message.reply(
+            f"📷 Принято фото для Камео: <b>{len(cameo_wizard_buffers[uid]['photos'])}/3</b>.\n\n"
+            f"Теперь отправьте короткий <code>@тег</code> персонажа (например, <code>@poco</code> или <code>@макс</code>).",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="❌ Отмена", callback_data=f"cm_cancel:{uid}")
+            ]]),
+            parse_mode="HTML",
+        )
+        return
+
+    if norm and (len(norm) < 2 or len(norm) > 24):
+        await message.reply(
+            "⚠️ Тег должен быть длиной <b>от 2 до 24</b> символов (буквы, цифры, <code>_</code>).\n"
+            "Например: <code>@poco</code> или <code>@макс</code>.",
+            parse_mode="HTML",
+        )
+        return
+
+    entry = cameo_manager.upsert_cameo(
+        owner_id=uid,
+        owner_name=get_user_display_name(message.from_user),
+        handle=norm,
+        images=images[:3],
+        description=desc,
+    )
+    cameo_wizard_buffers.pop(uid, None)
+    await state.clear()
+    text, kb = render_cameo_card(entry, message.from_user)
+    await message.reply(f"✅ <b>Камео сохранено!</b>\n\n{text}", reply_markup=kb, parse_mode="HTML")
+
+
+@router.message(CameoState.waiting_for_photos, F.photo | F.document)
+async def handle_cameo_waiting_photos(message: Message, bot: Bot, state: FSMContext):
+    """Collect 1–3 photos during interactive Cameo creation."""
+    uid = message.from_user.id
+    if message.document:
+        doc = message.document
+        is_img = (doc.mime_type and doc.mime_type.startswith("image/")) or (
+            doc.file_name and doc.file_name.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
+        )
+        if not is_img:
+            await message.reply("Пожалуйста, отправьте фото (JPG/PNG/WEBP) или нажмите ❌ Отмена.")
+            return
+
+    img_bytes = await extract_image_bytes(message, bot)
+    if not img_bytes:
+        await message.reply("⚠️ Не удалось прочитать изображение. Попробуйте ещё раз.")
+        return
+
+    buf = cameo_wizard_buffers.setdefault(uid, {"photos": [], "handle": "", "description": "", "last_mg": None})
+    compressed = cameo_manager.compress_cameo_image(img_bytes)
+    photos: List[bytes] = buf["photos"]
+    if len(photos) < 3 and not any(p == compressed for p in photos):
+        photos.append(compressed)
+
+    # Deduplicate prompt spam when Telegram delivers a 2–3 photo album as separate updates
+    mg = message.media_group_id
+    if mg and buf.get("last_mg") == mg and len(photos) < 3:
+        return
+    buf["last_mg"] = mg
+
+    count = len(photos)
+    done_label = "✅ Фото готовы" if count < 3 else "✅ Сохранить (3/3)"
+    if buf.get("handle"):
+        hint = f"Тег: <code>@{html.escape(buf['handle'])}</code>\nНажмите <b>{done_label}</b> или отправьте ещё фото (до 3)."
+    else:
+        hint = f"Отправьте ещё фото (до 3) для лучшего сходства лица/ракурсов или нажмите <b>{done_label}</b>."
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=done_label, callback_data=f"cm_photos_done:{uid}", style="success")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"cm_cancel:{uid}")],
+    ])
+    await message.reply(f"📷 Фото добавлено: <b>{count}/3</b>\n\n{hint}", reply_markup=kb, parse_mode="HTML")
+
+
 @router.message(F.photo)
 @router.message(F.document)
 async def handle_photo(message: Message, bot: Bot, state: FSMContext):
@@ -2021,7 +2295,7 @@ async def process_photo_batch(
         bot_username = f"@{bot_info.username}".lower()
         cap_lower = caption.lower()
         addressed = (
-            caption.startswith(("/video", "/gen", "/prompt", "/v", "/s2", "/omni", "/image", "/poster", "/img", "/pic", "/photo", "/banana", "/qwen", "/voice", "/tts", "/eleven", "/elevenlabs", "/grid", "/сетка", "/mesh"))
+            caption.startswith(("/video", "/gen", "/prompt", "/v", "/s2", "/omni", "/image", "/poster", "/img", "/pic", "/photo", "/banana", "/qwen", "/voice", "/tts", "/eleven", "/elevenlabs", "/grid", "/сетка", "/mesh", "/cameo", "/cameos", "/камео"))
             or bot_username in cap_lower
             or (not caption and fresh_draft(user_id) is not None)
         )
@@ -2032,6 +2306,12 @@ async def process_photo_batch(
     if bool(re.search(r"^/(grid|сетка|mesh)", caption, re.I)):
         grid_args = re.sub(r"^/(grid|сетка|mesh)(@\w+)?\s*", "", caption, flags=re.I).strip()
         await process_grid_image(message, bot, images[0], grid_args)
+        return
+
+    # Check for direct /cameo command in caption (supports single photo or multi-photo album)
+    if bool(re.search(r"^/(cameo|cameos|камео)\b", caption, re.I)):
+        cameo_args = re.sub(r"^/(cameo|cameos|камео)(@\w+)?\s*", "", caption, flags=re.I).strip()
+        await _save_cameo_shortcut(message, bot, state, cameo_args, images)
         return
 
     is_image_cmd = bool(re.search(r"^/(image|poster|img|pic|photo|banana|qwen)", caption, re.I))
@@ -2869,6 +3149,691 @@ async def on_grid_use_image(call: CallbackQuery, bot: Bot):
     await call.answer("Открыто меню Фото с сеткой на референсе")
 
 
+# --- Cameo (@character presets) Commands, FSM & Callbacks ---
+
+@router.message(Command("cameo", "cameos", "камео", ignore_case=True, ignore_mention=True), ~F.photo, ~F.document)
+async def handle_cameo_command(message: Message, command: CommandObject, bot: Bot, state: FSMContext):
+    uid = message.from_user.id
+    args = (command.args or "").strip()
+
+    if not args or args.lower() in ("list", "список", "menu", "меню"):
+        await state.clear()
+        cameo_wizard_buffers.pop(uid, None)
+        text, kb = render_cameo_hub(uid)
+        await message.reply(text, reply_markup=kb, parse_mode="HTML")
+        return
+
+    low = args.lower()
+    if low in ("help", "?", "помощь"):
+        text, kb = render_cameo_hub(uid)
+        await message.reply(
+            "🎭 <b>Как пользоваться Камео</b>\n\n"
+            "1️⃣ <b>Создать персонажа:</b> отправьте 1–3 фото с подписью "
+            "<code>/cameo @тег описание</code> (или нажмите ➕ Создать Камео).\n"
+            "2️⃣ <b>Использовать в промпте:</b> просто напишите <code>@тег</code> в любом запросе "
+            "(видео, фото или замена персонажа в видео) — фото подтянутся автоматически!\n"
+            "3️⃣ <b>Управление:</b> <code>/cameo</code> — список, <code>/cameo del @тег</code> — удалить.\n\n"
+            + text,
+            reply_markup=kb,
+            parse_mode="HTML",
+        )
+        return
+
+    if low in ("new", "create", "создать", "добавить"):
+        cameo_wizard_buffers[uid] = {"photos": [], "handle": "", "description": "", "last_mg": None}
+        await state.set_state(CameoState.waiting_for_photos)
+        await message.reply(
+            "🎭 <b>Создание нового Камео</b>\n\n"
+            "Отправьте <b>1–3 фото</b> персонажа (портрет, крупный план или разные ракурсы).",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="❌ Отмена", callback_data=f"cm_cancel:{uid}")
+            ]]),
+            parse_mode="HTML",
+        )
+        return
+
+    parts = args.split(maxsplit=1)
+    first_low = parts[0].lower()
+    if first_low in ("del", "delete", "remove", "удалить"):
+        target = parts[1].strip() if len(parts) > 1 else ""
+        norm = cameo_manager.normalize_handle(target)
+        if not norm:
+            await message.reply("Укажите тег для удаления, например: <code>/cameo del @max</code>", parse_mode="HTML")
+            return
+        ok = cameo_manager.delete_cameo(norm, uid, is_admin=user_access.is_admin(message.from_user))
+        if ok:
+            await message.reply(f"🗑 Камео <code>@{html.escape(norm)}</code> удалено.", parse_mode="HTML")
+        else:
+            await message.reply(f"⚠️ Камео <code>@{html.escape(norm)}</code> не найдено или нет прав на удаление.", parse_mode="HTML")
+        return
+
+    # Check if replying to photo(s)
+    replied_photos: List[bytes] = []
+    if message.reply_to_message:
+        replied_photos = await get_all_photos_for_message_or_reply(message, bot)
+    if replied_photos:
+        await _save_cameo_shortcut(message, bot, state, args, replied_photos)
+        return
+
+    # Single `@handle` lookup opens its card if it already exists
+    norm = cameo_manager.normalize_handle(parts[0])
+    desc = parts[1].strip() if len(parts) > 1 else ""
+    existing = cameo_manager.get_cameo(norm, uid) if norm else None
+    if existing and not desc:
+        await state.clear()
+        text, kb = render_cameo_card(existing, message.from_user)
+        await message.reply(text, reply_markup=kb, parse_mode="HTML")
+        return
+
+    # Otherwise start photo upload step pre-filled with this @handle + optional description
+    cameo_wizard_buffers[uid] = {"photos": [], "handle": norm, "description": desc, "last_mg": None}
+    await state.set_state(CameoState.waiting_for_photos)
+    tag_hint = f" для <code>@{html.escape(norm)}</code>" if norm else ""
+    await message.reply(
+        f"📷 Отправьте <b>1–3 фото</b>{tag_hint}.\n\n"
+        f"<i>После загрузки фото нажмите «✅ Фото готовы».</i>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"cm_cancel:{uid}")
+        ]]),
+        parse_mode="HTML",
+    )
+
+
+@router.message(CameoState.waiting_for_photos, F.text)
+async def handle_cameo_photos_state_text(message: Message, bot: Bot, state: FSMContext):
+    uid = message.from_user.id
+    text = (message.text or "").strip()
+    if text.lower() in ("/cancel", "/stop", "отмена"):
+        cameo_wizard_buffers.pop(uid, None)
+        await state.clear()
+        await message.reply("❌ Создание Камео отменено.")
+        return
+
+    buf = cameo_wizard_buffers.get(uid) or {}
+    photos: List[bytes] = list(buf.get("photos") or [])
+    if not photos:
+        await message.reply(
+            "📷 Сначала отправьте хотя бы <b>1 фото</b> персонажа (можно 2–3 штуки), или нажмите ❌ Отмена.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="❌ Отмена", callback_data=f"cm_cancel:{uid}")
+            ]]),
+            parse_mode="HTML",
+        )
+        return
+
+    # User already uploaded >=1 photo and typed a handle/command like "@poco описание" or "готово"
+    if text.lower() in ("готово", "done", "ок", "ok"):
+        if buf.get("handle"):
+            entry = cameo_manager.upsert_cameo(
+                owner_id=uid,
+                owner_name=get_user_display_name(message.from_user),
+                handle=buf["handle"],
+                images=photos[:3],
+                description=buf.get("description", ""),
+            )
+            cameo_wizard_buffers.pop(uid, None)
+            await state.clear()
+            c_text, kb = render_cameo_card(entry, message.from_user)
+            await message.reply(f"✅ <b>Камео создано!</b>\n\n{c_text}", reply_markup=kb, parse_mode="HTML")
+            return
+        await state.set_state(CameoState.waiting_for_handle)
+        await message.reply(
+            "🏷 Введите короткий <code>@тег</code> для персонажа (например: <code>@max</code> или <code>@poco</code>):",
+            parse_mode="HTML",
+        )
+        return
+
+    if buf.get("handle"):
+        # Handle was pre-filled; treat text as description and save!
+        entry = cameo_manager.upsert_cameo(
+            owner_id=uid,
+            owner_name=get_user_display_name(message.from_user),
+            handle=buf["handle"],
+            images=photos[:3],
+            description=text,
+        )
+        cameo_wizard_buffers.pop(uid, None)
+        await state.clear()
+        c_text, kb = render_cameo_card(entry, message.from_user)
+        await message.reply(f"✅ <b>Камео создано!</b>\n\n{c_text}", reply_markup=kb, parse_mode="HTML")
+        return
+
+    parts = text.split(maxsplit=1)
+    norm = cameo_manager.normalize_handle(parts[0])
+    if not norm or len(norm) < 2 or len(norm) > 24:
+        await message.reply("Укажите корректный тег (2–24 буквы/цифры/_), например <code>@max</code>:", parse_mode="HTML")
+        return
+    if len(parts) > 1:
+        entry = cameo_manager.upsert_cameo(
+            owner_id=uid,
+            owner_name=get_user_display_name(message.from_user),
+            handle=norm,
+            images=photos[:3],
+            description=parts[1].strip(),
+        )
+        cameo_wizard_buffers.pop(uid, None)
+        await state.clear()
+        c_text, kb = render_cameo_card(entry, message.from_user)
+        await message.reply(f"✅ <b>Камео создано!</b>\n\n{c_text}", reply_markup=kb, parse_mode="HTML")
+        return
+
+    buf["handle"] = norm
+    await state.set_state(CameoState.waiting_for_description)
+    await message.reply(
+        f"🏷 Тег: <code>@{html.escape(norm)}</code>\n\n"
+        f"Теперь напишите краткое описание внешности/стиля (или нажмите <b>Пропустить</b>):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭ Пропустить", callback_data=f"cm_skip_desc:{uid}")],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data=f"cm_cancel:{uid}")],
+        ]),
+        parse_mode="HTML",
+    )
+
+
+@router.message(CameoState.waiting_for_handle, F.text)
+async def handle_cameo_waiting_handle(message: Message, state: FSMContext):
+    uid = message.from_user.id
+    text = (message.text or "").strip()
+    if text.lower() in ("/cancel", "/stop", "отмена"):
+        cameo_wizard_buffers.pop(uid, None)
+        await state.clear()
+        await message.reply("❌ Создание Камео отменено.")
+        return
+
+    buf = cameo_wizard_buffers.get(uid)
+    if not buf or not buf.get("photos"):
+        cameo_wizard_buffers.pop(uid, None)
+        await state.clear()
+        await message.reply("Фото не найдены. Начните заново командой /cameo.")
+        return
+
+    parts = text.split(maxsplit=1)
+    norm = cameo_manager.normalize_handle(parts[0])
+    if not norm or len(norm) < 2 or len(norm) > 24:
+        await message.reply(
+            "⚠️ Тег должен быть длиной <b>2–24</b> символа (буквы, цифры или <code>_</code>), например <code>@max</code>:",
+            parse_mode="HTML",
+        )
+        return
+
+    if len(parts) > 1 and parts[1].strip():
+        entry = cameo_manager.upsert_cameo(
+            owner_id=uid,
+            owner_name=get_user_display_name(message.from_user),
+            handle=norm,
+            images=list(buf["photos"])[:3],
+            description=parts[1].strip(),
+        )
+        cameo_wizard_buffers.pop(uid, None)
+        await state.clear()
+        c_text, kb = render_cameo_card(entry, message.from_user)
+        await message.reply(f"✅ <b>Камео создано!</b>\n\n{c_text}", reply_markup=kb, parse_mode="HTML")
+        return
+
+    buf["handle"] = norm
+    await state.set_state(CameoState.waiting_for_description)
+    await message.reply(
+        f"🏷 Тег: <code>@{html.escape(norm)}</code>\n\n"
+        f"Напишите короткое описание персонажа (помогает нейросети точнее сохранять детали, "
+        f"например: <i>«парень в чёрной кожанке и круглых очках»</i>), или нажмите <b>Пропустить</b>:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭ Пропустить", callback_data=f"cm_skip_desc:{uid}")],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data=f"cm_cancel:{uid}")],
+        ]),
+        parse_mode="HTML",
+    )
+
+
+@router.message(CameoState.waiting_for_description, F.text)
+async def handle_cameo_waiting_description(message: Message, state: FSMContext):
+    uid = message.from_user.id
+    text = (message.text or "").strip()
+    if text.lower() in ("/cancel", "/stop", "отмена"):
+        cameo_wizard_buffers.pop(uid, None)
+        await state.clear()
+        await message.reply("❌ Создание Камео отменено.")
+        return
+
+    buf = cameo_wizard_buffers.pop(uid, None)
+    await state.clear()
+    if not buf or not buf.get("photos") or not buf.get("handle"):
+        await message.reply("Данные устарели. Начните заново через /cameo.")
+        return
+
+    desc = "" if text.lower() in ("-", "пропустить", "skip", "/skip") else text
+    entry = cameo_manager.upsert_cameo(
+        owner_id=uid,
+        owner_name=get_user_display_name(message.from_user),
+        handle=buf["handle"],
+        images=list(buf["photos"])[:3],
+        description=desc,
+    )
+    c_text, kb = render_cameo_card(entry, message.from_user)
+    await message.reply(f"✅ <b>Камео создано!</b>\n\n{c_text}", reply_markup=kb, parse_mode="HTML")
+
+
+@router.message(CameoState.editing_description, F.text)
+async def handle_cameo_edit_description(message: Message, state: FSMContext):
+    uid = message.from_user.id
+    text = (message.text or "").strip()
+    if text.lower() in ("/cancel", "/stop", "отмена"):
+        await state.clear()
+        await message.reply("❌ Редактирование описания отменено.")
+        return
+
+    data = await state.get_data()
+    key = data.get("cameo_key", "")
+    await state.clear()
+    desc = "" if text.lower() in ("-", "очистить", "удалить") else text
+    entry = cameo_manager.update_cameo_description(
+        key, uid, desc, is_admin=user_access.is_admin(message.from_user)
+    )
+    if not entry:
+        await message.reply("⚠️ Камео не найдено или нет прав для изменения.")
+        return
+    c_text, kb = render_cameo_card(entry, message.from_user)
+    await message.reply(f"✅ <b>Описание обновлено!</b>\n\n{c_text}", reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("cameo_menu:"))
+async def on_cameo_menu(call: CallbackQuery, state: FSMContext):
+    owner_id = int(call.data.split(":")[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    await state.clear()
+    cameo_wizard_buffers.pop(owner_id, None)
+    text, kb = render_cameo_hub(owner_id)
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("cameo_pick:"))
+async def on_cameo_picker(call: CallbackQuery):
+    owner_id = int(call.data.split(":")[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = user_drafts.get(owner_id)
+    if not draft:
+        text, kb = render_cameo_hub(owner_id)
+        try:
+            await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        except Exception:
+            await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+        await call.answer()
+        return
+
+    text, kb = render_cameo_picker(draft, owner_id)
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("cm_tog:"))
+async def on_cameo_toggle_in_draft(call: CallbackQuery):
+    _, cid, uid_s = call.data.split(":")
+    owner_id = int(uid_s)
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = user_drafts.get(owner_id)
+    if not draft:
+        await call.answer("Черновик устарел. Откройте /video или /image.", show_alert=True)
+        return
+    cameo = cameo_manager.get_cameo_by_key(cid, owner_id)
+    if not cameo:
+        await call.answer("Камео не найдено", show_alert=True)
+        return
+
+    handle = cameo["handle"]
+    attached: List[str] = list(draft.get("cameo_handles") or [])
+    if handle in attached:
+        attached = [h for h in attached if h != handle]
+        draft["cameo_handles"] = attached
+        status_note = f"Откреплено @{handle}"
+    else:
+        if draft.get("menu_mode") == "motion":
+            imgs = cameo_manager.get_cameo_images(cameo)
+            if imgs:
+                draft["motion_image"] = imgs[0]
+            draft["cameo_handles"] = [handle]
+        else:
+            attached.append(handle)
+            draft["cameo_handles"] = attached
+        status_note = f"Прикреплено @{handle}"
+
+    text, kb = render_cameo_picker(draft, owner_id)
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        pass
+    await call.answer(status_note)
+
+
+@router.callback_query(F.data.startswith("cm_back_draft:"))
+async def on_cameo_back_to_draft(call: CallbackQuery):
+    owner_id = int(call.data.split(":")[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = user_drafts.get(owner_id)
+    if not draft:
+        await call.answer("Черновик устарел", show_alert=True)
+        return
+    try:
+        await call.message.edit_text(
+            text=format_draft_text(draft),
+            reply_markup=build_settings_keyboard(draft, owner_id),
+            parse_mode="HTML",
+        )
+    except Exception:
+        await show_or_update_menu(call.message, call.bot, draft, owner_id)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("cm_new:"))
+async def on_cameo_new(call: CallbackQuery, state: FSMContext):
+    owner_id = int(call.data.split(":")[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    cameo_wizard_buffers[owner_id] = {"photos": [], "handle": "", "description": "", "last_mg": None}
+    await state.set_state(CameoState.waiting_for_photos)
+    await call.message.answer(
+        "🎭 <b>Создание нового Камео</b>\n\n"
+        "Отправьте <b>1–3 фото</b> персонажа (портрет, крупный план или разные ракурсы).",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"cm_cancel:{owner_id}")
+        ]]),
+        parse_mode="HTML",
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("cm_photos_done:"))
+async def on_cameo_photos_done(call: CallbackQuery, state: FSMContext):
+    owner_id = int(call.data.split(":")[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    buf = cameo_wizard_buffers.get(owner_id)
+    if not buf or not buf.get("photos"):
+        await call.answer("Сначала отправьте хотя бы 1 фото!", show_alert=True)
+        return
+
+    if buf.get("handle"):
+        entry = cameo_manager.upsert_cameo(
+            owner_id=owner_id,
+            owner_name=get_user_display_name(call.from_user),
+            handle=buf["handle"],
+            images=list(buf["photos"])[:3],
+            description=buf.get("description", ""),
+        )
+        cameo_wizard_buffers.pop(owner_id, None)
+        await state.clear()
+        text, kb = render_cameo_card(entry, call.from_user)
+        try:
+            await call.message.edit_text(f"✅ <b>Камео сохранено!</b>\n\n{text}", reply_markup=kb, parse_mode="HTML")
+        except Exception:
+            await call.message.answer(f"✅ <b>Камео сохранено!</b>\n\n{text}", reply_markup=kb, parse_mode="HTML")
+        await call.answer("Готово!")
+        return
+
+    await state.set_state(CameoState.waiting_for_handle)
+    prompt_txt = (
+        f"📷 Фото готовы: <b>{len(buf['photos'])}/3</b>.\n\n"
+        f"Теперь отправьте короткий <code>@тег</code> персонажа (например, <code>@max</code> или <code>@poco</code>):"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data=f"cm_cancel:{owner_id}")]])
+    try:
+        await call.message.edit_text(prompt_txt, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        await call.message.answer(prompt_txt, reply_markup=kb, parse_mode="HTML")
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("cm_skip_desc:"))
+async def on_cameo_skip_desc(call: CallbackQuery, state: FSMContext):
+    owner_id = int(call.data.split(":")[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    buf = cameo_wizard_buffers.pop(owner_id, None)
+    await state.clear()
+    if not buf or not buf.get("photos") or not buf.get("handle"):
+        await call.answer("Сессия устарела. Начните заново /cameo.", show_alert=True)
+        return
+
+    entry = cameo_manager.upsert_cameo(
+        owner_id=owner_id,
+        owner_name=get_user_display_name(call.from_user),
+        handle=buf["handle"],
+        images=list(buf["photos"])[:3],
+        description="",
+    )
+    text, kb = render_cameo_card(entry, call.from_user)
+    try:
+        await call.message.edit_text(f"✅ <b>Камео создано!</b>\n\n{text}", reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        await call.message.answer(f"✅ <b>Камео создано!</b>\n\n{text}", reply_markup=kb, parse_mode="HTML")
+    await call.answer("Создано!")
+
+
+@router.callback_query(F.data.startswith("cm_cancel:"))
+async def on_cameo_cancel(call: CallbackQuery, state: FSMContext):
+    owner_id = int(call.data.split(":")[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    cameo_wizard_buffers.pop(owner_id, None)
+    await state.clear()
+    try:
+        await call.message.edit_text("❌ Действие с Камео отменено.")
+    except Exception:
+        pass
+    await call.answer("Отменено")
+
+
+@router.callback_query(F.data.startswith("cm_view:"))
+async def on_cameo_view(call: CallbackQuery):
+    _, cid, uid_s = call.data.split(":")
+    owner_id = int(uid_s)
+    if not await verify_callback_owner(call, owner_id):
+        return
+    cameo = cameo_manager.get_cameo_by_key(cid, owner_id)
+    if not cameo:
+        await call.answer("Камео не найдено", show_alert=True)
+        return
+    text, kb = render_cameo_card(cameo, call.from_user)
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("cm_pics:"))
+async def on_cameo_show_pics(call: CallbackQuery):
+    _, cid, uid_s = call.data.split(":")
+    owner_id = int(uid_s)
+    if not await verify_callback_owner(call, owner_id):
+        return
+    cameo = cameo_manager.get_cameo_by_key(cid, owner_id)
+    if not cameo:
+        await call.answer("Камео не найдено", show_alert=True)
+        return
+    imgs = cameo_manager.get_cameo_images(cameo)
+    if not imgs:
+        await call.answer("Фото не найдены", show_alert=True)
+        return
+    caption = f"🎭 Фото-референсы Камео @{cameo['handle']} ({len(imgs)} шт.)"
+    if len(imgs) == 1:
+        await call.message.answer_photo(BufferedInputFile(imgs[0], filename=f"{cameo['handle']}.jpg"), caption=caption)
+    else:
+        media = [
+            InputMediaPhoto(
+                media=BufferedInputFile(b, filename=f"{cameo['handle']}_{idx}.jpg"),
+                caption=caption if idx == 0 else None,
+            )
+            for idx, b in enumerate(imgs[:3])
+        ]
+        await call.message.answer_media_group(media)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("cm_use:"))
+async def on_cameo_use_mode(call: CallbackQuery, bot: Bot):
+    _, mode_code, cid, uid_s = call.data.split(":")
+    owner_id = int(uid_s)
+    if not await verify_callback_owner(call, owner_id):
+        return
+    cameo = cameo_manager.get_cameo_by_key(cid, owner_id)
+    if not cameo:
+        await call.answer("Камео не найдено", show_alert=True)
+        return
+    imgs = cameo_manager.get_cameo_images(cameo)
+    handle = cameo["handle"]
+
+    target_mode = {"v": "video", "i": "image", "m": "motion"}.get(mode_code, "video")
+    if target_mode == "image":
+        default_prompt = f"@{handle} фотореалистичный портрет в высоком качестве"
+    elif target_mode == "motion":
+        default_prompt = ""
+    else:
+        default_prompt = f"@{handle} в кинематографичной сцене, плавное движение"
+
+    draft = create_draft_for_user(
+        user_id=owner_id,
+        prompt=default_prompt,
+        user_name=get_user_display_name(call.from_user),
+        message_id=call.message.message_id,
+        menu_mode=target_mode,
+    )
+    draft["cameo_handles"] = [handle]
+    if target_mode == "motion" and imgs:
+        draft["motion_image"] = imgs[0]
+    draft["menu_message_id"] = call.message.message_id
+    draft["menu_chat_id"] = call.message.chat.id
+    try:
+        await call.message.edit_text(
+            text=format_draft_text(draft),
+            reply_markup=build_settings_keyboard(draft, owner_id),
+            parse_mode="HTML",
+        )
+    except Exception:
+        await show_or_update_menu(call.message, bot, draft, owner_id)
+    await call.answer(f"Камео @{handle} готово в меню!")
+
+
+@router.callback_query(F.data.startswith("cm_attach:"))
+async def on_cameo_attach_current(call: CallbackQuery, bot: Bot):
+    _, cid, uid_s = call.data.split(":")
+    owner_id = int(uid_s)
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = fresh_draft(owner_id)
+    if not draft:
+        await call.answer("Активное меню не найдено", show_alert=True)
+        return
+    cameo = cameo_manager.get_cameo_by_key(cid, owner_id)
+    if not cameo:
+        await call.answer("Камео не найдено", show_alert=True)
+        return
+    handle = cameo["handle"]
+    if draft.get("menu_mode") == "motion":
+        imgs = cameo_manager.get_cameo_images(cameo)
+        if imgs:
+            draft["motion_image"] = imgs[0]
+        draft["cameo_handles"] = [handle]
+    else:
+        attached = list(draft.get("cameo_handles") or [])
+        if handle not in attached:
+            attached.append(handle)
+        draft["cameo_handles"] = attached
+    await show_or_update_menu(call.message, bot, draft, owner_id)
+    await call.answer(f"@{handle} прикреплено к текущему меню!")
+
+
+@router.callback_query(F.data.startswith("cm_desc:"))
+async def on_cameo_edit_desc_btn(call: CallbackQuery, state: FSMContext):
+    _, cid, uid_s = call.data.split(":")
+    owner_id = int(uid_s)
+    if not await verify_callback_owner(call, owner_id):
+        return
+    cameo = cameo_manager.get_cameo_by_key(cid, owner_id)
+    if not cameo:
+        await call.answer("Камео не найдено", show_alert=True)
+        return
+    is_adm = user_access.is_admin(call.from_user)
+    if not is_adm and int(cameo.get("owner_id") or 0) != owner_id:
+        await call.answer("Нет прав на редактирование", show_alert=True)
+        return
+    await state.update_data(cameo_key=cameo["key"])
+    await state.set_state(CameoState.editing_description)
+    await call.message.answer(
+        f"✏️ Отправьте новое описание для <code>@{html.escape(cameo['handle'])}</code>\n"
+        f"(или <code>-</code> чтобы очистить):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"cm_cancel:{owner_id}")
+        ]]),
+        parse_mode="HTML",
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("cm_pub:"))
+async def on_cameo_toggle_public(call: CallbackQuery):
+    _, cid, uid_s = call.data.split(":")
+    owner_id = int(uid_s)
+    if not await verify_callback_owner(call, owner_id):
+        return
+    is_adm = user_access.is_admin(call.from_user)
+    if not is_adm:
+        await call.answer("Только администратор может публиковать Камео для всех", show_alert=True)
+        return
+    updated = cameo_manager.toggle_cameo_public(cid, owner_id, is_admin=True)
+    if not updated:
+        await call.answer("Камео не найдено", show_alert=True)
+        return
+    text, kb = render_cameo_card(updated, call.from_user)
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        pass
+    await call.answer("🌐 Статус видимости обновлён")
+
+
+@router.callback_query(F.data.startswith("cm_del:"))
+async def on_cameo_delete_btn(call: CallbackQuery):
+    _, cid, uid_s = call.data.split(":")
+    owner_id = int(uid_s)
+    if not await verify_callback_owner(call, owner_id):
+        return
+    ok = cameo_manager.delete_cameo(cid, owner_id, is_admin=user_access.is_admin(call.from_user))
+    if not ok:
+        await call.answer("Нет прав или Камео не найдено", show_alert=True)
+        return
+    text, kb = render_cameo_hub(owner_id)
+    try:
+        await call.message.edit_text(f"🗑 Камео удалено.\n\n{text}", reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        await call.message.answer(f"🗑 Камео удалено.\n\n{text}", reply_markup=kb, parse_mode="HTML")
+    await call.answer("Удалено")
+
+
+@router.callback_query(F.data.startswith("cm_close:"))
+async def on_cameo_close(call: CallbackQuery):
+    owner_id = int(call.data.split(":")[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    try:
+        await call.message.delete()
+    except Exception:
+        try:
+            await call.message.edit_text("Закрыто.")
+        except Exception:
+            pass
+    await call.answer()
+
+
 # --- Text Handling (Mentions in groups, plain text in private) ---
 
 @router.message(F.text)
@@ -3702,10 +4667,26 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
     else:
         ref_images = ref_images[:1]
 
+    used_cameos: List[str] = []
     motion_orient = motion_orient_of(draft) if menu_mode == "motion" else "image"
     if menu_mode == "motion":
         ref_images = [draft["motion_image"]]
         duration = int(draft.get("motion_sec") or 0) or -1
+    else:
+        pre_handles = draft_cameo_handles(draft, call.from_user.id)
+        if draft.get("ref_video") and pre_handles and prompt.strip() == "Измени видео, сохранив движение и композицию":
+            tags_str = ", ".join(f"@{h}" for h in pre_handles)
+            prompt = f"Замени персонажа на видео на {tags_str}, сохранив движения и композицию"
+        max_refs = int(model_info.get("ref_limit", 30)) if model_info.get("multi_ref") else 1
+        prompt, ref_images, used_cameos = cameo_manager.resolve_cameos_for_generation(
+            prompt=prompt,
+            user_id=call.from_user.id,
+            attached_handles=draft.get("cameo_handles"),
+            existing_refs=ref_images,
+            max_refs=max_refs,
+            model_api_id=model_info.get("api_id") or "",
+            category=model_info.get("category") or menu_mode,
+        )
     job = GenerationJob(
         user_id=call.from_user.id,
         chat_id=call.message.chat.id,
@@ -3740,6 +4721,8 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
         chips.append(f"{dur_label} · {resolution} · {ratio}")
     if ref_images:
         chips.append(f"📎 {len(ref_images)}")
+    if used_cameos:
+        chips.append("🎭 " + " ".join(f"@{h}" for h in used_cameos[:3]))
     if job.ref_video:
         chips.append("🎞 видео-реф")
     if cost > 0:
