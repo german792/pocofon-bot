@@ -71,7 +71,8 @@
     6909079965,
     7348340691,
     6685238066,
-    8479290260
+    8479290260,
+    7842728681
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -331,7 +332,7 @@
       "role": "user"
     },
     "geniibaik": {
-      "user_id": null,
+      "user_id": 7842728681,
       "username": "Geniibaik",
       "name": "@Geniibaik",
       "added_at": 1794575109.3207746,
