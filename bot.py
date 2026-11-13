@@ -19,9 +19,11 @@ from aiogram.types import (
     InlineKeyboardButton,
     BufferedInputFile,
     InputMediaPhoto,
+    User,
 )
 import image_utils
 import access_manager
+import user_access
 import config
 import history_manager
 
@@ -69,9 +71,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 router = Router()
+router.message.middleware(user_access.AccessControlMiddleware())
+router.callback_query.middleware(user_access.AccessControlMiddleware())
 
 # Marker of the code version (visible in the menu) to confirm the latest bot.py is deployed
-BUILD_ID = "multiref-v5-video-2026-11-09"
+BUILD_ID = "poco-v9-merged-2026-11-13"
 
 
 class UserInputState(StatesGroup):
@@ -144,10 +148,22 @@ def build_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeybo
     return build_video_settings_keyboard(draft, owner_id)
 
 
+def motion_orient_of(draft: Dict[str, Any]) -> str:
+    """Кто задаёт позу и кадр. По умолчанию — фото, но для видео длиннее 10 сек это невозможно."""
+    sec = int(draft.get("motion_sec") or 0)
+    orient = draft.get("motion_orient")
+    if orient not in ("image", "video"):
+        orient = "image" if (not sec or sec <= 10) else "video"
+    if orient == "image" and sec > 10:
+        orient = "video"
+    return orient
+
+
 def build_motion_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeyboardMarkup:
-    """Motion Control: модель (3.0 / 2.6), разрешение, запуск, отмена."""
+    """Motion Control: модель (3.0 / 2.6), разрешение, ориентация, запуск, отмена."""
     cur_model = draft.get("model_key", MOTION_MODEL_KEY)
     cur_res = draft.get("resolution", "720p")
+    cur_orient = motion_orient_of(draft)
     rows = [tabs_row("motion", owner_id)]
     model_row = []
     for mk, label in (("klingMotionControl3", "3.0"), ("klingMotionControl26", "2.6")):
@@ -167,6 +183,15 @@ def build_motion_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inli
             **({"style": "primary"} if active else {}),
         ))
     rows.append(res_row)
+    orient_row = []
+    for ov, olabel in (("image", "🧍 Персонаж с фото"), ("video", "🎞 Как в видео")):
+        active = ov == cur_orient
+        orient_row.append(InlineKeyboardButton(
+            text=("✅ " if active else "") + olabel,
+            callback_data=f"mori:{ov}:{owner_id}",
+            **({"style": "primary"} if active else {}),
+        ))
+    rows.append(orient_row)
     ready = bool(draft.get("motion_image")) and bool(draft.get("ref_video"))
     rows.append([InlineKeyboardButton(text="🕺 Запустить", callback_data=f"gen:{owner_id}", **({"style": "success"} if ready else {}))])
     rows.append([InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}", style="danger")])
@@ -530,9 +555,13 @@ def format_motion_draft_text(draft: Dict[str, Any]) -> str:
     else:
         warn = ""
     dur = f"⏱ Длительность: <b>{sec} сек</b> (как у видео)\n" if sec else ""
+    orient = motion_orient_of(draft)
+    orient_line = (
+        "🧍 Персонаж и поза — с фото\n" if orient == "image" else "🎞 Поза и кадр — как в видео, персонаж — с фото\n"
+    )
     return (
         f"🕺 <b>{html.escape(model_name)}</b> · {res}\n\n"
-        f"{step1}\n{step2}\n{dur}"
+        f"{step1}\n{step2}\n{dur}{orient_line}"
         "<i>Персонаж повторит движения из видео.</i>"
         f"{warn}"
     )
@@ -867,6 +896,45 @@ async def extract_image_bytes(message: Message, bot: Bot) -> Optional[bytes]:
     return None
 
 
+async def extract_audio_bytes(message: Message, bot: Bot) -> Optional[bytes]:
+    """Extract audio bytes from voice, audio track, audio document, or reply_to_message."""
+    try:
+        media_obj = message.voice or message.audio
+        if not media_obj and message.document:
+            doc = message.document
+            is_audio_doc = (doc.mime_type and doc.mime_type.startswith("audio/")) or (
+                doc.file_name and doc.file_name.lower().endswith(
+                    (".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".opus", ".wma", ".oga")
+                )
+            )
+            if is_audio_doc:
+                media_obj = doc
+
+        if not media_obj and message.reply_to_message:
+            reply = message.reply_to_message
+            media_obj = reply.voice or reply.audio
+            if not media_obj and reply.document:
+                doc = reply.document
+                is_audio_doc = (doc.mime_type and doc.mime_type.startswith("audio/")) or (
+                    doc.file_name and doc.file_name.lower().endswith(
+                        (".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".opus", ".wma", ".oga")
+                    )
+                )
+                if is_audio_doc:
+                    media_obj = doc
+
+        if not media_obj:
+            return None
+
+        file_info = await bot.get_file(media_obj.file_id)
+        buf = io.BytesIO()
+        await bot.download_file(file_info.file_path, destination=buf)
+        return buf.getvalue()
+    except Exception as e:
+        logger.warning(f"Failed to extract audio bytes: {e}")
+        return None
+
+
 # --- In-Memory Rolling Media Cache (Multi-Reference & Album Tracking) ---
 media_group_cache: Dict[str, List[bytes]] = {}
 recent_chat_media: Dict[int, Tuple[Optional[str], bytes]] = {}
@@ -997,11 +1065,13 @@ async def handle_id_command(message: Message):
     user_un = message.from_user.username
     chat_id = message.chat.id
     chat_type = message.chat.type
+    access_status = "👑 Создатель/Администратор" if user_access.is_admin(message.from_user) else ("✅ Доступ разрешен" if user_access.is_user_allowed(message.from_user) else "⛔ Нет индивидуального доступа в ЛС")
     await message.reply(
         f"👤 <b>Ваш профиль в Telegram:</b>\n"
         f"• <b>ID:</b> <code>{user_id}</code>\n"
         f"• <b>Username:</b> @{user_un or 'отсутствует'}\n"
         f"• <b>Имя:</b> {html.escape(message.from_user.full_name or '')}\n"
+        f"• <b>Статус доступа:</b> {access_status}\n"
         f"• <b>Чат ID:</b> <code>{chat_id}</code> ({chat_type})",
         parse_mode="HTML",
     )
@@ -1014,7 +1084,8 @@ async def handle_admin_auth_command(message: Message, command: CommandObject):
     user_id = message.from_user.id
     user_un = (message.from_user.username or "").lower().strip()
 
-    if access_manager.verify_admin_password(raw):
+    if access_manager.verify_admin_password(raw) or user_access.authenticate_admin(message.from_user, raw):
+        user_access.authenticate_admin(message.from_user, raw)
         if user_id not in config.ADMIN_TELEGRAM_IDS:
             config.ADMIN_TELEGRAM_IDS.append(user_id)
         await message.reply(
@@ -1132,6 +1203,339 @@ async def handle_unbind_key_command(message: Message, command: CommandObject):
         await message.reply(f"✅ Привязка ключа <code>{target_key}</code> сброшена! Теперь его можно активировать на новом устройстве.", parse_mode="HTML")
     else:
         await message.reply(f"❌ Ключ <code>{target_key}</code> не найден в базе.", parse_mode="HTML")
+
+
+@router.message(Command("allow", "allowall", "allow_all"), ~F.photo, ~F.document)
+async def handle_allow_user_command(message: Message, command: CommandObject):
+    """Grant bot access to a user or whole group (/allow all, /allow @username, /allow ID, or reply)."""
+    user = message.from_user
+    if not user_access.is_admin(user):
+        await message.reply("⛔ Эта команда доступна только администраторам бота (@GermanUstinf).")
+        return
+
+    added_by_str = f"@{user.username}" if (user and user.username) else (user.full_name if user else "admin")
+    arg = (command.args or "").strip()
+    cmd_name = (command.command or "").lower()
+
+    if cmd_name in ("allowall", "allow_all") or arg.lower() in ("all", "все", "всем", "group", "группа"):
+        if message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
+            success, reply_msg = user_access.allow_group(
+                chat_id=message.chat.id,
+                chat_title=message.chat.title or "Группа",
+                added_by=added_by_str
+            )
+            try:
+                admins = await message.bot.get_chat_administrators(message.chat.id)
+                for adm in admins:
+                    if adm.user and not adm.user.is_bot:
+                        user_access.allow_user(
+                            str(adm.user.id),
+                            added_by=f"group_admin_{message.chat.id}",
+                            target_user=adm.user
+                        )
+            except Exception:
+                pass
+            await message.reply(reply_msg, parse_mode="HTML")
+            return
+        else:
+            await message.reply(
+                "ℹ️ Команда <code>/allow all</code> работает внутри группы, чтобы открыть доступ сразу всем её участникам.\n\n"
+                "Для выдачи доступа отдельному пользователю в ЛС используйте: <code>/allow @username</code>",
+                parse_mode="HTML"
+            )
+            return
+
+    tokens = [t.strip(",; ") for t in arg.split() if t.strip(",; ")]
+    if len(tokens) > 1:
+        results = []
+        for tok in tokens:
+            ok, rmsg = user_access.allow_user(tok, added_by=added_by_str)
+            results.append(rmsg)
+            target_uid = user_access.lookup_user_id(tok)
+            if ok and target_uid and target_uid != user.id:
+                try:
+                    await message.bot.send_message(
+                        chat_id=target_uid,
+                        text=(
+                            f"🎉 <b>Администратор {added_by_str} одобрил ваш доступ к Poco AI вне группы (в ЛС бота)!</b>\n\n"
+                            f"✨ Теперь вы можете свободно пользоваться всеми функциями бота в личных сообщениях.\n"
+                            f"Нажмите /start или отправьте текстовый запрос для генерации видео!"
+                        ),
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+        await message.reply("\n\n".join(results), parse_mode="HTML")
+        return
+
+    target_user: Optional[User] = None
+    if not arg and message.reply_to_message:
+        if getattr(message.reply_to_message, "forward_from", None):
+            target_user = message.reply_to_message.forward_from
+        elif getattr(message.reply_to_message, "from_user", None):
+            target_user = message.reply_to_message.from_user
+
+        if target_user and target_user.is_bot:
+            await message.reply("⚠️ Нельзя выдать доступ боту. Ответьте на сообщение реального пользователя.")
+            return
+
+    if not arg and not target_user:
+        await message.reply(
+            "ℹ️ <b>Как выдать доступ пользователю вне группы (в ЛС):</b>\n"
+            "• <code>/allow @username</code> — выдать доступ по юзернейму\n"
+            "• <code>/allow 123456789</code> — выдать по Telegram ID\n"
+            "• <code>/allow all</code> — открыть доступ сразу всем в группе\n"
+            "• Ответьте <code>/allow</code> на сообщение пользователя или перешлите его сообщение боту в ЛС.",
+            parse_mode="HTML"
+        )
+        return
+
+    success, reply_msg = user_access.allow_user(arg, added_by=added_by_str, target_user=target_user)
+    await message.reply(reply_msg, parse_mode="HTML")
+
+    target_uid = target_user.id if target_user else user_access.lookup_user_id(arg)
+    if success and target_uid and target_uid != user.id:
+        try:
+            await message.bot.send_message(
+                chat_id=target_uid,
+                text=(
+                    f"🎉 <b>Администратор {added_by_str} одобрил ваш доступ к Poco AI вне группы (в ЛС бота)!</b>\n\n"
+                    f"✨ Теперь вы можете свободно пользоваться всеми функциями бота в личных сообщениях.\n"
+                    f"Нажмите /start или отправьте текстовый запрос для генерации видео!"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.forward_from)
+async def handle_admin_forwarded_user_in_pm(message: Message):
+    """When German forwards a user's message to the bot in PM, offer 1-click button to allow PM access."""
+    admin = message.from_user
+    if not user_access.is_admin(admin):
+        return
+
+    fwd_user = message.forward_from
+    if not fwd_user or fwd_user.is_bot:
+        return
+
+    if user_access.is_admin(fwd_user):
+        await message.reply("ℹ️ Это сообщение от администратора бота.")
+        return
+
+    uid = fwd_user.id
+    u_name = fwd_user.full_name or f"User {uid}"
+    u_tag = f"@{fwd_user.username}" if fwd_user.username else "без юзернейма"
+    is_allowed = user_access.is_user_allowed(fwd_user)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="✅ Разрешить доступ в ЛС и везде" if not is_allowed else "🔄 Обновить доступ в ЛС",
+                callback_data=f"allow_user_btn:{uid}"
+            )
+        ]
+    ])
+
+    await message.reply(
+        f"👤 <b>Пользователь из пересланного сообщения:</b>\n"
+        f"• Имя: <b>{u_name}</b>\n"
+        f"• Юзернейм: {u_tag}\n"
+        f"• Telegram ID: <code>{uid}</code>\n"
+        f"• Статус доступа: <i>{'✅ Есть доступ' if is_allowed else '⛔ Нет доступа в ЛС'}</i>\n\n"
+        f"Нажмите кнопку ниже, чтобы выдать пользователю доступ к боту вне группы (в ЛС бота):",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("allow_user_btn:"))
+async def handle_allow_user_callback(call: CallbackQuery):
+    """Grant PM access to a user when admin clicks inline button."""
+    admin = call.from_user
+    if not user_access.is_admin(admin):
+        await call.answer("⛔ Доступно только администратору бота (@GermanUstinf).", show_alert=True)
+        return
+
+    uid_str = call.data.split(":", 1)[1]
+    if not uid_str.isdigit():
+        await call.answer("Ошибка ID пользователя", show_alert=True)
+        return
+
+    uid = int(uid_str)
+    admin_tag = f"@{admin.username}" if (admin and admin.username) else (admin.full_name or "admin")
+    user_access.allow_user(uid_str, added_by=admin_tag)
+
+    try:
+        await call.message.edit_text(
+            f"✅ <b>Доступ успешно выдан!</b>\n\n"
+            f"Пользователь с ID <code>{uid}</code> теперь может свободно пользоваться ботом <b>вне группы (в ЛС бота)</b>.\n"
+            f"Администратор: {admin_tag}",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+
+    try:
+        await call.bot.send_message(
+            chat_id=uid,
+            text=(
+                f"🎉 <b>Администратор {admin_tag} одобрил ваш доступ к Poco AI вне группы (в ЛС бота)!</b>\n\n"
+                f"✨ Теперь вам доступны все генерации, выбор моделей и настройки прямо здесь в диалоге с ботом.\n"
+                f"Нажмите /start или отправьте описание видео для начала работы!"
+            ),
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+
+    await call.answer("✅ Доступ пользователю открыт!", show_alert=False)
+
+
+@router.callback_query(F.data.startswith("deny_user_btn:"))
+async def handle_deny_user_callback(call: CallbackQuery):
+    """Deny PM access to a user when admin clicks inline button."""
+    admin = call.from_user
+    if not user_access.is_admin(admin):
+        await call.answer("⛔ Доступно только администратору бота.", show_alert=True)
+        return
+
+    uid_str = call.data.split(":", 1)[1]
+    admin_tag = f"@{admin.username}" if (admin and admin.username) else (admin.full_name or "admin")
+
+    try:
+        await call.message.edit_text(
+            f"❌ <b>Запрос доступа отклонен</b>\n\n"
+            f"Пользователю с ID <code>{uid_str}</code> отказано в доступе к боту в ЛС.\n"
+            f"Администратор: {admin_tag}",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+    await call.answer("Запрос отклонен", show_alert=False)
+
+
+@router.callback_query(F.data.startswith("req_access:"))
+async def handle_request_access_callback(call: CallbackQuery):
+    """Notify all admins when an unauthorized user requests PM access in the bot's PM."""
+    user = call.from_user
+    uid = user.id
+    u_tag = f"@{user.username}" if user.username else user.full_name
+
+    admin_ids = user_access.get_admin_user_ids()
+    admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Разрешить в ЛС", callback_data=f"allow_user_btn:{uid}"),
+            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"deny_user_btn:{uid}")
+        ]
+    ])
+
+    sent_any = False
+    for adm_id in admin_ids:
+        try:
+            await call.bot.send_message(
+                chat_id=adm_id,
+                text=(
+                    f"🔔 <b>Запрос на доступ к Poco AI вне группы (в ЛС):</b>\n\n"
+                    f"👤 Пользователь: <b>{user.full_name}</b> ({u_tag})\n"
+                    f"🆔 Telegram ID: <code>{uid}</code>\n\n"
+                    f"Разрешить пользователю пользоваться ботом в личных сообщениях?"
+                ),
+                reply_markup=admin_kb,
+                parse_mode="HTML"
+            )
+            sent_any = True
+        except Exception:
+            pass
+
+    if sent_any:
+        await call.answer("Запрос отправлен администратору @GermanUstinf!", show_alert=True)
+        try:
+            await call.message.edit_text(
+                f"⏳ <b>Запрос отправлен администратору!</b>\n\n"
+                f"👤 Профиль: {u_tag}\n"
+                f"🆔 Ваш ID: <code>{uid}</code>\n\n"
+                f"Администратор @GermanUstinf уведомлен. Как только доступ будет одобрен, бот сразу напишет вам здесь.",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+    else:
+        await call.answer("Пожалуйста, напишите создателю @GermanUstinf!", show_alert=True)
+
+
+@router.message(Command("revoke", "disallow", "deny", "revokeall", "revoke_all"), ~F.photo, ~F.document)
+async def handle_revoke_user_command(message: Message, command: CommandObject):
+    """Revoke bot access from a user or whole group."""
+    user = message.from_user
+    if not user_access.is_admin(user):
+        await message.reply("⛔ Эта команда доступна только администраторам бота (@GermanUstinf).")
+        return
+
+    arg = (command.args or "").strip()
+    cmd_name = (command.command or "").lower()
+
+    if cmd_name in ("revokeall", "revoke_all") or arg.lower() in ("all", "все", "всем", "group", "группа"):
+        if message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
+            success, reply_msg = user_access.revoke_group(message.chat.id)
+            await message.reply(reply_msg, parse_mode="HTML")
+            return
+        else:
+            await message.reply("ℹ️ Команда <code>/revoke all</code> отзывает общий доступ внутри группы.", parse_mode="HTML")
+            return
+
+    target_user: Optional[User] = None
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_user = message.reply_to_message.from_user
+
+    if not arg and not target_user:
+        await message.reply(
+            "ℹ️ <b>Как закрыть доступ:</b>\n"
+            "• <code>/revoke all</code> — закрыть общий доступ в группе\n"
+            "• <code>/revoke @username</code> — закрыть доступ пользователю\n"
+            "• <code>/revoke 123456789</code> — по Telegram ID\n"
+            "• Ответьте <code>/revoke</code> на сообщение пользователя.",
+            parse_mode="HTML"
+        )
+        return
+
+    success, reply_msg = user_access.revoke_user(arg, target_user=target_user)
+    await message.reply(reply_msg, parse_mode="HTML")
+
+
+@router.message(Command("allowed", "users", "whitelist"), ~F.photo, ~F.document)
+async def handle_allowed_users_list_command(message: Message):
+    """Show list of all users and groups allowed to use the bot."""
+    user = message.from_user
+    if not user_access.is_admin(user):
+        await message.reply("⛔ Список доступа доступен только администраторам бота (@GermanUstinf).")
+        return
+
+    groups_list = user_access.get_allowed_groups_list()
+    users_list = user_access.get_allowed_users_list()
+
+    if not groups_list and not users_list:
+        await message.reply("📋 Список доступа пуст (доступен только создатель @GermanUstinf).")
+        return
+
+    lines = []
+    if groups_list:
+        lines.append("🏰 <b>Группы с общим доступом (/allow all):</b>")
+        for g in groups_list:
+            lines.append(f"• «<b>{g.get('title', 'Группа')}</b>» (ID: <code>{g.get('chat_id')}</code>)")
+        lines.append("")
+
+    if users_list:
+        lines.append("👥 <b>Пользователи с индивидуальным доступом:</b>")
+        for i, u in enumerate(users_list, 1):
+            uname = f"@{u['username']}" if u.get("username") else ""
+            uid = f"(ID: <code>{u['user_id']}</code>)" if u.get("user_id") else ""
+            role_badge = " 👑 <i>(Создатель/Админ)</i>" if u.get("role") in ("admin", "superadmin") else ""
+            display = f"<b>{u.get('name') or uname or uid}</b> {uname if u.get('name') != uname else ''} {uid}{role_badge}"
+            lines.append(f"{i}. {display.strip()}")
+
+    await message.reply("\n".join(lines), parse_mode="HTML")
 
 
 @router.message(Command("last", "sync"))
@@ -1289,8 +1693,6 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
         addressed = (
             caption.lower().startswith(("/video", "/gen", "/prompt", "/v", "/s2"))
             or f"@{bot_info.username}".lower() in caption.lower()
-            or (message.reply_to_message and message.reply_to_message.from_user
-                and message.reply_to_message.from_user.id == bot_info.id)
             or fresh_draft(user_id) is not None
         )
         if not addressed:
@@ -1319,21 +1721,27 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
 
     logger.info(f"[refs] video reference from user {user_id}: {len(video_bytes)} bytes, caption={bool(clean_prompt)}")
 
-    # Extract first frame and audio track from the reference video
-    first_frame = await extract_frame_from_video(video_bytes)
+    # Extract audio track from the reference video (do NOT inject first_frame into ref_images so character photo stays @Image1)
     video_audio = await extract_audio_from_video(video_bytes)
 
     draft = fresh_draft(user_id)
     if draft and draft.get("menu_mode", "video") == "video":
         if clean_prompt:
             draft["prompt"] = clean_prompt
+        elif draft.get("ref_images"):
+            draft["prompt"] = "Замени персонажа на видео на персонажа с фото, сохранив движения и композицию"
     else:
         photos = get_recent_photos_for_user(message.chat.id, user_id, max_age_sec=60.0)
+        default_v_prompt = (
+            "Замени персонажа на видео на персонажа с фото, сохранив движения и композицию"
+            if photos
+            else "Измени видео, сохранив движение и композицию"
+        )
         draft = create_draft_for_user(
             user_id=user_id,
-            prompt=clean_prompt or "Измени видео, сохранив движение и композицию",
-            image_bytes=photos[0] if photos else first_frame,
-            ref_images=photos if photos else ([first_frame] if first_frame else []),
+            prompt=clean_prompt or default_v_prompt,
+            image_bytes=photos[0] if photos else None,
+            ref_images=photos if photos else [],
             user_name=get_user_display_name(message.from_user),
             message_id=message.message_id,
             menu_mode="video",
@@ -1341,10 +1749,6 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
         )
 
     draft["ref_video"] = video_bytes
-    if first_frame and not draft.get("ref_images") and not draft.get("image_bytes"):
-        draft["image_bytes"] = first_frame
-        draft["ref_images"] = [first_frame]
-        draft["all_uploaded_refs"] = [first_frame]
     if video_audio and not draft.get("audio_bytes"):
         draft["audio_bytes"] = video_audio
 
@@ -1354,16 +1758,16 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
         get_user_prefs(user_id)["model_key"] = DEFAULT_MODEL
     sync_draft_references(draft)
 
-    info_parts = []
-    if first_frame:
-        info_parts.append("• 🖼 Извлечен первый кадр (старт-кадр сцены)")
+    info_parts = ["• 🎞 Видео-референс прикреплен к задаче (@Video1)"]
+    if draft.get("ref_images"):
+        info_parts.append(f"• 🧑 Персонаж с фото прикреплен ({len(draft['ref_images'])} шт.)")
     if video_audio:
         info_parts.append("• 🎵 Извлечена звуковая дорожка из видео")
     hint_text = "\n".join(info_parts)
     try:
         await message.reply(
-            f"🎞 <b>Видео принято в работу!</b>\n\n{hint_text}\n\n"
-            f"💡 <i>Модели Seedance 2.5 и Kling 4.0 генерируют анимацию по фото и промпту (Image-to-Video). Опишите в промпте, что должен делать персонаж (например: «персонаж танцует брейк-данс под эту музыку»)!</i>",
+            f"🎞 <b>Видео-референс принят!</b>\n\n{hint_text}\n\n"
+            f"💡 <i>Для замены персонажа просто отправьте в чат фото нового героя и нажмите <b>Запустить</b> — Seedance 2.5 перенесёт движения с видео на вашего персонажа.</i>",
             parse_mode="HTML"
         )
     except Exception:
@@ -1382,6 +1786,14 @@ async def handle_photo(message: Message, bot: Bot, state: FSMContext):
         is_img = (doc.mime_type and doc.mime_type.startswith("image/")) or (
             doc.file_name and doc.file_name.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
         )
+        is_audio = (doc.mime_type and doc.mime_type.startswith("audio/")) or (
+            doc.file_name and doc.file_name.lower().endswith(
+                (".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".opus", ".wma", ".oga")
+            )
+        )
+        if is_audio:
+            await handle_voice_or_audio(message, bot, state)
+            return
         if not is_img:
             return
 
@@ -1477,7 +1889,6 @@ async def process_photo_batch(
         addressed = (
             caption.startswith(("/video", "/gen", "/prompt", "/v", "/s2", "/image", "/poster", "/img", "/pic", "/photo", "/banana", "/qwen", "/voice", "/tts", "/eleven", "/elevenlabs", "/grid", "/сетка", "/mesh"))
             or bot_username in cap_lower
-            or (message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id)
             or (not caption and fresh_draft(user_id) is not None)
         )
         if not addressed:
@@ -1512,6 +1923,8 @@ async def process_photo_batch(
         draft = user_drafts[user_id]
         if clean_prompt:
             draft["prompt"] = clean_prompt
+        elif draft.get("ref_video") and draft.get("prompt") in (*PLACEHOLDER_PROMPTS, "Измени видео, сохранив движение и композицию"):
+            draft["prompt"] = "Замени персонажа на видео на персонажа с фото, сохранив движения и композицию"
 
         all_refs = list(draft.get("all_uploaded_refs") or draft.get("orig_ref_images") or draft.get("ref_images") or [])
         for img in images:
@@ -1593,21 +2006,17 @@ async def process_photo_batch(
 async def handle_voice_or_audio(message: Message, bot: Bot, state: FSMContext):
     """Support attaching voice/audio reference for ANY video model or ElevenLabs."""
     is_group = message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP)
-    caption_text = (message.caption or "").strip()
+    raw_caption = (message.caption or "").strip()
+    clean_caption = re.sub(r"^/(?:video|gen|prompt|v|s2|voice|tts|eleven|elevenlabs)(?:@[A-Za-z0-9_]+)?\s*", "", raw_caption, flags=re.IGNORECASE).strip()
+    caption_text = clean_caption or raw_caption
     is_eleven = "eleven" in caption_text.lower() or "озвуч" in caption_text.lower()
 
-    if is_group and not is_eleven and not (message.caption and "видео" in message.caption.lower()):
+    if is_group and not is_eleven and not (caption_text and "видео" in caption_text.lower()):
         if message.from_user.id not in user_drafts:
             return
 
-    try:
-        media_obj = message.voice or message.audio
-        file_info = await bot.get_file(media_obj.file_id)
-        buf = io.BytesIO()
-        await bot.download_file(file_info.file_path, destination=buf)
-        audio_bytes = buf.getvalue()
-    except Exception as e:
-        logger.warning(f"Failed to download audio reference: {e}")
+    audio_bytes = await extract_audio_bytes(message, bot)
+    if not audio_bytes:
         return
 
     user_id = message.from_user.id
@@ -2319,9 +2728,7 @@ async def handle_text(message: Message, bot: Bot, state: FSMContext):
         bot_info = await bot.me()
         bot_username = f"@{bot_info.username}".lower()
         text_lower = text.lower()
-        is_mentioned = bot_username in text_lower or (
-            message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id
-        )
+        is_mentioned = bot_username in text_lower
         if not is_mentioned:
             return
 
@@ -2517,6 +2924,28 @@ async def on_motion_resolution(call: CallbackQuery):
     except Exception:
         pass
     await call.answer(f"🕺 {draft['resolution']}")
+
+
+@router.callback_query(F.data.startswith("mori:"))
+async def on_motion_orient(call: CallbackQuery):
+    _, ov, owner = call.data.split(":")
+    owner_id = int(owner)
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = fresh_draft(owner_id)
+    if not draft or draft.get("menu_mode") != "motion":
+        await call.answer("Откройте Motion заново: /motion", show_alert=True)
+        return
+    sec = int(draft.get("motion_sec") or 0)
+    if ov == "image" and sec > 10:
+        await call.answer("Режим «с фото» — только для видео до 10 сек", show_alert=True)
+        return
+    draft["motion_orient"] = ov if ov in ("image", "video") else "image"
+    try:
+        await call.message.edit_text(text=format_draft_text(draft), reply_markup=build_settings_keyboard(draft, owner_id), parse_mode="HTML")
+    except Exception:
+        pass
+    await call.answer("🧍 с фото" if ov == "image" else "🎞 как в видео")
 
 
 @router.callback_query(F.data.startswith("mmodel:"))
@@ -3108,6 +3537,7 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
     else:
         ref_images = ref_images[:1]
 
+    motion_orient = motion_orient_of(draft) if menu_mode == "motion" else "image"
     if menu_mode == "motion":
         ref_images = [draft["motion_image"]]
         duration = int(draft.get("motion_sec") or 0) or -1
@@ -3130,9 +3560,10 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
         ref_video=draft.get("ref_video"),
         voice_id=draft.get("voice_id", "") if menu_mode == "voice" else "",
         voice_mode=draft.get("voice_mode", "tts") if menu_mode == "voice" else "tts",
+        motion_orient=motion_orient,
     )
 
-    pos = await queue.add_job(job)
+    await queue.add_job(job)
     cost = calculate_credit_cost(model_key, duration, resolution)
     chips = []
     if menu_mode == "image":
@@ -3152,7 +3583,7 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
 
     try:
         await call.message.edit_text(
-            f"⏳ <b>В очереди #{pos}</b>\n"
+            f"🚀 <b>Генерация запущена</b>\n"
             f"<b>{html.escape(model_info['name'])}</b>  ·  " + "  ·  ".join(chips) +
             f"{quote}",
             parse_mode="HTML"

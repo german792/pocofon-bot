@@ -14,6 +14,11 @@ SHOW_USERNAME_BADGE = False
 
 # Exact duration of one full appear -> hold -> disappear cycle in Watermark.webm (125 frames @ 25fps = 5.0s)
 WEBM_CYCLE_SEC = 5.0
+# Вотермарка: одно место и показ только в начале видео (без прыжков по углам)
+WM_X = "W-w-24"          # правый верхний угол
+WM_Y = "24"
+WM_SHOW_SEC = 6.0        # логотип виден первые 6 секунд (анимация v6, два телефона)
+WM_ENABLE = f"enable='between(t,0,{WM_SHOW_SEC})'"
 
 
 def get_watermark_src() -> Path:
@@ -151,8 +156,8 @@ async def apply_watermark(
     is_webm = ext == ".webm"
 
     c_sec = WEBM_CYCLE_SEC
-    cycle_expr_x = f"x='if(mod(floor(t/{c_sec}),2), 24, W-w-24)'"
-    cycle_expr_y = f"y='if(between(mod(floor(t/{c_sec}),4), 1, 2), H-h-24, 24)'"
+    cycle_expr_x = WM_X
+    cycle_expr_y = WM_Y
 
     badge_path: Optional[Path] = None
     badge_w, badge_h = 0, 0
@@ -175,7 +180,7 @@ async def apply_watermark(
                     f"[1:v]scale={wm_w}:-1,format=yuva420p[wm];"
                     f"[wm]pad=w=max(iw\\,{badge_w}):h=ih+{badge_h + 4}:x=(ow-iw)/2:y=0:color=0x00000000[wm_pad];"
                     f"[wm_pad][2:v]overlay=(W-w)/2:H-h[wm_combo];"
-                    f"[0:v][wm_combo]overlay={cycle_expr_x}:{cycle_expr_y}:shortest=1[outv]"
+                    f"[0:v][wm_combo]overlay={cycle_expr_x}:{cycle_expr_y}:{WM_ENABLE}:shortest=1[outv]"
                 )
                 cmd_primary = [
                     "ffmpeg", "-y",
@@ -190,7 +195,7 @@ async def apply_watermark(
             else:
                 filter_str = (
                     f"[1:v]scale={wm_w}:-1,format=yuva420p[wm];"
-                    f"[0:v][wm]overlay={cycle_expr_x}:{cycle_expr_y}:shortest=1[outv]"
+                    f"[0:v][wm]overlay={cycle_expr_x}:{cycle_expr_y}:{WM_ENABLE}:shortest=1[outv]"
                 )
                 cmd_primary = [
                     "ffmpeg", "-y",
@@ -247,7 +252,7 @@ async def apply_watermark(
                     f"[1:v]colorkey=0x000000:0.15:0.02,scale={wm_w}:-1,format=yuva420p[wm];"
                     f"[wm]pad=w=max(iw\\,{badge_w}):h=ih+{badge_h + 4}:x=(ow-iw)/2:y=0:color=0x00000000[wm_pad];"
                     f"[wm_pad][2:v]overlay=(W-w)/2:H-h[wm_combo];"
-                    f"[0:v][wm_combo]overlay={cycle_expr_x}:{cycle_expr_y}:shortest=1[outv]"
+                    f"[0:v][wm_combo]overlay={cycle_expr_x}:{cycle_expr_y}:{WM_ENABLE}:shortest=1[outv]"
                 )
                 cmd_fb = [
                     "ffmpeg", "-y",
@@ -260,7 +265,7 @@ async def apply_watermark(
             else:
                 filter_str_fb = (
                     f"[1:v]colorkey=0x000000:0.15:0.02,scale={wm_w}:-1,format=yuva420p[wm];"
-                    f"[0:v][wm]overlay={cycle_expr_x}:{cycle_expr_y}:shortest=1[outv]"
+                    f"[0:v][wm]overlay={cycle_expr_x}:{cycle_expr_y}:{WM_ENABLE}:shortest=1[outv]"
                 )
                 cmd_fb = [
                     "ffmpeg", "-y",
@@ -307,7 +312,7 @@ async def apply_watermark(
             # Fallback for GIF/PNG
             filter_str = (
                 f"[1:v]scale={wm_w}:-1,format=yuva420p[wm];"
-                f"[0:v][wm]overlay={cycle_expr_x}:{cycle_expr_y}:shortest=1[outv]"
+                f"[0:v][wm]overlay={cycle_expr_x}:{cycle_expr_y}:{WM_ENABLE}:shortest=1[outv]"
             )
             cmd = [
                 "ffmpeg", "-y",

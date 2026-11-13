@@ -46,13 +46,12 @@ MODELS = {
         "desc": "Фото персонажа + видео с движением",
         "video_ref": True,
     },
-    # ВНИМАНИЕ: modelId для 2.6 — предположение. Если сервер вернёт ошибку, пришли payload с сайта.
     "klingMotionControl26": {
         "name": "Kling Motion Control 2.6",
         "short": "🕺 2.6",
         "category": "motion",
         "backend": "davinci_motion",
-        "api_id": "klingMotionControl2_6",
+        "api_id": "klingMotionControl26",
         "desc": "Motion Control 2.6: фото персонажа + видео с движением",
         "video_ref": True,
     },
