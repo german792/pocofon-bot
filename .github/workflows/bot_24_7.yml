@@ -53,6 +53,5 @@ jobs:
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD || secrets.TOKEN4 }}
           KEY_SIGNING_SECRET: ${{ secrets.KEY_SIGNING_SECRET || secrets.ADMIN_PASSWORD || secrets.TOKEN4 }}
           API_PASSWORD: ${{ secrets.API_PASSWORD || secrets.TOKEN5 }}
-          GH_PAT: ${{ secrets.GH_PAT }}
           PYTHONUNBUFFERED: "1"
         run: python bot.py

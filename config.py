@@ -39,11 +39,21 @@ MODELS = {
     # --- MOTION CONTROL (вкладка Motion: фото персонажа + видео с движением) ---
     "klingMotionControl3": {
         "name": "Kling Motion Control 3.0",
-        "short": "🕺 Motion",
+        "short": "🕺 3.0",
         "category": "motion",
         "backend": "davinci_motion",
         "api_id": "klingMotionControl3",
         "desc": "Фото персонажа + видео с движением",
+        "video_ref": True,
+    },
+    # ВНИМАНИЕ: modelId для 2.6 — предположение. Если сервер вернёт ошибку, пришли payload с сайта.
+    "klingMotionControl26": {
+        "name": "Kling Motion Control 2.6",
+        "short": "🕺 2.6",
+        "category": "motion",
+        "backend": "davinci_motion",
+        "api_id": "klingMotionControl2_6",
+        "desc": "Motion Control 2.6: фото персонажа + видео с движением",
         "video_ref": True,
     },
     # --- SEEDANCE MODELS (All replaced with DaVinci AI site versions) ---
@@ -333,6 +343,7 @@ MODELS = {
     "elevenlabs": {
         "name": "ElevenLabs V3",
         "short": "🎙 ElevenLabs",
+        "hidden": True,  # скрыт из меню и /model
         "category": "video",  # остаётся "video" ради web.py/истории; в боте голос вынесен во вкладку «Голос»
         "backend": "davinci_voice",
         "api_id": "eleven-v3",
@@ -609,6 +620,7 @@ IMAGE_MODEL_KEYS = [k for k, v in MODELS.items() if v.get("category") == "image"
 # --- Voice tab (ElevenLabs) ---
 VOICE_MODEL_KEY = "elevenlabs"  # вкладка голоса временно отключена
 MOTION_MODEL_KEY = "klingMotionControl3"
+MOTION_MODEL_KEYS = ["klingMotionControl3", "klingMotionControl26"]
 # Голоса для вкладки «Голос». id — ElevenLabs voice_id. Первый — тот, что бот использовал раньше.
 # Если сайт не принимает какой-то id, просто удали строку — остальные продолжат работать.
 VOICES = [

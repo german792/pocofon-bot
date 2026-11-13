@@ -182,17 +182,21 @@ class GenerationQueue:
         self._last_msg_text: dict[int, str] = {}
 
     def start(self):
-        """Initialize runner (no queue: tasks launch immediately)."""
+        """Start background workers for concurrent processing."""
         if not self.is_running:
             self.is_running = True
-            logger.info("GenerationQueue started in direct mode (no queue).")
+            self.worker_tasks = [
+                asyncio.create_task(self._worker_loop(w_id))
+                for w_id in range(1, self.max_concurrent_jobs + 1)
+            ]
+            logger.info(f"GenerationQueue started with {self.max_concurrent_jobs} concurrent workers.")
 
     async def stop(self):
-        """Stop all active tasks cleanly."""
+        """Stop all workers cleanly."""
         self.is_running = False
-        for t in list(self.worker_tasks):
+        for t in self.worker_tasks:
             t.cancel()
-        for t in list(self.worker_tasks):
+        for t in self.worker_tasks:
             try:
                 await t
             except asyncio.CancelledError:
@@ -200,29 +204,14 @@ class GenerationQueue:
         self.worker_tasks.clear()
 
     def get_queue_size(self) -> int:
-        """Returns number of currently running jobs."""
-        return self.active_count
+        """Returns number of waiting jobs + currently running jobs."""
+        return self.queue.qsize() + self.active_count
 
     async def add_job(self, job: GenerationJob) -> int:
-        """Launch generation task immediately without queuing."""
-        self.active_count += 1
-        task = asyncio.create_task(self._run_direct(job))
-        self.worker_tasks.append(task)
-        task.add_done_callback(lambda t: self.worker_tasks.remove(t) if t in self.worker_tasks else None)
-        return self.active_count
-
-    async def _run_direct(self, job: GenerationJob):
-        try:
-            await self._process_job(job)
-        except Exception as e:
-            logger.error(f"Error processing job for user {job.user_id}: {e}", exc_info=True)
-            await self._update_status(
-                job,
-                f"❌ <b>Произошла ошибка при генерации:</b>\n{html.escape(str(e))}\nПопробуйте повторить запрос."
-            )
-        finally:
-            self._last_msg_text.pop(job.status_message_id, None)
-            self.active_count = max(0, self.active_count - 1)
+        """Add job to queue and return position in queue."""
+        pos = self.get_queue_size() + 1
+        await self.queue.put(job)
+        return pos
 
     async def _update_status(self, job: GenerationJob, text: str):
         """Safely edit status message in Telegram, skipping identical text."""
@@ -740,6 +729,7 @@ class GenerationQueue:
                     image_bytes=imgs[0],
                     video_bytes=job.ref_video,
                     resolution=job.resolution,
+                    model_id=model_info.get("api_id", "klingMotionControl3"),
                 )
 
             elif backend == "davinci_image":
@@ -924,7 +914,7 @@ class GenerationQueue:
                 else:
                     pct = estimate_progress(elapsed, job.duration, status, srv_progress)
                     if status == "queued":
-                        stage = "Запуск на сервере..."
+                        stage = "В очереди на GPU-сервере..."
                     elif pct < 35:
                         stage = "Анализ сцены и генерация начальных кадров..."
                     elif pct < 75:
