@@ -42,7 +42,8 @@
     "ggf_123",
     "geniibaik",
     "rb_sil",
-    "numbimx"
+    "numbimx",
+    "drushok_patan"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -345,6 +346,14 @@
       "username": "numbimx",
       "name": "last",
       "added_at": 1794635590.704613,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "drushok_patan": {
+      "user_id": 8240079379,
+      "username": "Drushok_patan",
+      "name": "Дружок_Пацан🤪👻",
+      "added_at": 1794649281.4358501,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
