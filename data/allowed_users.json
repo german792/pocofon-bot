@@ -43,7 +43,8 @@
     "geniibaik",
     "rb_sil",
     "numbimx",
-    "drushok_patan"
+    "drushok_patan",
+    "flexovprime"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -74,7 +75,8 @@
     6685238066,
     8479290260,
     7842728681,
-    8240079379
+    8240079379,
+    8701205471
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -354,6 +356,14 @@
       "username": "Drushok_patan",
       "name": "Дружок_Пацан🤪👻",
       "added_at": 1794649281.4358501,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "flexovprime": {
+      "user_id": 8701205471,
+      "username": "flexovprime",
+      "name": "᥈ᥱρⲕᥲ 𐔤ᥒ𐔖ρ𐔖ⲧᥲя",
+      "added_at": 1794650176.75722,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
