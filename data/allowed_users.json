@@ -92,7 +92,8 @@
     8865875147,
     9285030551,
     8509726288,
-    7420002075
+    7420002075,
+    5197785785
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -438,7 +439,7 @@
       "role": "user"
     },
     "ustinova_tvoe_oil": {
-      "user_id": null,
+      "user_id": 5197785785,
       "username": "Ustinova_tvoe_oil",
       "name": "@Ustinova_tvoe_oil",
       "added_at": 1794673628.1853225,
