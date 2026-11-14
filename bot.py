@@ -261,16 +261,30 @@ def render_watermark_menu(
         "Выберите нужный водяной знак ниже — он сразу применится ко всем вашим новым генерациям:",
     ]
     rows: List[List[InlineKeyboardButton]] = []
-    for p in presets:
-        is_on = p["id"] == cur_id
-        btn_text = ("✅ " if is_on else "") + p["label"]
+    if presets:
+        first_p = presets[0]
+        is_first_on = first_p["id"] == cur_id
         rows.append([
             InlineKeyboardButton(
-                text=btn_text,
-                callback_data=f"wm_set:{p['id']}:{user_id}",
-                **({"style": "success"} if is_on else {}),
+                text=("✅ " if is_first_on else "") + first_p["label"],
+                callback_data=f"wm_set:{first_p['id']}:{user_id}",
+                **({"style": "success"} if is_first_on else {}),
             )
         ])
+        other_presets = presets[1:]
+        for i in range(0, len(other_presets), 2):
+            row_pair = []
+            for p in other_presets[i:i + 2]:
+                is_on = p["id"] == cur_id
+                btn_text = ("✅ " if is_on else "") + p["label"]
+                row_pair.append(
+                    InlineKeyboardButton(
+                        text=btn_text,
+                        callback_data=f"wm_set:{p['id']}:{user_id}",
+                        **({"style": "success"} if is_on else {}),
+                    )
+                )
+            rows.append(row_pair)
 
     rows.append([InlineKeyboardButton(text="👁 Превью всех ватермарок", callback_data=f"wm_preview:{user_id}", style="primary")])
     if user and user_access.is_admin(user) and cur_id != def_id:

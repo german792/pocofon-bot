@@ -67,6 +67,50 @@ WATERMARK_PRESETS: Dict[str, Dict[str, Any]] = {
             "windows_xp_poco_ai_watermark_alpha.webm",
         ],
     },
+    "iphone": {
+        "id": "iphone",
+        "label": "🍎 iPhone AI",
+        "short": "iPhone AI",
+        "desc": "Логотип Apple iPhone · POCO AI",
+        "width_scale": 1.35,
+        "still_ss": "3.5",
+        "candidates": [
+            "iphone_v2_poco_ai_watermark_alpha.webm",
+        ],
+    },
+    "samsung": {
+        "id": "samsung",
+        "label": "🔷 Samsung AI",
+        "short": "Samsung AI",
+        "desc": "Синий овал Samsung · POCO AI",
+        "width_scale": 1.35,
+        "still_ss": "3.5",
+        "candidates": [
+            "samsung_v2_poco_ai_watermark_alpha.webm",
+        ],
+    },
+    "nokia": {
+        "id": "nokia",
+        "label": "📞 Nokia 3310",
+        "short": "Nokia 3310",
+        "desc": "Легендарная Nokia 3310 · POCO AI",
+        "width_scale": 1.45,
+        "still_ss": "3.5",
+        "candidates": [
+            "nokia_v2_poco_ai_watermark_alpha.webm",
+        ],
+    },
+    "realme": {
+        "id": "realme",
+        "label": "💛 realme AI",
+        "short": "realme AI",
+        "desc": "Фирменный жёлтый realme · POCO AI",
+        "width_scale": 1.45,
+        "still_ss": "3.5",
+        "candidates": [
+            "realme_poco_ai_watermark_alpha.webm",
+        ],
+    },
 }
 
 _prefs_lock = threading.RLock()
@@ -271,22 +315,22 @@ async def render_watermark_preview_card() -> Optional[bytes]:
     presets = list_available_watermarks()
     if not presets:
         return None
-    card_w, row_h = 760, 190
-    canvas = Image.new("RGB", (card_w, max(row_h, len(presets) * row_h + 20)), (24, 28, 36))
+    card_w, row_h = 760, 148
+    canvas = Image.new("RGB", (card_w, max(row_h, len(presets) * row_h + 16)), (24, 28, 36))
     draw = ImageDraw.Draw(canvas)
     try:
-        font_title = ImageFont.truetype("arial.ttf", size=24)
-        font_sub = ImageFont.truetype("arial.ttf", size=16)
+        font_title = ImageFont.truetype("arial.ttf", size=22)
+        font_sub = ImageFont.truetype("arial.ttf", size=15)
     except Exception:
         font_title = ImageFont.load_default()
         font_sub = ImageFont.load_default()
 
-    y = 14
+    y = 12
     for idx, preset in enumerate(presets, start=1):
         src = _resolve_preset_file(preset["id"])
         if not src:
             continue
-        draw.rounded_rectangle((16, y, card_w - 16, y + row_h - 16), radius=14, fill=(36, 41, 52), outline=(65, 75, 95), width=1)
+        draw.rounded_rectangle((16, y, card_w - 16, y + row_h - 12), radius=12, fill=(36, 41, 52), outline=(65, 75, 95), width=1)
         try:
             proc = await asyncio.create_subprocess_exec(
                 "ffmpeg", "-v", "error", "-c:v", "libvpx-vp9",
@@ -300,15 +344,15 @@ async def render_watermark_preview_card() -> Optional[bytes]:
             if proc.returncode == 0 and out:
                 with Image.open(io.BytesIO(out)) as im:
                     rgba = im.convert("RGBA")
-                    rgba.thumbnail((250, 145), Image.Resampling.LANCZOS)
-                    px = 34 + (250 - rgba.width) // 2
-                    py = y + (row_h - 16 - rgba.height) // 2
+                    rgba.thumbnail((230, 114), Image.Resampling.LANCZOS)
+                    px = 34 + (230 - rgba.width) // 2
+                    py = y + (row_h - 12 - rgba.height) // 2
                     canvas.paste(rgba, (px, py), rgba)
         except Exception:
             pass
         title = f"{idx}. {preset['short']}"
-        draw.text((310, y + 45), title, fill=(245, 248, 255), font=font_title)
-        draw.text((310, y + 84), preset.get("desc", ""), fill=(165, 178, 200), font=font_sub)
+        draw.text((295, y + 34), title, fill=(245, 248, 255), font=font_title)
+        draw.text((295, y + 68), preset.get("desc", ""), fill=(165, 178, 200), font=font_sub)
         y += row_h
 
     buf = io.BytesIO()
