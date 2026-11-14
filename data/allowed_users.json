@@ -47,7 +47,8 @@
     "flexovprime",
     "mertvv0_lol_46678",
     "apelsin_328",
-    "ttrtkdr"
+    "ttrtkdr",
+    "glebaicreator"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -82,7 +83,8 @@
     8701205471,
     7859494260,
     8536373258,
-    8660996799
+    8660996799,
+    8865875147
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -394,6 +396,14 @@
       "username": "ttRTKdr",
       "name": "Новогодние друзья(Rader rtk)",
       "added_at": 1794668830.193266,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "glebaicreator": {
+      "user_id": 8865875147,
+      "username": "glebaicreator",
+      "name": "хлебные игры",
+      "added_at": 1794669116.6433702,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
