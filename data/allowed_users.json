@@ -48,7 +48,8 @@
     "mertvv0_lol_46678",
     "apelsin_328",
     "ttrtkdr",
-    "glebaicreator"
+    "glebaicreator",
+    "henvey2"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -420,6 +421,14 @@
       "name": "Максим",
       "added_at": 1794669585.130298,
       "added_by": "group_-5444101670",
+      "role": "user"
+    },
+    "henvey2": {
+      "user_id": null,
+      "username": "Henvey2",
+      "name": "@Henvey2",
+      "added_at": 1794670826.9458327,
+      "added_by": "@GermanUstinf",
       "role": "user"
     }
   }
