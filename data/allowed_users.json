@@ -41,7 +41,8 @@
     "ndn_naxyi67520kak",
     "ggf_123",
     "geniibaik",
-    "rb_sil"
+    "rb_sil",
+    "numbimx"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -336,6 +337,14 @@
       "username": "MrDryfixORG",
       "name": "MrDryfix",
       "added_at": 1794588578.1066186,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "numbimx": {
+      "user_id": 8871319864,
+      "username": "numbimx",
+      "name": "last",
+      "added_at": 1794635590.704613,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
