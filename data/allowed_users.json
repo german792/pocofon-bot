@@ -44,7 +44,8 @@
     "rb_sil",
     "numbimx",
     "drushok_patan",
-    "flexovprime"
+    "flexovprime",
+    "mertvv0_lol_46678"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -76,7 +77,8 @@
     8479290260,
     7842728681,
     8240079379,
-    8701205471
+    8701205471,
+    7859494260
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -364,6 +366,14 @@
       "username": "flexovprime",
       "name": "᥈ᥱρⲕᥲ 𐔤ᥒ𐔖ρ𐔖ⲧᥲя",
       "added_at": 1794650176.75722,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "mertvv0_lol_46678": {
+      "user_id": 7859494260,
+      "username": "mertvv0_lol_46678",
+      "name": "Esenia",
+      "added_at": 1794651786.4184592,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
