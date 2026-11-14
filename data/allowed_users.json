@@ -49,7 +49,8 @@
     "apelsin_328",
     "ttrtkdr",
     "glebaicreator",
-    "henvey2"
+    "henvey2",
+    "ustinova_tvoe_oil"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -429,6 +430,14 @@
       "username": "Henvey2",
       "name": "@Henvey2",
       "added_at": 1794670826.9458327,
+      "added_by": "@GermanUstinf",
+      "role": "user"
+    },
+    "ustinova_tvoe_oil": {
+      "user_id": null,
+      "username": "Ustinova_tvoe_oil",
+      "name": "@Ustinova_tvoe_oil",
+      "added_at": 1794673628.1853225,
       "added_by": "@GermanUstinf",
       "role": "user"
     }
