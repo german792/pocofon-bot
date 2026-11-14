@@ -46,7 +46,8 @@
     "drushok_patan",
     "flexovprime",
     "mertvv0_lol_46678",
-    "apelsin_328"
+    "apelsin_328",
+    "ttrtkdr"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -80,7 +81,8 @@
     8240079379,
     8701205471,
     7859494260,
-    8536373258
+    8536373258,
+    8660996799
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -384,6 +386,14 @@
       "username": "apelsin_328",
       "name": "Апельсин",
       "added_at": 1794651791.9916172,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "ttrtkdr": {
+      "user_id": 8660996799,
+      "username": "ttRTKdr",
+      "name": "Новогодние друзья(Rader rtk)",
+      "added_at": 1794668830.193266,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
