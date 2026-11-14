@@ -1,9 +1,16 @@
 import asyncio
+import base64
+import copy
+import io
+import json
 import logging
+import os
 import re
+import threading
+import urllib.request
 import uuid
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from PIL import Image, ImageDraw, ImageFont
 from config import BASE_DIR
 
@@ -12,29 +19,301 @@ logger = logging.getLogger(__name__)
 # Show the user's @username badge next to the watermark (disabled: only the POCO AI watermark is shown)
 SHOW_USERNAME_BADGE = False
 
-# Exact duration of one full appear -> hold -> disappear cycle in Watermark.webm (125 frames @ 25fps = 5.0s)
+# Exact duration of one full appear -> hold -> disappear cycle in all watermark webms (125 frames @ 25fps = 5.0s)
 WEBM_CYCLE_SEC = 5.0
 
+DEFAULT_WATERMARK_ID = "poco"
+WATERMARK_PREFS_FILE = BASE_DIR / "data" / "watermark_prefs.json"
+WATERMARK_PREFS_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-def get_watermark_src() -> Path:
-    """Find the best available watermark file across repository locations."""
-    candidates = [
-        BASE_DIR / "Watermark.webm",
-        BASE_DIR / "watermark.webm",
-        BASE_DIR / "static" / "brand" / "watermark.webm",
-        BASE_DIR / "Watermark.gif",
-        BASE_DIR / "Watermark.GIF",
-        BASE_DIR / "watermark.gif",
-        BASE_DIR / "static" / "brand" / "green_watermark_crop.png",
-        BASE_DIR / "animation.gif.mp4",
-    ]
-    for c in candidates:
-        if c.exists() and c.stat().st_size > 0:
-            return c
+GITHUB_SYNC_TOKEN = os.getenv("GH_PAT") or os.getenv("GITHUB_TOKEN") or ""
+GITHUB_REPO = os.getenv("GITHUB_REPOSITORY") or "german792/pocofon-bot2"
+
+WATERMARK_PRESETS: Dict[str, Dict[str, Any]] = {
+    "poco": {
+        "id": "poco",
+        "label": "🟢 Наша (POCO AI)",
+        "short": "POCO AI",
+        "desc": "Фирменный оранжевый POCO + зелёная сетка",
+        "width_scale": 1.0,
+        "still_ss": "3.0",
+        "candidates": [
+            "Watermark.webm",
+            "watermark.webm",
+            "static/brand/watermark.webm",
+            "Watermark.gif",
+            "static/brand/green_watermark_crop.png",
+        ],
+    },
+    "tecno": {
+        "id": "tecno",
+        "label": "🔵 TECNO AI",
+        "short": "TECNO AI",
+        "desc": "Неоново-синий логотип TECNO AI · POCO AI",
+        "width_scale": 1.25,
+        "still_ss": "3.5",
+        "candidates": [
+            "tecno_poco_ai_watermark_v2_alpha.webm",
+        ],
+    },
+    "xp": {
+        "id": "xp",
+        "label": "🪟 Windows AI",
+        "short": "Windows AI",
+        "desc": "Ретро-логотип Windows XP AI · POCO AI",
+        "width_scale": 1.55,
+        "still_ss": "3.5",
+        "candidates": [
+            "windows_xp_poco_ai_watermark_alpha.webm",
+        ],
+    },
+}
+
+_prefs_lock = threading.RLock()
+_prefs_cache: Optional[Dict[str, Any]] = None
+_gh_sha: Optional[str] = None
+_gh_loaded: bool = False
+
+
+def _fetch_prefs_from_github_once() -> None:
+    global _prefs_cache, _gh_sha, _gh_loaded
+    if _gh_loaded:
+        return
+    _gh_loaded = True
+    if not GITHUB_SYNC_TOKEN or not GITHUB_REPO:
+        return
+    try:
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/data/watermark_prefs.json"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Authorization": f"Bearer {GITHUB_SYNC_TOKEN}",
+                "User-Agent": "poco-bot-wm-sync",
+                "Accept": "application/vnd.github.v3+json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=6.0) as resp:
+            res = json.loads(resp.read().decode("utf-8"))
+            _gh_sha = res.get("sha")
+            raw_bytes = base64.b64decode(res.get("content", ""))
+            gh_data = json.loads(raw_bytes.decode("utf-8"))
+            if isinstance(gh_data, dict):
+                _prefs_cache = {
+                    "default": gh_data.get("default", DEFAULT_WATERMARK_ID),
+                    "users": dict(gh_data.get("users") or {}),
+                }
+                WATERMARK_PREFS_FILE.write_text(json.dumps(_prefs_cache, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception as e:
+        logger.debug(f"GitHub watermark prefs fetch note: {e}")
+
+
+def _sync_prefs_to_github_worker(snapshot: Dict[str, Any]) -> None:
+    global _gh_sha
+    if not GITHUB_SYNC_TOKEN or not GITHUB_REPO:
+        return
+    try:
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/data/watermark_prefs.json"
+        if not _gh_sha:
+            try:
+                chk_req = urllib.request.Request(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {GITHUB_SYNC_TOKEN}",
+                        "User-Agent": "poco-bot-wm-sync",
+                    },
+                )
+                with urllib.request.urlopen(chk_req, timeout=5.0) as chk_resp:
+                    _gh_sha = json.loads(chk_resp.read().decode("utf-8")).get("sha")
+            except Exception:
+                pass
+        payload_dict: Dict[str, Any] = {
+            "message": "bot: update watermark prefs [skip ci]",
+            "content": base64.b64encode(json.dumps(snapshot, indent=2, ensure_ascii=False).encode("utf-8")).decode("ascii"),
+        }
+        if _gh_sha:
+            payload_dict["sha"] = _gh_sha
+        put_req = urllib.request.Request(
+            url,
+            data=json.dumps(payload_dict).encode("utf-8"),
+            method="PUT",
+            headers={
+                "Authorization": f"Bearer {GITHUB_SYNC_TOKEN}",
+                "User-Agent": "poco-bot-wm-sync",
+                "Content-Type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(put_req, timeout=8.0) as resp:
+            res = json.loads(resp.read().decode("utf-8"))
+            _gh_sha = (res.get("content") or {}).get("sha") or _gh_sha
+    except Exception as e:
+        logger.debug(f"GitHub watermark prefs sync skipped: {e}")
+
+
+def _load_prefs() -> Dict[str, Any]:
+    global _prefs_cache
+    with _prefs_lock:
+        if _prefs_cache is not None:
+            return _prefs_cache
+        _fetch_prefs_from_github_once()
+        if _prefs_cache is not None:
+            return _prefs_cache
+        data: Dict[str, Any] = {"default": DEFAULT_WATERMARK_ID, "users": {}}
+        if WATERMARK_PREFS_FILE.exists():
+            try:
+                raw = json.loads(WATERMARK_PREFS_FILE.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    data["default"] = raw.get("default", DEFAULT_WATERMARK_ID)
+                    data["users"] = dict(raw.get("users") or {})
+            except Exception as e:
+                logger.warning(f"Failed to read {WATERMARK_PREFS_FILE}: {e}")
+        _prefs_cache = data
+        return _prefs_cache
+
+
+def _save_prefs(data: Dict[str, Any]) -> None:
+    snapshot = copy.deepcopy(data)
+    try:
+        tmp = WATERMARK_PREFS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(snapshot, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(WATERMARK_PREFS_FILE)
+    except Exception as e:
+        logger.warning(f"Failed to save watermark prefs: {e}")
+    if GITHUB_SYNC_TOKEN and GITHUB_REPO:
+        threading.Thread(target=_sync_prefs_to_github_worker, args=(snapshot,), daemon=True).start()
+
+
+def _resolve_preset_file(preset_id: str) -> Optional[Path]:
+    preset = WATERMARK_PRESETS.get(preset_id)
+    if not preset:
+        return None
+    for rel in preset["candidates"]:
+        p = BASE_DIR / rel
+        if p.exists() and p.stat().st_size > 0:
+            return p
+    return None
+
+
+def list_available_watermarks() -> List[Dict[str, Any]]:
+    """Return ordered list of watermark presets whose media file exists on disk."""
+    out: List[Dict[str, Any]] = []
+    for pid, preset in WATERMARK_PRESETS.items():
+        if _resolve_preset_file(pid) is not None:
+            out.append(preset)
+    return out
+
+
+def get_default_watermark_id() -> str:
+    data = _load_prefs()
+    pid = str(data.get("default") or DEFAULT_WATERMARK_ID)
+    if _resolve_preset_file(pid) is not None:
+        return pid
+    return DEFAULT_WATERMARK_ID
+
+
+def set_default_watermark_id(watermark_id: str) -> str:
+    if watermark_id not in WATERMARK_PRESETS or _resolve_preset_file(watermark_id) is None:
+        watermark_id = DEFAULT_WATERMARK_ID
+    with _prefs_lock:
+        data = _load_prefs()
+        data["default"] = watermark_id
+        _save_prefs(data)
+    return watermark_id
+
+
+def get_user_watermark_id(user_id: Optional[int] = None) -> str:
+    data = _load_prefs()
+    if user_id is not None:
+        u_choice = (data.get("users") or {}).get(str(user_id))
+        if u_choice in WATERMARK_PRESETS and _resolve_preset_file(u_choice) is not None:
+            return u_choice
+    return get_default_watermark_id()
+
+
+def set_user_watermark_id(user_id: int, watermark_id: str) -> str:
+    if watermark_id not in WATERMARK_PRESETS or _resolve_preset_file(watermark_id) is None:
+        watermark_id = DEFAULT_WATERMARK_ID
+    with _prefs_lock:
+        data = _load_prefs()
+        data.setdefault("users", {})[str(user_id)] = watermark_id
+        _save_prefs(data)
+    return watermark_id
+
+
+def resolve_watermark_id(watermark_id: Optional[str] = None, user_id: Optional[int] = None) -> str:
+    if watermark_id and watermark_id in WATERMARK_PRESETS and _resolve_preset_file(watermark_id) is not None:
+        return watermark_id
+    return get_user_watermark_id(user_id)
+
+
+def get_watermark_info(watermark_id: Optional[str] = None, user_id: Optional[int] = None) -> Dict[str, Any]:
+    pid = resolve_watermark_id(watermark_id, user_id)
+    return WATERMARK_PRESETS.get(pid, WATERMARK_PRESETS[DEFAULT_WATERMARK_ID])
+
+
+def get_watermark_src(watermark_id: Optional[str] = None, user_id: Optional[int] = None) -> Path:
+    """Find the active watermark file based on user selection or global fallback."""
+    pid = resolve_watermark_id(watermark_id, user_id)
+    found = _resolve_preset_file(pid)
+    if found is not None:
+        return found
+    for fallback_id in WATERMARK_PRESETS:
+        alt = _resolve_preset_file(fallback_id)
+        if alt is not None:
+            return alt
     return BASE_DIR / "Watermark.webm"
 
 
 WATERMARK_SRC = get_watermark_src()
+
+
+async def render_watermark_preview_card() -> Optional[bytes]:
+    """Render a side-by-side preview PNG of all available watermark presets."""
+    presets = list_available_watermarks()
+    if not presets:
+        return None
+    card_w, row_h = 760, 190
+    canvas = Image.new("RGB", (card_w, max(row_h, len(presets) * row_h + 20)), (24, 28, 36))
+    draw = ImageDraw.Draw(canvas)
+    try:
+        font_title = ImageFont.truetype("arial.ttf", size=24)
+        font_sub = ImageFont.truetype("arial.ttf", size=16)
+    except Exception:
+        font_title = ImageFont.load_default()
+        font_sub = ImageFont.load_default()
+
+    y = 14
+    for idx, preset in enumerate(presets, start=1):
+        src = _resolve_preset_file(preset["id"])
+        if not src:
+            continue
+        draw.rounded_rectangle((16, y, card_w - 16, y + row_h - 16), radius=14, fill=(36, 41, 52), outline=(65, 75, 95), width=1)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-v", "error", "-c:v", "libvpx-vp9",
+                "-ss", preset.get("still_ss", "3.0"),
+                "-i", str(src),
+                "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=12.0)
+            if proc.returncode == 0 and out:
+                with Image.open(io.BytesIO(out)) as im:
+                    rgba = im.convert("RGBA")
+                    rgba.thumbnail((250, 145), Image.Resampling.LANCZOS)
+                    px = 34 + (250 - rgba.width) // 2
+                    py = y + (row_h - 16 - rgba.height) // 2
+                    canvas.paste(rgba, (px, py), rgba)
+        except Exception:
+            pass
+        title = f"{idx}. {preset['short']}"
+        draw.text((310, y + 45), title, fill=(245, 248, 255), font=font_title)
+        draw.text((310, y + 84), preset.get("desc", ""), fill=(165, 178, 200), font=font_sub)
+        y += row_h
+
+    buf = io.BytesIO()
+    canvas.save(buf, format="PNG")
+    return buf.getvalue()
 
 
 async def get_media_dimensions(file_path: Path) -> Tuple[int, int]:
@@ -66,10 +345,12 @@ async def get_media_dimensions(file_path: Path) -> Tuple[int, int]:
     return 1280, 720
 
 
-def calculate_watermark_width(video_w: int, video_h: int) -> int:
-    """Calculates watermark width proportional to video/image resolution."""
-    # 22% of width for portrait / vertical video, 16% for landscape
-    ratio = 0.22 if video_h > video_w else 0.16
+def calculate_watermark_width(video_w: int, video_h: int, width_scale: float = 1.0) -> int:
+    """Calculates watermark width proportional to video/image resolution and watermark aspect."""
+    # 22% of width for portrait / vertical video, 16% for landscape; scaled for wider banners
+    base_ratio = 0.22 if video_h > video_w else 0.16
+    max_ratio = 0.45 if video_h > video_w else 0.34
+    ratio = min(max_ratio, base_ratio * max(0.5, float(width_scale or 1.0)))
     target_w = max(90, int(video_w * ratio))
     if target_w % 2 != 0:
         target_w += 1
@@ -134,19 +415,22 @@ async def apply_watermark(
     output_path: Path,
     username: Optional[str] = None,
     audio_ref_path: Optional[Path] = None,
-    target_duration: Optional[int] = None
+    target_duration: Optional[int] = None,
+    watermark_id: Optional[str] = None,
+    user_id: Optional[int] = None,
 ) -> bool:
-    """Overlays the animated Poco AI watermark + username badge onto a video,
+    """Overlays the animated watermark + optional username badge onto a video,
     cycling corners every time the watermark disappears (every 5.0s).
     Optionally muxes an audio reference onto the final video.
     """
-    watermark_src = get_watermark_src()
+    preset = get_watermark_info(watermark_id=watermark_id, user_id=user_id)
+    watermark_src = get_watermark_src(watermark_id=watermark_id, user_id=user_id)
     if not watermark_src.exists():
         logger.warning(f"Watermark file not found at {watermark_src}, skipping overlay.")
         return False
 
     vw, vh = await get_media_dimensions(input_path)
-    wm_w = calculate_watermark_width(vw, vh)
+    wm_w = calculate_watermark_width(vw, vh, width_scale=float(preset.get("width_scale", 1.0)))
     ext = watermark_src.suffix.lower()
     is_webm = ext == ".webm"
 
@@ -338,16 +622,20 @@ async def apply_watermark(
 async def apply_watermark_image(
     input_path: Path,
     output_path: Path,
-    username: Optional[str] = None
+    username: Optional[str] = None,
+    watermark_id: Optional[str] = None,
+    user_id: Optional[int] = None,
 ) -> bool:
-    """Overlays the Poco AI watermark + username badge onto a static image file."""
-    watermark_src = get_watermark_src()
+    """Overlays the selected watermark + optional username badge onto a static image file."""
+    preset = get_watermark_info(watermark_id=watermark_id, user_id=user_id)
+    watermark_src = get_watermark_src(watermark_id=watermark_id, user_id=user_id)
     if not watermark_src.exists():
         logger.warning(f"Watermark file not found at {watermark_src}, skipping overlay.")
         return False
 
     vw, vh = await get_media_dimensions(input_path)
-    wm_w = calculate_watermark_width(vw, vh)
+    wm_w = calculate_watermark_width(vw, vh, width_scale=float(preset.get("width_scale", 1.0)))
+    still_ss = str(preset.get("still_ss", "3.0"))
     ext = watermark_src.suffix.lower()
     is_webm = ext == ".webm"
 
@@ -374,7 +662,7 @@ async def apply_watermark_image(
                     "ffmpeg", "-y",
                     "-i", str(input_path),
                     "-c:v", "libvpx-vp9",
-                    "-ss", "3.0",
+                    "-ss", still_ss,
                     "-i", str(watermark_src),
                     "-i", str(badge_path),
                     "-filter_complex", filter_str,
@@ -391,7 +679,7 @@ async def apply_watermark_image(
                     "ffmpeg", "-y",
                     "-i", str(input_path),
                     "-c:v", "libvpx-vp9",
-                    "-ss", "3.0",
+                    "-ss", still_ss,
                     "-i", str(watermark_src),
                     "-filter_complex", filter_str,
                     "-map", "[outv]",
@@ -417,7 +705,7 @@ async def apply_watermark_image(
                 cmd_fb = [
                     "ffmpeg", "-y",
                     "-i", str(input_path),
-                    "-ss", "3.0",
+                    "-ss", still_ss,
                     "-i", str(watermark_src),
                     "-i", str(badge_path),
                     "-filter_complex", filter_str_fb,
@@ -433,7 +721,7 @@ async def apply_watermark_image(
                 cmd_fb = [
                     "ffmpeg", "-y",
                     "-i", str(input_path),
-                    "-ss", "3.0",
+                    "-ss", still_ss,
                     "-i", str(watermark_src),
                     "-filter_complex", filter_str_fb,
                     "-map", "[outv]",

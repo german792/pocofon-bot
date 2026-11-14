@@ -26,6 +26,7 @@ import image_utils
 import access_manager
 import cameo_manager
 import user_access
+import watermark_utils
 import config
 import history_manager
 
@@ -237,6 +238,55 @@ def render_cameo_card(cameo: Dict[str, Any], user: Any) -> Tuple[str, InlineKeyb
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def watermark_picker_button(owner_id: int) -> InlineKeyboardButton:
+    info = watermark_utils.get_watermark_info(user_id=owner_id)
+    return InlineKeyboardButton(text=f"💧 Ватермарка: {info['short']}", callback_data=f"wm_pick:{owner_id}")
+
+
+def render_watermark_menu(
+    user_id: int,
+    user: Any = None,
+    from_draft: bool = False,
+) -> Tuple[str, InlineKeyboardMarkup]:
+    """Render the interactive watermark selection menu."""
+    cur_id = watermark_utils.get_user_watermark_id(user_id)
+    def_id = watermark_utils.get_default_watermark_id()
+    cur_info = watermark_utils.get_watermark_info(cur_id, user_id=user_id)
+    presets = watermark_utils.list_available_watermarks()
+
+    lines = [
+        "💧 <b>Выбор ватермарки на видео и фото</b>\n",
+        f"✅ <b>Сейчас выбрана:</b> {html.escape(cur_info['label'])}",
+        f"<i>{html.escape(cur_info.get('desc', ''))}</i>\n",
+        "Выберите нужный водяной знак ниже — он сразу применится ко всем вашим новым генерациям:",
+    ]
+    rows: List[List[InlineKeyboardButton]] = []
+    for p in presets:
+        is_on = p["id"] == cur_id
+        btn_text = ("✅ " if is_on else "") + p["label"]
+        rows.append([
+            InlineKeyboardButton(
+                text=btn_text,
+                callback_data=f"wm_set:{p['id']}:{user_id}",
+                **({"style": "success"} if is_on else {}),
+            )
+        ])
+
+    rows.append([InlineKeyboardButton(text="👁 Превью всех ватермарок", callback_data=f"wm_preview:{user_id}", style="primary")])
+    if user and user_access.is_admin(user) and cur_id != def_id:
+        rows.append([
+            InlineKeyboardButton(
+                text=f"🌐 Сделать «{cur_info['short']}» общей по умолчанию",
+                callback_data=f"wm_global:{cur_id}:{user_id}",
+            )
+        ])
+    if from_draft:
+        rows.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data=f"wm_back:{user_id}")])
+    else:
+        rows.append([InlineKeyboardButton(text="❌ Закрыть", callback_data=f"wm_close:{user_id}")])
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 # Active draft per user
 user_drafts: Dict[int, Dict[str, Any]] = {}
 # Persistent user preferences across requests
@@ -348,7 +398,7 @@ def build_motion_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inli
             **({"style": "primary"} if active else {}),
         ))
     rows.append(orient_row)
-    rows.append([cameo_picker_button(draft, owner_id)])
+    rows.append([cameo_picker_button(draft, owner_id), watermark_picker_button(owner_id)])
     ready = bool(draft.get("motion_image")) and bool(draft.get("ref_video"))
     rows.append([InlineKeyboardButton(text="🕺 Запустить", callback_data=f"gen:{owner_id}", **({"style": "success"} if ready else {}))])
     rows.append([InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}", style="danger")])
@@ -511,9 +561,10 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
         )
         rows.append([vid_btn, aud_btn])
 
-        # Cancel button
+        # Watermark + Cancel row
         rows.append([
-            InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}", style="danger")
+            watermark_picker_button(owner_id),
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}", style="danger"),
         ])
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -587,6 +638,7 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
         InlineKeyboardButton(text=f"🔄 Модель: {minfo.get('short', cur_model)}", callback_data=f"wstep:model:{owner_id}"),
         InlineKeyboardButton(text=f"⏱ Длительность: {dur}с", callback_data=f"wstep:duration:{owner_id}")
     ])
+    rows.append([watermark_picker_button(owner_id)])
 
     # Action row
     cost = calculate_credit_cost(cur_model, dur, res)
@@ -660,6 +712,7 @@ def build_image_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
         btn_kwargs = {"style": "primary"} if is_active else {}
         ratio_buttons.append(InlineKeyboardButton(text=lbl, callback_data=f"sia:{rat}:{owner_id}", **btn_kwargs))
     rows.append(ratio_buttons)
+    rows.append([watermark_picker_button(owner_id)])
 
     # Action row
     cost = calculate_credit_cost(cur_model, 1, res)
@@ -1106,6 +1159,7 @@ async def handle_start_and_help(message: Message, state: FSMContext):
         ],
         [
             InlineKeyboardButton(text="🎭 Камео (@персонажи)", callback_data=f"cameo_menu:{uid}"),
+            InlineKeyboardButton(text="💧 Ватермарка", callback_data=f"wm_menu:{uid}"),
         ],
     ])
 
@@ -1120,7 +1174,7 @@ async def handle_start_and_help(message: Message, state: FSMContext):
         f"Видео, фото и Motion за пару тапов.\n\n"
         f"{how} 👇\n\n"
         f"<blockquote>📎 Фото с подписью станет референсом · 🎭 Камео: /cameo\n"
-        f"💳 /balance · 🔲 /grid · 🤖 /model</blockquote>"
+        f"💧 Ватермарка: /watermark · 💳 /balance · 🔲 /grid · 🤖 /model</blockquote>"
     )
     if in_group:
         await message.reply(text, reply_markup=start_kb, parse_mode="HTML")
@@ -3834,6 +3888,149 @@ async def on_cameo_close(call: CallbackQuery):
     await call.answer()
 
 
+# --- Watermark Selection Menu & Callbacks ---
+
+@router.message(Command("watermark", "wm", "ватермарка", ignore_case=True, ignore_mention=True), ~F.photo, ~F.document)
+async def handle_watermark_command(message: Message):
+    uid = message.from_user.id
+    text, kb = render_watermark_menu(uid, user=message.from_user, from_draft=False)
+    await message.reply(text, reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("wm_menu:"))
+async def on_watermark_menu(call: CallbackQuery):
+    owner_id = int(call.data.split(":")[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    text, kb = render_watermark_menu(owner_id, user=call.from_user, from_draft=False)
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("wm_pick:"))
+async def on_watermark_pick_in_draft(call: CallbackQuery):
+    owner_id = int(call.data.split(":")[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    has_draft = user_drafts.get(owner_id) is not None
+    text, kb = render_watermark_menu(owner_id, user=call.from_user, from_draft=has_draft)
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("wm_set:"))
+async def on_watermark_select(call: CallbackQuery):
+    _, wm_id, uid_s = call.data.split(":")
+    owner_id = int(uid_s)
+    if not await verify_callback_owner(call, owner_id):
+        return
+    chosen_id = watermark_utils.set_user_watermark_id(owner_id, wm_id)
+    draft = user_drafts.get(owner_id)
+    if draft is not None:
+        draft["watermark_id"] = chosen_id
+
+    info = watermark_utils.get_watermark_info(chosen_id, user_id=owner_id)
+    has_back_btn = bool(
+        call.message.reply_markup
+        and any(
+            (b.callback_data or "").startswith("wm_back:")
+            for row in call.message.reply_markup.inline_keyboard
+            for b in row
+        )
+    )
+    text, kb = render_watermark_menu(owner_id, user=call.from_user, from_draft=has_back_btn)
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        pass
+    await call.answer(f"Выбрана ватермарка: {info['short']}")
+
+
+@router.callback_query(F.data.startswith("wm_global:"))
+async def on_watermark_set_global(call: CallbackQuery):
+    _, wm_id, uid_s = call.data.split(":")
+    owner_id = int(uid_s)
+    if not await verify_callback_owner(call, owner_id):
+        return
+    if not user_access.is_admin(call.from_user):
+        await call.answer("Только администратор может менять общую ватермарку", show_alert=True)
+        return
+    chosen_id = watermark_utils.set_default_watermark_id(wm_id)
+    info = watermark_utils.get_watermark_info(chosen_id)
+    has_back_btn = bool(
+        call.message.reply_markup
+        and any(
+            (b.callback_data or "").startswith("wm_back:")
+            for row in call.message.reply_markup.inline_keyboard
+            for b in row
+        )
+    )
+    text, kb = render_watermark_menu(owner_id, user=call.from_user, from_draft=has_back_btn)
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        pass
+    await call.answer(f"🌐 Для всех по умолчанию: {info['short']}")
+
+
+@router.callback_query(F.data.startswith("wm_preview:"))
+async def on_watermark_preview(call: CallbackQuery):
+    owner_id = int(call.data.split(":")[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    await call.answer("Готовлю превью...")
+    png_bytes = await watermark_utils.render_watermark_preview_card()
+    if not png_bytes:
+        await call.message.answer("⚠️ Не удалось собрать превью ватермарок.")
+        return
+    await call.message.answer_photo(
+        BufferedInputFile(png_bytes, filename="watermarks_preview.png"),
+        caption="💧 <b>Доступные ватермарки</b>\nВыберите нужную в меню выше.",
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data.startswith("wm_back:"))
+async def on_watermark_back_to_draft(call: CallbackQuery):
+    owner_id = int(call.data.split(":")[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = user_drafts.get(owner_id)
+    if not draft:
+        await call.answer("Черновик устарел. Откройте /video или /image.", show_alert=True)
+        return
+    try:
+        await call.message.edit_text(
+            text=format_draft_text(draft),
+            reply_markup=build_settings_keyboard(draft, owner_id),
+            parse_mode="HTML",
+        )
+    except Exception:
+        await show_or_update_menu(call.message, call.bot, draft, owner_id)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("wm_close:"))
+async def on_watermark_close(call: CallbackQuery):
+    owner_id = int(call.data.split(":")[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    try:
+        await call.message.delete()
+    except Exception:
+        try:
+            await call.message.edit_text("Закрыто.")
+        except Exception:
+            pass
+    await call.answer()
+
+
 # --- Text Handling (Mentions in groups, plain text in private) ---
 
 @router.message(F.text)
@@ -4707,6 +4904,7 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
         voice_id=draft.get("voice_id", "") if menu_mode == "voice" else "",
         voice_mode=draft.get("voice_mode", "tts") if menu_mode == "voice" else "tts",
         motion_orient=motion_orient,
+        watermark_id=draft.get("watermark_id") or watermark_utils.get_user_watermark_id(call.from_user.id),
     )
 
     await queue.add_job(job)
@@ -4725,6 +4923,8 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
         chips.append("🎭 " + " ".join(f"@{h}" for h in used_cameos[:3]))
     if job.ref_video:
         chips.append("🎞 видео-реф")
+    wm_info = watermark_utils.get_watermark_info(job.watermark_id, user_id=call.from_user.id)
+    chips.append(f"💧 {wm_info['short']}")
     if cost > 0:
         chips.append(f"💳 ~{cost} кр.")
     quote = f"\n<blockquote expandable>{html.escape(prompt[:500])}</blockquote>" if prompt else ""

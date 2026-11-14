@@ -165,6 +165,7 @@ class GenerationJob:
     voice_id: str = ""
     voice_mode: str = "tts"
     motion_orient: str = "image"
+    watermark_id: str = ""
     job_id: str = field(default_factory=lambda: f"tg_{uuid.uuid4().hex[:12]}")
 
     def get_all_ref_images(self) -> List[bytes]:
@@ -410,7 +411,13 @@ class GenerationQueue:
                 temp_file = raw_file
                 try:
                     wm_out = VIDEOS_DIR / f"{job.model_key}_{job.user_id}_{ts}.png"
-                    wm_ok = await apply_watermark_image(raw_file, wm_out, username=job.user_name)
+                    wm_ok = await apply_watermark_image(
+                        raw_file,
+                        wm_out,
+                        username=job.user_name,
+                        watermark_id=job.watermark_id or None,
+                        user_id=job.user_id,
+                    )
                     if wm_ok and wm_out.exists() and wm_out.stat().st_size > 0:
                         raw_file.unlink(missing_ok=True)
                         temp_file = wm_out
@@ -619,7 +626,9 @@ class GenerationQueue:
                     temp_file,
                     username=job.user_name,
                     audio_ref_path=temp_audio_ref,
-                    target_duration=job.duration
+                    target_duration=job.duration,
+                    watermark_id=job.watermark_id or None,
+                    user_id=job.user_id,
                 )
             finally:
                 if temp_audio_ref and temp_audio_ref.exists():
@@ -997,7 +1006,7 @@ class GenerationQueue:
                 out_file = VIDEOS_DIR / f"last_{user_id}_{ts}.png"
                 img_bytes = await self.davinci_client.download_image(media_url)
                 raw_file.write_bytes(img_bytes)
-                wm_ok = await apply_watermark_image(raw_file, out_file)
+                wm_ok = await apply_watermark_image(raw_file, out_file, user_id=user_id)
                 if not wm_ok or not out_file.exists() or out_file.stat().st_size == 0:
                     out_file = raw_file
                 else:
@@ -1023,7 +1032,7 @@ class GenerationQueue:
                 out_file = VIDEOS_DIR / f"last_{user_id}_{ts}.mp4"
                 vid_bytes = await self.davinci_client.download_video(media_url)
                 raw_file.write_bytes(vid_bytes)
-                wm_ok = await apply_watermark(raw_file, out_file)
+                wm_ok = await apply_watermark(raw_file, out_file, user_id=user_id)
                 if not wm_ok or not out_file.exists() or out_file.stat().st_size == 0:
                     out_file = raw_file
                 else:
