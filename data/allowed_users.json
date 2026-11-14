@@ -51,7 +51,8 @@
     "glebaicreator",
     "henvey2",
     "ustinova_tvoe_oil",
-    "destry_prime_hebante"
+    "destry_prime_hebante",
+    "kukishrik"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -89,7 +90,8 @@
     8660996799,
     8865875147,
     9285030551,
-    8509726288
+    8509726288,
+    7420002075
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -440,6 +442,22 @@
       "name": "@Ustinova_tvoe_oil",
       "added_at": 1794673628.1853225,
       "added_by": "@GermanUstinf",
+      "role": "user"
+    },
+    "destry_prime_hebante": {
+      "user_id": 8479290260,
+      "username": "Destry_PRIME_HEBANTE",
+      "name": "𝖣𝖤𝖲𝖳𝖱𝖸 𝖠𝖨",
+      "added_at": 1794674426.7318468,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "kukishrik": {
+      "user_id": 7420002075,
+      "username": "Kukishrik",
+      "name": "PRIME",
+      "added_at": 1794680791.3880863,
+      "added_by": "group_-5444101670",
       "role": "user"
     }
   }
