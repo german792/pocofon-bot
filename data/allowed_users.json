@@ -45,7 +45,8 @@
     "numbimx",
     "drushok_patan",
     "flexovprime",
-    "mertvv0_lol_46678"
+    "mertvv0_lol_46678",
+    "apelsin_328"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -78,7 +79,8 @@
     7842728681,
     8240079379,
     8701205471,
-    7859494260
+    7859494260,
+    8536373258
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -374,6 +376,14 @@
       "username": "mertvv0_lol_46678",
       "name": "Esenia",
       "added_at": 1794651786.4184592,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "apelsin_328": {
+      "user_id": 8536373258,
+      "username": "apelsin_328",
+      "name": "Апельсин",
+      "added_at": 1794651791.9916172,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
