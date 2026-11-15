@@ -57,7 +57,8 @@
     "antimellstudio",
     "axolf",
     "nodebilyeafool",
-    "sjisidek"
+    "sjisidek",
+    "mya1creator"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -100,7 +101,8 @@
     5197785785,
     5982306869,
     7999651446,
-    6856937972
+    6856937972,
+    8529901930
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -507,6 +509,14 @@
       "name": "Андрей",
       "added_at": 1794747846.5536933,
       "added_by": "group_-5444101670",
+      "role": "user"
+    },
+    "mya1creator": {
+      "user_id": 8529901930,
+      "username": "mya1creator",
+      "name": "🫠",
+      "added_at": 1794757892.8131957,
+      "added_by": "group_-1004328649380",
       "role": "user"
     }
   }
