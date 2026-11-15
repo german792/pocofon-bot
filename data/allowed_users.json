@@ -58,7 +58,8 @@
     "axolf",
     "nodebilyeafool",
     "sjisidek",
-    "mya1creator"
+    "mya1creator",
+    "tukhgf"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -517,6 +518,14 @@
       "name": "🫠",
       "added_at": 1794757892.8131957,
       "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "tukhgf": {
+      "user_id": null,
+      "username": "TUKHGF",
+      "name": "@TUKHGF",
+      "added_at": 1794758403.807864,
+      "added_by": "@GermanUstinf",
       "role": "user"
     }
   }
