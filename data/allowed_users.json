@@ -109,7 +109,8 @@
     8529901930,
     5735262401,
     8609605940,
-    6900261657
+    6900261657,
+    5960712902
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -551,7 +552,7 @@
       "role": "user"
     },
     "grrrmondays1": {
-      "user_id": null,
+      "user_id": 5960712902,
       "username": "GrrrMondays1",
       "name": "@GrrrMondays1",
       "added_at": 1794768441.7855194,
