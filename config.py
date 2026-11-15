@@ -227,6 +227,36 @@ MODELS = {
         "ratios": ["16:9", "9:16"],
         "desc": "Google Gemini Omni Flash 1.1 (1–15с, 4K, видео- и фото-референсы)"
     },
+    "veo_3_1": {
+        "name": "Google Veo 3.1",
+        "short": "🎬 Veo 3.1",
+        "category": "video",
+        "backend": "davinci",
+        "api_id": "veo31",
+        "has_audio": True,
+        "multi_ref": True,
+        "video_ref": False,
+        "ref_limit": 3,
+        "durations": [4, 6, 8],
+        "resolutions": ["720p", "1080p", "4k"],
+        "ratios": ["16:9", "9:16"],
+        "desc": "Google Veo 3.1 (4/6/8с, до 4K, звук и до 3 фото-референсов)"
+    },
+    "veo_3_1_fast": {
+        "name": "Google Veo 3.1 Fast",
+        "short": "⚡ Veo 3.1 Fast",
+        "category": "video",
+        "backend": "davinci",
+        "api_id": "veo31fast",
+        "has_audio": True,
+        "multi_ref": False,
+        "video_ref": False,
+        "ref_limit": 1,
+        "durations": [4, 6, 8],
+        "resolutions": ["720p", "1080p"],
+        "ratios": ["16:9", "9:16"],
+        "desc": "Google Veo 3.1 Fast (4/6/8с, быстрый рендер до 1080p + звук и старт-кадр)"
+    },
     "luma_dream_machine": {
         "name": "Luma Dream Machine",
         "short": "🌟 Luma Dream Machine",
@@ -459,6 +489,7 @@ MODELS = {
         "api_id": "FLUX_3",
         "multi_ref": True,
         "ref_limit": 10,
+        "resolutions": ["1K", "2K", "4K"],
         "desc": "Фотореалистичная генерация изображений Flux 3 (до 4K, 10 референсов)"
     },
     "flux_3_klein": {
@@ -469,7 +500,96 @@ MODELS = {
         "api_id": "FLUX_3_KLEIN",
         "multi_ref": True,
         "ref_limit": 10,
+        "resolutions": ["1K", "2K", "4K"],
         "desc": "Быстрая художественная модель Flux 3 Klein с поддержкой референсов"
+    },
+    "flux_2": {
+        "name": "Flux 2",
+        "short": "🎨 Flux 2",
+        "category": "image",
+        "backend": "davinci_image",
+        "api_id": "FLUX_2",
+        "multi_ref": True,
+        "ref_limit": 4,
+        "resolutions": ["0.5K", "1K", "2K"],
+        "desc": "Black Forest Labs Flux 2 (точный контроль, 0.5K–2K, до 4 референсов)"
+    },
+    "flux_2_turbo": {
+        "name": "Flux 2 Turbo",
+        "short": "⚡ Flux 2 Turbo",
+        "category": "image",
+        "backend": "davinci_image",
+        "api_id": "FLUX_2_TURBO",
+        "multi_ref": True,
+        "ref_limit": 4,
+        "resolutions": ["0.5K", "1K", "2K"],
+        "desc": "Ускоренный Flux 2 Turbo (0.5K–2K, до 4 референсов)"
+    },
+    "seedream_5_5": {
+        "name": "Seedream 5.5",
+        "short": "🌊 Seedream 5.5",
+        "category": "image",
+        "backend": "davinci_image",
+        "api_id": "SEEDREAM_5_5",
+        "multi_ref": True,
+        "ref_limit": 10,
+        "resolutions": ["1K", "2K"],
+        "desc": "Новейшая фото-модель ByteDance Seedream 5.5 (1K–2K, до 10 референсов)"
+    },
+    "seedream_5_pro": {
+        "name": "Seedream 5.0 Pro",
+        "short": "💎 Seedream 5.0 Pro",
+        "category": "image",
+        "backend": "davinci_image",
+        "api_id": "SEEDREAM_5_PRO",
+        "multi_ref": True,
+        "ref_limit": 10,
+        "resolutions": ["1K", "2K"],
+        "desc": "ByteDance Seedream 5.0 Pro (премиум детализация и точное редактирование, до 10 референсов)"
+    },
+    "seedream_5_flash": {
+        "name": "Seedream 5.0 Flash",
+        "short": "⚡ Seedream 5.0 Flash",
+        "category": "image",
+        "backend": "davinci_image",
+        "api_id": "SEEDREAM_5_FLASH",
+        "multi_ref": True,
+        "ref_limit": 10,
+        "resolutions": ["1K", "2K"],
+        "desc": "Быстрая фото-модель ByteDance Seedream 5.0 Flash (1K–2K, до 10 референсов)"
+    },
+    "seedream_5_lite": {
+        "name": "Seedream 5.0 Lite",
+        "short": "🌿 Seedream 5.0 Lite",
+        "category": "image",
+        "backend": "davinci_image",
+        "api_id": "SEEDREAM_5_LITE",
+        "multi_ref": True,
+        "ref_limit": 10,
+        "resolutions": ["2K", "4K"],
+        "desc": "Лёгкая модель ByteDance Seedream 5.0 Lite (2K–4K, до 10 референсов)"
+    },
+    "seedream_45": {
+        "name": "Seedream 4.5",
+        "short": "✨ Seedream 4.5",
+        "category": "image",
+        "backend": "davinci_image",
+        "api_id": "SEEDREAM_45",
+        "multi_ref": True,
+        "ref_limit": 10,
+        "resolutions": ["2K", "4K"],
+        "desc": "ByteDance Seedream 4.5 (улучшенная эстетика, 2K–4K, до 10 референсов)"
+    },
+    "seedream_4": {
+        "name": "Seedream 4.0",
+        "short": "🎨 Seedream 4.0",
+        "category": "image",
+        "backend": "davinci_image",
+        "api_id": "SEEDREAM",
+        "multi_ref": True,
+        "ref_limit": 10,
+        "resolutions": ["1K", "2K", "4K"],
+        "desc": "Классическая ByteDance Seedream 4.0 (1K–4K, до 10 референсов)"
     },
     "qwen_image_3": {
         "name": "Qwen Image 3.0",
@@ -479,6 +599,7 @@ MODELS = {
         "api_id": "QWEN_IMAGE_3",
         "multi_ref": True,
         "ref_limit": 3,
+        "resolutions": ["1K", "2K"],
         "desc": "Qwen Image 3.0 (точная генерация текста и сцен по референсам)"
     },
     "gpt_image_2_6_sunburst": {
@@ -489,6 +610,7 @@ MODELS = {
         "api_id": "GPT_IMAGE_2_6_SUNBURST",
         "multi_ref": True,
         "ref_limit": 10,
+        "resolutions": ["1K", "2K"],
         "desc": "Новейшая модель OpenAI GPT Image 2.6 Sunburst с референсами (1 кредит)"
     },
     "gpt_image_2_6_flare": {
@@ -499,6 +621,7 @@ MODELS = {
         "api_id": "GPT_IMAGE_2_6_FLARE",
         "multi_ref": True,
         "ref_limit": 10,
+        "resolutions": ["1K", "2K"],
         "desc": "Новейшая модель OpenAI GPT Image 2.6 Flare с референсами (1 кредит)"
     },
     "qwen_image": {
@@ -513,7 +636,7 @@ MODELS = {
     },
 }
 
-def calculate_credit_cost(model_key: str, duration: int = 5, resolution: str = "720p") -> int:
+def calculate_credit_cost(model_key: str, duration: int = 5, resolution: str = "720p", generate_audio: bool = True) -> int:
     """Calculate estimated DaVinci AI credit cost for a generation based on model and parameters."""
     model_info = MODELS.get(model_key, MODELS.get(DEFAULT_MODEL, {}))
     backend = model_info.get("backend")
@@ -554,6 +677,10 @@ def calculate_credit_cost(model_key: str, duration: int = 5, resolution: str = "
             return int(dur * 6)
         elif api_id in ("geminiOmniFlash12", "geminiOmniFlash11"):
             return int(dur * 28)
+        elif api_id == "veo31":
+            return int(dur * (70 if generate_audio else 35))
+        elif api_id == "veo31fast":
+            return int(dur * (38 if generate_audio else 25))
         elif api_id in ("luma-dream-machine", "luma-ray-3-2"):
             return int(dur * 22)
         elif api_id == "minimaxH3":
@@ -576,6 +703,7 @@ def calculate_credit_cost(model_key: str, duration: int = 5, resolution: str = "
 
     # 2. Image models on DaVinci backend
     if backend == "davinci_image":
+        res_upper = str(resolution or "1K").upper()
         if api_id == "NANO_BANANA_2_1":
             return 38
         elif api_id == "NANO_BANANA_2":
@@ -583,6 +711,18 @@ def calculate_credit_cost(model_key: str, duration: int = 5, resolution: str = "
         elif api_id == "NANO_BANANA":
             return 10
         elif api_id in ("FLUX_3", "FLUX_3_KLEIN"):
+            return 15
+        elif api_id == "FLUX_2":
+            return 3 if res_upper == "0.5K" else (48 if res_upper == "2K" else 12)
+        elif api_id == "FLUX_2_TURBO":
+            return 2 if res_upper == "0.5K" else (36 if res_upper == "2K" else 9)
+        elif api_id in ("SEEDREAM_5_5", "SEEDREAM_5_PRO"):
+            return 40 if res_upper == "2K" else 20
+        elif api_id == "SEEDREAM_5_FLASH":
+            return 48 if res_upper == "2K" else 12
+        elif api_id == "SEEDREAM_45":
+            return 13
+        elif api_id in ("SEEDREAM", "SEEDREAM_5_LITE"):
             return 15
         elif api_id == "QWEN_IMAGE_3":
             return 10
@@ -611,6 +751,8 @@ COMPACT_MODEL_LABELS = {
     "ltx_25_fast": "⚡ LTX 2.5F",
     "gemini_omni_12": "💎 Omni 1.2",
     "gemini_omni_11": "⚡ Omni 1.1",
+    "veo_3_1": "🎬 Veo 3.1",
+    "veo_3_1_fast": "⚡ Veo 3.1F",
     "luma_dream_machine": "🌟 Luma DM",
     "luma_ray_32": "⚡ Luma 3.2",
     "minimax_h3": "⚡ MiniMax H3",
@@ -630,6 +772,14 @@ COMPACT_MODEL_LABELS = {
     "nano_banana": "🍌 Banana",
     "flux_3_img": "🎨 Flux 3",
     "flux_3_klein": "✨ Flux Klein",
+    "flux_2": "🎨 Flux 2",
+    "flux_2_turbo": "⚡ Flux 2T",
+    "seedream_5_5": "🌊 Seedream 5.5",
+    "seedream_5_pro": "💎 Seedream 5P",
+    "seedream_5_flash": "⚡ Seedream 5F",
+    "seedream_5_lite": "🌿 Seedream 5L",
+    "seedream_45": "✨ Seedream 4.5",
+    "seedream_4": "🎨 Seedream 4.0",
     "qwen_image_3": "🖼 Qwen 3.0",
     "gpt_image_2_6_sunburst": "☀️ GPT Sun",
     "gpt_image_2_6_flare": "✨ GPT Flare",

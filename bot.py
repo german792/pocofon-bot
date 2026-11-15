@@ -495,16 +495,26 @@ def build_model_grid_rows(
     return grid_rows
 
 
+def snap_duration_to_model(dur: int, model_durs: List[int]) -> int:
+    """Snap a requested duration to the closest allowed integer for a model."""
+    if not model_durs:
+        return max(1, min(30, int(dur)))
+    val = int(dur)
+    if val in model_durs:
+        return val
+    return min(model_durs, key=lambda x: (abs(x - val), x))
+
+
 def align_draft_to_model(
     draft: Dict[str, Any],
     minfo: Dict[str, Any],
     owner_id: Optional[int] = None,
 ) -> Tuple[int, int, List[str], List[str]]:
     """Clamp draft duration, resolution, and ratio to the active model's supported limits."""
-    model_durs = minfo.get("durations") or list(range(1, 31))
+    model_durs = sorted(minfo.get("durations") or list(range(1, 31)))
     min_dur, max_dur = min(model_durs), max(model_durs)
     cur_dur = int(draft.get("duration", DEFAULT_DURATION))
-    dur = max(min_dur, min(max_dur, cur_dur))
+    dur = snap_duration_to_model(cur_dur, model_durs)
     if dur != cur_dur or "duration" not in draft:
         draft["duration"] = dur
         if owner_id is not None:
@@ -533,6 +543,31 @@ def align_draft_to_model(
             get_user_prefs(owner_id)["ratio"] = ratio
 
     return min_dur, max_dur, res_options, ratio_choices
+
+
+def align_image_draft_to_model(
+    draft: Dict[str, Any],
+    minfo: Dict[str, Any],
+    owner_id: Optional[int] = None,
+) -> Tuple[List[str], List[str]]:
+    """Clamp image draft resolution and ratio to the active image model's supported options."""
+    res_options = list(minfo.get("resolutions") or IMAGE_RESOLUTION_OPTIONS)
+    res = draft.get("image_resolution", DEFAULT_IMAGE_RESOLUTION)
+    if res not in res_options:
+        res = "1K" if "1K" in res_options else ("2K" if "2K" in res_options else res_options[0])
+        draft["image_resolution"] = res
+        if owner_id is not None:
+            get_user_prefs(owner_id)["image_resolution"] = res
+
+    ratio_options = list(minfo.get("ratios") or IMAGE_RATIO_OPTIONS)
+    ratio = draft.get("image_ratio", DEFAULT_IMAGE_RATIO)
+    if ratio not in ratio_options:
+        ratio = "1:1" if "1:1" in ratio_options else ratio_options[0]
+        draft["image_ratio"] = ratio
+        if owner_id is not None:
+            get_user_prefs(owner_id)["image_ratio"] = ratio
+
+    return res_options, ratio_options
 
 
 def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeyboardMarkup:
@@ -632,13 +667,9 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
 
     # STEP 2: Duration Selection
     if step == "duration":
-        model_durs = minfo.get("durations") or list(range(1, 31))
-        min_dur = min(model_durs)
-        max_dur = max(model_durs)
-        cur_dur = int(draft.get("duration", DEFAULT_DURATION))
-        if cur_dur < min_dur or cur_dur > max_dur:
-            cur_dur = max(min_dur, min(max_dur, cur_dur))
-            draft["duration"] = cur_dur
+        model_durs = sorted(minfo.get("durations") or list(range(1, 31)))
+        cur_dur = snap_duration_to_model(int(draft.get("duration", DEFAULT_DURATION)), model_durs)
+        draft["duration"] = cur_dur
 
         rows = []
         cur_row = []
@@ -731,7 +762,7 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     rows.append([watermark_picker_button(owner_id)])
 
     # Action row
-    cost = calculate_credit_cost(cur_model, dur, res)
+    cost = calculate_credit_cost(cur_model, dur, res, generate_audio=audio)
     btn_text = f"Сгенерировать видео (~{cost} кр.)" if cost > 0 else "Сгенерировать видео"
     rows.append([
         cbtn(btn_text, callback_data=f"gen:{owner_id}", icon_key="rocket", fallback_emoji="🚀", style="success"),
@@ -742,13 +773,14 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
 
 
 def build_image_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeyboardMarkup:
-    """Dedicated Image Generation Menu (Nano Banana 2.1/Pro, Flux 3 Image/Klein, Qwen Image 3.0)."""
+    """Dedicated Image Generation Menu (Nano Banana, Flux, Seedream, Qwen, GPT Image)."""
     cur_model = draft.get("model_key", DEFAULT_IMAGE_MODEL)
     if cur_model not in IMAGE_MODEL_KEYS:
         cur_model = DEFAULT_IMAGE_MODEL
         draft["model_key"] = cur_model
 
     minfo = MODELS.get(cur_model, MODELS[DEFAULT_IMAGE_MODEL])
+    res_options, ratio_options = align_image_draft_to_model(draft, minfo, owner_id=owner_id)
     res = draft.get("image_resolution", DEFAULT_IMAGE_RESOLUTION)
     ratio = draft.get("image_ratio", DEFAULT_IMAGE_RATIO)
     ref_images: List[bytes] = draft.get("ref_images", [])
@@ -785,9 +817,9 @@ def build_image_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
         ])
         rows.append([cameo_picker_button(draft, owner_id)])
 
-    # Image Quality / Resolution Row (1K, 2K, 4K)
+    # Image Quality / Resolution Row (model-specific: e.g. 0.5K/1K/2K, 1K/2K, 2K/4K, 1K/2K/4K)
     res_buttons = []
-    for r in IMAGE_RESOLUTION_OPTIONS:
+    for r in res_options:
         is_active = r == res
         if r.lower() == "4k":
             res_buttons.append(
@@ -805,9 +837,9 @@ def build_image_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
             res_buttons.append(InlineKeyboardButton(text=lbl, callback_data=f"sir:{r}:{owner_id}", **btn_kwargs))
     rows.append(res_buttons)
 
-    # Image Aspect Ratio Row (1:1, 16:9, 9:16, 4:3, 3:4)
+    # Image Aspect Ratio Row
     ratio_buttons = []
-    for rat in IMAGE_RATIO_OPTIONS:
+    for rat in ratio_options:
         is_active = rat == ratio
         lbl = f"✓ {rat}" if is_active else rat
         btn_kwargs = {"style": "primary"} if is_active else {}
@@ -994,10 +1026,10 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
             f"<code>build: {BUILD_ID}</code>"
         )
 
-    model_durs = minfo.get("durations") or list(range(1, 31))
+    model_durs = sorted(minfo.get("durations") or list(range(1, 31)))
     min_dur = min(model_durs)
     max_dur = max(model_durs)
-    dur = max(min_dur, min(max_dur, int(draft.get("duration", DEFAULT_DURATION))))
+    dur = snap_duration_to_model(int(draft.get("duration", DEFAULT_DURATION)), model_durs)
     draft["duration"] = dur
 
     if step == "model":
@@ -1044,7 +1076,7 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
         else ""
     )
 
-    cost = calculate_credit_cost(cur_model, dur, res)
+    cost = calculate_credit_cost(cur_model, dur, res, generate_audio=audio)
     cost_line = (
         f"{ce('card', '💳')} <b>Стоимость:</b> ~{cost} кредитов\n"
         if cost > 0
@@ -1075,6 +1107,7 @@ def format_image_draft_text(draft: Dict[str, Any]) -> str:
     if cur_model not in IMAGE_MODEL_KEYS:
         cur_model = DEFAULT_IMAGE_MODEL
     minfo = MODELS.get(cur_model, MODELS[DEFAULT_IMAGE_MODEL])
+    align_image_draft_to_model(draft, minfo)
 
     res = draft.get("image_resolution", DEFAULT_IMAGE_RESOLUTION)
     ratio = draft.get("image_ratio", DEFAULT_IMAGE_RATIO)
@@ -4653,6 +4686,7 @@ async def on_set_model(call: CallbackQuery):
         draft["menu_mode"] = "image"
         draft["step"] = "main"
         get_user_prefs(owner_id)["image_model_key"] = mkey
+        align_image_draft_to_model(draft, minfo, owner_id=owner_id)
     else:
         draft["menu_mode"] = "video"
         get_user_prefs(owner_id)["model_key"] = mkey
@@ -4691,9 +4725,8 @@ async def on_set_duration(call: CallbackQuery):
         return
 
     cur_model = draft.get("model_key", DEFAULT_MODEL)
-    model_durs = MODELS.get(cur_model, {}).get("durations", list(range(1, 31)))
-    max_dur = max(model_durs) if model_durs else 15
-    dur = max(1, min(max_dur, dur))
+    model_durs = sorted(MODELS.get(cur_model, {}).get("durations") or list(range(1, 31)))
+    dur = snap_duration_to_model(dur, model_durs)
 
     draft["menu_message_id"] = call.message.message_id
     draft["menu_chat_id"] = call.message.chat.id
@@ -4721,7 +4754,10 @@ async def on_dec_duration(call: CallbackQuery):
     draft = user_drafts.get(owner_id)
     if not draft:
         return
-    dur = max(1, int(draft.get("duration", DEFAULT_DURATION)) - 1)
+    model_durs = sorted(MODELS.get(draft.get("model_key", DEFAULT_MODEL), {}).get("durations") or list(range(1, 31)))
+    cur_dur = snap_duration_to_model(int(draft.get("duration", DEFAULT_DURATION)), model_durs)
+    idx = model_durs.index(cur_dur)
+    dur = model_durs[max(0, idx - 1)]
     draft["duration"] = dur
     get_user_prefs(owner_id)["duration"] = dur
     draft["menu_message_id"] = call.message.message_id
@@ -4746,7 +4782,10 @@ async def on_inc_duration(call: CallbackQuery):
     draft = user_drafts.get(owner_id)
     if not draft:
         return
-    dur = min(30, int(draft.get("duration", DEFAULT_DURATION)) + 1)
+    model_durs = sorted(MODELS.get(draft.get("model_key", DEFAULT_MODEL), {}).get("durations") or list(range(1, 31)))
+    cur_dur = snap_duration_to_model(int(draft.get("duration", DEFAULT_DURATION)), model_durs)
+    idx = model_durs.index(cur_dur)
+    dur = model_durs[min(len(model_durs) - 1, idx + 1)]
     draft["duration"] = dur
     get_user_prefs(owner_id)["duration"] = dur
     draft["menu_message_id"] = call.message.message_id
@@ -4978,6 +5017,10 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
     if menu_mode == "motion":
         model_key = model_key if model_key in MOTION_MODEL_KEYS else MOTION_MODEL_KEY
     model_info = MODELS.get(model_key, MODELS[DEFAULT_MODEL])
+    if menu_mode == "image":
+        align_image_draft_to_model(draft, model_info, owner_id=owner_id)
+    elif menu_mode == "video" and model_info.get("backend") != "davinci_voice":
+        align_draft_to_model(draft, model_info, owner_id=owner_id)
     prompt = draft.get("prompt", "")
     duration = draft["duration"]
     resolution = draft["image_resolution"] if menu_mode == "image" else draft["resolution"]
@@ -5035,7 +5078,7 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
     )
 
     await queue.add_job(job)
-    cost = calculate_credit_cost(model_key, duration, resolution)
+    cost = calculate_credit_cost(model_key, duration, resolution, generate_audio=audio)
     chips = []
     if menu_mode == "image":
         chips.append(f"{resolution} · {ratio}")

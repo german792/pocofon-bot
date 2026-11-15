@@ -1132,6 +1132,8 @@ class DaVinciClient:
             "kling4Flash",
             "pika22",
             "minimax-hailuo-2-3",
+            "veo31",
+            "veo31fast",
         )
         audio_bucket_path: Optional[str] = None
         if (
@@ -1175,6 +1177,8 @@ class DaVinciClient:
             api_dur = max(3, min(15, api_dur))
         elif effective_model_id == "geminiOmniFlash11":
             api_dur = max(1, min(15, api_dur))
+        elif effective_model_id in ("veo31", "veo31fast"):
+            api_dur = min((4, 6, 8), key=lambda x: (abs(x - api_dur), x))
         elif effective_model_id in (
             "wan26",
             "wan30Prime",
@@ -1197,11 +1201,24 @@ class DaVinciClient:
         elif effective_model_id in ("seedance2Fast", "seedance2Mini", "wan30", "wan30Prime", "wan26", "grok"):
             if res not in ("480p", "720p"):
                 res = "720p"
-        elif effective_model_id in ("kling4", "flux3", "flux3Max", "pixversev6", "minimax-hailuo-2-3", "pika22", "luma-dream-machine", "luma-ray-3-2"):
+        elif effective_model_id in (
+            "kling4",
+            "flux3",
+            "flux3Max",
+            "pixversev6",
+            "minimax-hailuo-2-3",
+            "pika22",
+            "luma-dream-machine",
+            "luma-ray-3-2",
+            "veo31fast",
+        ):
             if res not in ("720p", "1080p"):
                 res = "720p"
         elif effective_model_id in ("geminiOmniFlash12", "geminiOmniFlash11"):
             if res not in ("360p", "720p", "1080p", "4k"):
+                res = "720p"
+        elif effective_model_id == "veo31":
+            if res not in ("720p", "1080p", "4k"):
                 res = "720p"
         else:
             if res not in ("480p", "720p", "1080p", "4k"):
@@ -1211,7 +1228,7 @@ class DaVinciClient:
         dim = ratio if ratio in ("16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "auto") else "16:9"
         if dim == "auto" and effective_model_id not in ("seedance25", "seedance2", "seedance2Fast", "seedance2Mini", "seedance", "wan30", "wan30Prime", "wan26"):
             dim = "16:9"
-        if effective_model_id in ("ltx25Pro", "ltx25Fast", "geminiOmniFlash12", "geminiOmniFlash11") and dim not in ("16:9", "9:16"):
+        if effective_model_id in ("ltx25Pro", "ltx25Fast", "geminiOmniFlash12", "geminiOmniFlash11", "veo31", "veo31fast") and dim not in ("16:9", "9:16"):
             dim = "16:9"
         elif effective_model_id in ("kling4", "kling4Flash") and dim not in ("16:9", "9:16", "1:1", "21:9"):
             dim = "16:9"
@@ -1245,6 +1262,7 @@ class DaVinciClient:
             "runway-aleph",
             "luma-dream-machine",
             "luma-ray-3-2",
+            "veo31",
         )
         start_frame: Optional[str] = None
         reference_images_payload: Optional[List[str]] = None
@@ -1411,9 +1429,26 @@ class DaVinciClient:
         }
 
         if model_key != "NANO_BANANA":
-            res = resolution if resolution in ("1K", "2K", "4K") else "1K"
-            if model_key in ("QWEN_IMAGE_3", "GPT_IMAGE_2_6_SUNBURST", "GPT_IMAGE_2_6_FLARE") and res == "4K":
-                res = "2K"
+            if model_key in ("FLUX_2", "FLUX_2_TURBO"):
+                allowed_res = ("0.5K", "1K", "2K")
+                default_res = "1K"
+            elif model_key in ("SEEDREAM_45", "SEEDREAM_5_LITE"):
+                allowed_res = ("2K", "4K")
+                default_res = "2K"
+            elif model_key in (
+                "SEEDREAM_5_5",
+                "SEEDREAM_5_PRO",
+                "SEEDREAM_5_FLASH",
+                "QWEN_IMAGE_3",
+                "GPT_IMAGE_2_6_SUNBURST",
+                "GPT_IMAGE_2_6_FLARE",
+            ):
+                allowed_res = ("1K", "2K")
+                default_res = "1K"
+            else:
+                allowed_res = ("1K", "2K", "4K")
+                default_res = "1K"
+            res = resolution if resolution in allowed_res else default_res
             payload["resolution"] = res
 
         if bucket_paths:

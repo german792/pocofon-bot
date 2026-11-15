@@ -111,6 +111,19 @@ WATERMARK_PRESETS: Dict[str, Dict[str, Any]] = {
             "realme_poco_ai_watermark_alpha.webm",
         ],
     },
+    "sora": {
+        "id": "sora",
+        "label": "☁️ Sora 2",
+        "short": "Sora 2",
+        "desc": "Плавающий логотип Sora 2 · работает на всех форматах",
+        "width_scale": 1.15,
+        "still_ss": "0.2",
+        "overlay_mode": "sora",
+        "candidates": [
+            "sora2_poco_ai_watermark_alpha.webm",
+            "Sora 2.mp4",
+        ],
+    },
 }
 
 _prefs_lock = threading.RLock()
@@ -332,8 +345,9 @@ async def render_watermark_preview_card() -> Optional[bytes]:
             continue
         draw.rounded_rectangle((16, y, card_w - 16, y + row_h - 12), radius=12, fill=(36, 41, 52), outline=(65, 75, 95), width=1)
         try:
+            decode_args = ["-c:v", "libvpx-vp9"] if src.suffix.lower() == ".webm" else []
             proc = await asyncio.create_subprocess_exec(
-                "ffmpeg", "-v", "error", "-c:v", "libvpx-vp9",
+                "ffmpeg", "-v", "error", *decode_args,
                 "-ss", preset.get("still_ss", "3.0"),
                 "-i", str(src),
                 "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-",
@@ -477,10 +491,26 @@ async def apply_watermark(
     wm_w = calculate_watermark_width(vw, vh, width_scale=float(preset.get("width_scale", 1.0)))
     ext = watermark_src.suffix.lower()
     is_webm = ext == ".webm"
+    is_sora = preset.get("overlay_mode") == "sora"
 
-    c_sec = WEBM_CYCLE_SEC
-    cycle_expr_x = f"x='if(mod(floor(t/{c_sec}),2), 24, W-w-24)'"
-    cycle_expr_y = f"y='if(between(mod(floor(t/{c_sec}),4), 1, 2), H-h-24, 24)'"
+    if is_sora:
+        mx = max(18, min(56, int(vw * 0.045)))
+        my = max(18, min(56, int(vh * 0.045)))
+        mid_right = "gte(mod(t,10),2)*lt(mod(t,10),4.5)+gte(mod(t,10),9)"
+        bot_left = "gte(mod(t,10),4.5)*lt(mod(t,10),6.5)"
+        cycle_expr_x = f"x='if({mid_right}, W-w-{mx}, {mx})'"
+        cycle_expr_y = f"y='if({mid_right}, trunc((H-h)*0.48), if({bot_left}, H-h-{my}, {my}))'"
+    else:
+        c_sec = WEBM_CYCLE_SEC
+        cycle_expr_x = f"x='if(mod(floor(t/{c_sec}),2), 24, W-w-24)'"
+        cycle_expr_y = f"y='if(between(mod(floor(t/{c_sec}),4), 1, 2), H-h-24, 24)'"
+
+    base_prep = "[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2[base];"
+    non_webm_prep = (
+        f"[1:v]crop=132:52:28:84,chromakey=0x05ba06:0.22:0.06,scale={wm_w}:-1,format=yuva420p[wm];"
+        if is_sora and not is_webm
+        else f"[1:v]scale={wm_w}:-1,format=yuva420p[wm];"
+    )
 
     badge_path: Optional[Path] = None
     badge_w, badge_h = 0, 0
@@ -500,10 +530,11 @@ async def apply_watermark(
             if badge_path:
                 # Composite watermark + username badge into one stream [wm_combo]
                 filter_str = (
+                    f"{base_prep}"
                     f"[1:v]scale={wm_w}:-1,format=yuva420p[wm];"
                     f"[wm]pad=w=max(iw\\,{badge_w}):h=ih+{badge_h + 4}:x=(ow-iw)/2:y=0:color=0x00000000[wm_pad];"
                     f"[wm_pad][2:v]overlay=(W-w)/2:H-h[wm_combo];"
-                    f"[0:v][wm_combo]overlay={cycle_expr_x}:{cycle_expr_y}:shortest=1[outv]"
+                    f"[base][wm_combo]overlay={cycle_expr_x}:{cycle_expr_y}:shortest=1[outv]"
                 )
                 cmd_primary = [
                     "ffmpeg", "-y",
@@ -517,8 +548,9 @@ async def apply_watermark(
                 audio_input_idx = 3
             else:
                 filter_str = (
+                    f"{base_prep}"
                     f"[1:v]scale={wm_w}:-1,format=yuva420p[wm];"
-                    f"[0:v][wm]overlay={cycle_expr_x}:{cycle_expr_y}:shortest=1[outv]"
+                    f"[base][wm]overlay={cycle_expr_x}:{cycle_expr_y}:shortest=1[outv]"
                 )
                 cmd_primary = [
                     "ffmpeg", "-y",
@@ -541,6 +573,7 @@ async def apply_watermark(
                 cmd_primary.extend([
                     "-map", f"{audio_input_idx}:a",
                     "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p",
                     "-preset", "veryfast",
                     "-crf", "22",
                     "-c:a", "aac",
@@ -553,6 +586,7 @@ async def apply_watermark(
                 cmd_primary.extend([
                     "-map", "0:a?",
                     "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p",
                     "-preset", "veryfast",
                     "-crf", "22",
                     "-c:a", "copy",
@@ -569,13 +603,15 @@ async def apply_watermark(
             except Exception as e:
                 logger.warning(f"Primary watermark attempt error: {e}")
 
-            # Fallback with colorkey
+            # Fallback with colorkey / chromakey
+            fb_key = "chromakey=0x05ba06:0.22:0.06" if is_sora else "colorkey=0x000000:0.15:0.02"
             if badge_path:
                 filter_str_fb = (
-                    f"[1:v]colorkey=0x000000:0.15:0.02,scale={wm_w}:-1,format=yuva420p[wm];"
+                    f"{base_prep}"
+                    f"[1:v]{fb_key},scale={wm_w}:-1,format=yuva420p[wm];"
                     f"[wm]pad=w=max(iw\\,{badge_w}):h=ih+{badge_h + 4}:x=(ow-iw)/2:y=0:color=0x00000000[wm_pad];"
                     f"[wm_pad][2:v]overlay=(W-w)/2:H-h[wm_combo];"
-                    f"[0:v][wm_combo]overlay={cycle_expr_x}:{cycle_expr_y}:shortest=1[outv]"
+                    f"[base][wm_combo]overlay={cycle_expr_x}:{cycle_expr_y}:shortest=1[outv]"
                 )
                 cmd_fb = [
                     "ffmpeg", "-y",
@@ -587,8 +623,9 @@ async def apply_watermark(
                 ]
             else:
                 filter_str_fb = (
-                    f"[1:v]colorkey=0x000000:0.15:0.02,scale={wm_w}:-1,format=yuva420p[wm];"
-                    f"[0:v][wm]overlay={cycle_expr_x}:{cycle_expr_y}:shortest=1[outv]"
+                    f"{base_prep}"
+                    f"[1:v]{fb_key},scale={wm_w}:-1,format=yuva420p[wm];"
+                    f"[base][wm]overlay={cycle_expr_x}:{cycle_expr_y}:shortest=1[outv]"
                 )
                 cmd_fb = [
                     "ffmpeg", "-y",
@@ -609,6 +646,7 @@ async def apply_watermark(
                 cmd_fb.extend([
                     "-map", f"{audio_input_idx}:a",
                     "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p",
                     "-preset", "veryfast",
                     "-crf", "22",
                     "-c:a", "aac",
@@ -621,6 +659,7 @@ async def apply_watermark(
                 cmd_fb.extend([
                     "-map", "0:a?",
                     "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p",
                     "-preset", "veryfast",
                     "-crf", "22",
                     "-c:a", "copy",
@@ -632,10 +671,11 @@ async def apply_watermark(
             return rc == 0 and output_path.exists() and output_path.stat().st_size > 0
 
         else:
-            # Fallback for GIF/PNG
+            # Fallback for MP4/GIF/PNG watermarks
             filter_str = (
-                f"[1:v]scale={wm_w}:-1,format=yuva420p[wm];"
-                f"[0:v][wm]overlay={cycle_expr_x}:{cycle_expr_y}:shortest=1[outv]"
+                f"{base_prep}"
+                f"{non_webm_prep}"
+                f"[base][wm]overlay={cycle_expr_x}:{cycle_expr_y}:shortest=1[outv]"
             )
             cmd = [
                 "ffmpeg", "-y",
@@ -644,14 +684,20 @@ async def apply_watermark(
                 "-i", str(watermark_src),
                 "-filter_complex", filter_str,
                 "-map", "[outv]",
-                "-map", "0:a?",
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-crf", "22",
-                "-c:a", "copy",
-                *dur_args,
-                str(output_path)
             ]
+            if has_audio_ref:
+                cmd.extend([
+                    "-stream_loop", "-1", "-i", str(audio_ref_path),
+                    "-map", "2:a",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "22",
+                    "-c:a", "aac", "-b:a", "192k", "-shortest", *dur_args, str(output_path),
+                ])
+            else:
+                cmd.extend([
+                    "-map", "0:a?",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "22",
+                    "-c:a", "copy", *dur_args, str(output_path),
+                ])
             rc, err = await _run_ffmpeg_command(cmd, timeout=120.0)
             return rc == 0 and output_path.exists() and output_path.stat().st_size > 0
 
@@ -682,6 +728,13 @@ async def apply_watermark_image(
     still_ss = str(preset.get("still_ss", "3.0"))
     ext = watermark_src.suffix.lower()
     is_webm = ext == ".webm"
+    is_sora = preset.get("overlay_mode") == "sora"
+    if is_sora:
+        mx = max(18, min(56, int(vw * 0.045)))
+        my = max(18, min(56, int(vh * 0.045)))
+        img_overlay_pos = f"{mx}:{my}"
+    else:
+        img_overlay_pos = "W-w-24:24"
 
     badge_path: Optional[Path] = None
     badge_w, badge_h = 0, 0
@@ -700,7 +753,7 @@ async def apply_watermark_image(
                     f"[1:v]scale={wm_w}:-1,format=yuva420p[wm];"
                     f"[wm]pad=w=max(iw\\,{badge_w}):h=ih+{badge_h + 4}:x=(ow-iw)/2:y=0:color=0x00000000[wm_pad];"
                     f"[wm_pad][2:v]overlay=(W-w)/2:H-h[wm_combo];"
-                    "[0:v][wm_combo]overlay=W-w-24:24[outv]"
+                    f"[0:v][wm_combo]overlay={img_overlay_pos}[outv]"
                 )
                 cmd_primary = [
                     "ffmpeg", "-y",
@@ -717,7 +770,7 @@ async def apply_watermark_image(
             else:
                 filter_str = (
                     f"[1:v]scale={wm_w}:-1,format=yuva420p[wm];"
-                    "[0:v][wm]overlay=W-w-24:24[outv]"
+                    f"[0:v][wm]overlay={img_overlay_pos}[outv]"
                 )
                 cmd_primary = [
                     "ffmpeg", "-y",
@@ -739,12 +792,13 @@ async def apply_watermark_image(
                 logger.warning(f"Primary image watermark attempt error: {e}")
 
             # Fallback
+            fb_key = "chromakey=0x05ba06:0.22:0.06" if is_sora else "colorkey=0x000000:0.15:0.02"
             if badge_path:
                 filter_str_fb = (
-                    f"[1:v]colorkey=0x000000:0.15:0.02,scale={wm_w}:-1,format=yuva420p[wm];"
+                    f"[1:v]{fb_key},scale={wm_w}:-1,format=yuva420p[wm];"
                     f"[wm]pad=w=max(iw\\,{badge_w}):h=ih+{badge_h + 4}:x=(ow-iw)/2:y=0:color=0x00000000[wm_pad];"
                     f"[wm_pad][2:v]overlay=(W-w)/2:H-h[wm_combo];"
-                    "[0:v][wm_combo]overlay=W-w-24:24[outv]"
+                    f"[0:v][wm_combo]overlay={img_overlay_pos}[outv]"
                 )
                 cmd_fb = [
                     "ffmpeg", "-y",
@@ -759,8 +813,8 @@ async def apply_watermark_image(
                 ]
             else:
                 filter_str_fb = (
-                    f"[1:v]colorkey=0x000000:0.15:0.02,scale={wm_w}:-1,format=yuva420p[wm];"
-                    "[0:v][wm]overlay=W-w-24:24[outv]"
+                    f"[1:v]{fb_key},scale={wm_w}:-1,format=yuva420p[wm];"
+                    f"[0:v][wm]overlay={img_overlay_pos}[outv]"
                 )
                 cmd_fb = [
                     "ffmpeg", "-y",
@@ -777,9 +831,14 @@ async def apply_watermark_image(
             return rc == 0 and output_path.exists() and output_path.stat().st_size > 0
 
         else:
+            non_webm_img_prep = (
+                f"[1:v]crop=132:52:28:84,chromakey=0x05ba06:0.22:0.06,scale={wm_w}:-1,format=yuva420p[wm];"
+                if is_sora
+                else f"[1:v]colorkey=0x000000:0.15:0.02,scale={wm_w}:-1,format=yuva420p[wm];"
+            )
             filter_str = (
-                f"[1:v]colorkey=0x000000:0.15:0.02,scale={wm_w}:-1,format=yuva420p[wm];"
-                "[0:v][wm]overlay=W-w-24:24[outv]"
+                f"{non_webm_img_prep}"
+                f"[0:v][wm]overlay={img_overlay_pos}[outv]"
             )
             cmd = [
                 "ffmpeg", "-y",
