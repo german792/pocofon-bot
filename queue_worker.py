@@ -239,7 +239,7 @@ class GenerationQueue:
             logger.error(f"Error processing job for user {job.user_id}: {e}", exc_info=True)
             await self._update_status(
                 job,
-                f"❌ <b>Произошла ошибка при генерации:</b>\n{html.escape(str(e))}\nПопробуйте повторить запрос."
+                f"{ce('alert', '❌')} <b>Произошла ошибка при генерации:</b>\n{html.escape(str(e))}\nПопробуйте повторить запрос."
             )
         finally:
             self._last_msg_text.pop(job.status_message_id, None)
@@ -273,7 +273,7 @@ class GenerationQueue:
         safe_stage = html.escape(str(stage))
         ref_count = len(job.get_all_ref_images())
         cost = calculate_credit_cost(job.model_key, job.duration, job.resolution)
-        user_line = f"👤 {job.user_name}\n" if job.user_name else ""
+        user_line = f"{ce('astro', '👤')} {job.user_name}\n" if job.user_name else ""
 
         chips = []
         if backend in ("davinci_image", "qwen_image"):
@@ -285,13 +285,13 @@ class GenerationQueue:
             head = f"{ce('rocket', '🎬')} <b>{model_name}</b> · создаю видео"
             chips.append(f"{dur_label} · {job.resolution} · {job.ratio}")
             if backend == "minimax":
-                chips.append("🔊 музыка")
+                chips.append(f"{ce('mega', '🔊')} музыка")
             elif model_info.get("has_audio"):
-                chips.append("🔊 звук" if job.generate_audio else "🔇 без звука")
+                chips.append(f"{ce('mega', '🔊')} звук" if job.generate_audio else f"{ce('ban', '🔇')} без звука")
         if ref_count > 0:
-            chips.append(f"📎 {ref_count}")
+            chips.append(f"{ce('pin', '📎')} {ref_count}")
         if cost > 0:
-            chips.append(f"💳 ~{cost} кр.")
+            chips.append(f"{ce('card', '💳')} ~{cost} кр.")
         chips_line = "   ".join(chips)
 
         spinner = loader_emoji(stage, elapsed)
@@ -315,7 +315,7 @@ class GenerationQueue:
                 logger.error(f"Worker {worker_id} error processing job for user {job.user_id}: {e}", exc_info=True)
                 await self._update_status(
                     job,
-                    f"❌ <b>Произошла ошибка при генерации:</b>\n{html.escape(str(e))}\nПопробуйте повторить запрос."
+                    f"{ce('alert', '❌')} <b>Произошла ошибка при генерации:</b>\n{html.escape(str(e))}\nПопробуйте повторить запрос."
                 )
             finally:
                 self._last_msg_text.pop(job.status_message_id, None)
@@ -368,7 +368,7 @@ class GenerationQueue:
             error_friendly = translate_server_error(error_raw)
             await self._update_status(
                 job,
-                f"❌ <b>Генерация не удалась ({model_name}):</b>\n{error_friendly}"
+                f"{ce('alert', '❌')} <b>Генерация не удалась ({model_name}):</b>\n{error_friendly}"
             )
             return
 
@@ -393,7 +393,7 @@ class GenerationQueue:
                     job,
                     pct=99,
                     elapsed=total_elapsed,
-                    stage="📥 Скачиваю изображение с сервера..."
+                    stage="Скачиваю изображение с сервера..."
                 )
             )
 
@@ -432,12 +432,12 @@ class GenerationQueue:
                     job,
                     pct=100,
                     elapsed=total_elapsed,
-                    stage="📤 Отправляю изображение в Telegram..."
+                    stage="Отправляю изображение в Telegram..."
                 )
             )
 
-            user_line = f"👤 {job.user_name}\n" if job.user_name else ""
-            ref_part = f"  ·  📎 {ref_count}" if ref_count > 0 else ""
+            user_line = f"{ce('astro', '👤')} {job.user_name}\n" if job.user_name else ""
+            ref_part = f"  ·  {ce('pin', '📎')} {ref_count}" if ref_count > 0 else ""
             caption = (
                 f"{ce('spark', '🖼')} <b>Изображение готово</b>\n"
                 f"{user_line}\n"
@@ -448,13 +448,13 @@ class GenerationQueue:
             if not (temp_file and temp_file.exists()):
                 await self._update_status(
                     job,
-                    "❌ <b>Изображение не получилось забрать с сервера.</b>\nПопробуйте ещё раз: баланс не списан, если генерация не прошла."
+                    f"{ce('alert', '❌')} <b>Изображение не получилось забрать с сервера.</b>\nПопробуйте ещё раз: баланс не списан, если генерация не прошла."
                 )
                 return
 
             grid_kb = _result_keyboard(
                 job.user_id, "image",
-                extra_rows=[[InlineKeyboardButton(text="🔲 Наложить толстую сетку", callback_data=f"grid_gen:{job.user_id}")]],
+                extra_rows=[[cbtn("Наложить толстую сетку", callback_data=f"grid_gen:{job.user_id}", icon_key="grid", fallback_emoji="🔲")]],
             )
             try:
                 send_path = await asyncio.to_thread(_telegram_photo_ready, temp_file)
@@ -505,7 +505,7 @@ class GenerationQueue:
             if not sent_ok:
                 await self._update_status(
                     job,
-                    "❌ <b>Не удалось отправить изображение.</b>\nПопробуйте ещё раз, можно взять меньшее разрешение."
+                    f"{ce('alert', '❌')} <b>Не удалось отправить изображение.</b>\nПопробуйте ещё раз, можно взять меньшее разрешение."
                 )
                 return
 
@@ -529,7 +529,7 @@ class GenerationQueue:
                     job,
                     pct=99,
                     elapsed=total_elapsed,
-                    stage="📥 Скачиваю аудиодорожку ElevenLabs..."
+                    stage="Скачиваю аудиодорожку ElevenLabs..."
                 )
             )
 
@@ -540,7 +540,7 @@ class GenerationQueue:
                 logger.error(f"Audio download failed: {dl_err}", exc_info=True)
                 await self._update_status(
                     job,
-                    "❌ <b>Ошибка загрузки аудиофайла с сервера ElevenLabs.</b>"
+                    f"{ce('alert', '❌')} <b>Ошибка загрузки аудиофайла с сервера ElevenLabs.</b>"
                 )
                 return
 
@@ -550,11 +550,11 @@ class GenerationQueue:
                     job,
                     pct=100,
                     elapsed=total_elapsed,
-                    stage="📤 Отправляю озвучку в Telegram..."
+                    stage="Отправляю озвучку в Telegram..."
                 )
             )
 
-            user_line = f"👤 {job.user_name}\n" if job.user_name else ""
+            user_line = f"{ce('astro', '👤')} {job.user_name}\n" if job.user_name else ""
             caption = (
                 f"{ce('planet', '🎙')} <b>Озвучка готова</b>\n"
                 f"{user_line}\n"
@@ -601,7 +601,7 @@ class GenerationQueue:
                 job,
                 pct=99,
                 elapsed=total_elapsed,
-                stage="📥 Скачиваю видео с сервера..."
+                stage="Скачиваю видео с сервера..."
             )
         )
 
@@ -646,7 +646,7 @@ class GenerationQueue:
             logger.error(f"Download failed: {dl_err}", exc_info=True)
             await self._update_status(
                 job,
-                "❌ <b>Ошибка загрузки видео</b>\n\n"
+                f"{ce('alert', '❌')} <b>Ошибка загрузки видео</b>\n\n"
                 "Не удалось получить видеофайл с сервера генерации. Пожалуйста, попробуйте повторить запрос позже.",
             )
             return
@@ -657,7 +657,7 @@ class GenerationQueue:
                 job,
                 pct=100,
                 elapsed=total_elapsed,
-                stage="📤 Отправляю файл в Telegram..."
+                stage="Отправляю файл в Telegram..."
             )
         )
 
@@ -666,8 +666,8 @@ class GenerationQueue:
         except Exception:
             pass
 
-        user_line = f"👤 {job.user_name}\n" if job.user_name else ""
-        ref_part = f"  ·  📎 {ref_count}" if ref_count > 0 else ""
+        user_line = f"{ce('astro', '👤')} {job.user_name}\n" if job.user_name else ""
+        ref_part = f"  ·  {ce('pin', '📎')} {ref_count}" if ref_count > 0 else ""
         caption = (
             f"{ce('party', '🎬')} <b>Видео готово</b>\n"
             f"{user_line}\n"
@@ -727,7 +727,7 @@ class GenerationQueue:
             logger.error("Could not upload video to Telegram after retries.")
             await self._update_status(
                 job,
-                "⚠️ <b>Видео сгенерировано</b>, но из-за временной сетевой ошибки Telegram не удалось передать файл в чат.\n\n"
+                f"{ce('warn', '⚠️')} <b>Видео сгенерировано</b>, но из-за временной сетевой ошибки Telegram не удалось передать файл в чат.\n\n"
                 "Пожалуйста, повторите генерацию через несколько секунд."
             )
 
@@ -1015,7 +1015,7 @@ class GenerationQueue:
                     raw_file.unlink(missing_ok=True)
 
                 caption = (
-                    f"🖼 <b>Изображение готово</b>\n\n"
+                    f"{ce('wand', '🖼')} <b>Изображение готово</b>\n\n"
                     f"{_quote(prompt)}\n"
                     f"<b>{html.escape(str(model_name))}</b>  ·  {res} · {dim}"
                 )
@@ -1041,7 +1041,7 @@ class GenerationQueue:
                     raw_file.unlink(missing_ok=True)
 
                 caption = (
-                    f"🎬 <b>Видео готово</b>\n\n"
+                    f"{ce('rocket', '🎬')} <b>Видео готово</b>\n\n"
                     f"{_quote(prompt)}\n"
                     f"<b>{html.escape(str(model_name))}</b>  ·  {dur} сек · {res} · {dim}"
                 )

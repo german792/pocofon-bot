@@ -108,16 +108,16 @@ def cameo_picker_button(draft: Dict[str, Any], owner_id: int) -> InlineKeyboardB
     handles = draft_cameo_handles(draft, owner_id)
     if handles:
         return cbtn(
-            f"Камео ({len(handles)} ✅)",
+            f"Камео ({len(handles)})",
             callback_data=f"cameo_pick:{owner_id}",
-            icon_key="mask",
+            icon_key="check",
             fallback_emoji="🎭",
             style="success",
         )
     return cbtn(
         "+ Камео",
         callback_data=f"cameo_pick:{owner_id}",
-        icon_key="mask",
+        icon_key="cosmos",
         fallback_emoji="🎭",
         style="primary",
     )
@@ -133,11 +133,11 @@ def render_cameo_hub(user_id: int) -> Tuple[str, InlineKeyboardMarkup]:
     if cameos:
         lines = [f"{ce('cosmos', '🎭')} <b>Камео — ваши персонажи</b>\n"]
         for c in cameos[:25]:
-            badge = "🌐 " if c.get("is_public") else ""
+            badge = f"{ce('globe', '🌐')} " if c.get("is_public") else ""
             n_imgs = len(c.get("images") or [])
             desc = (c.get("description") or "").strip()
             desc_part = f" — <i>{html.escape(desc[:48])}{'…' if len(desc) > 48 else ''}</i>" if desc else ""
-            lines.append(f"• {badge}<code>@{html.escape(c['handle'])}</code> ({n_imgs}📷){desc_part}")
+            lines.append(f"• {badge}<code>@{html.escape(c['handle'])}</code> ({n_imgs} фото){desc_part}")
         if len(cameos) > 25:
             lines.append(f"<i>…и ещё {len(cameos) - 25}</i>")
         lines.append("\n<i>Упомяните <code>@тег</code> в любом промпте или выберите персонажа кнопкой:</i>")
@@ -155,15 +155,18 @@ def render_cameo_hub(user_id: int) -> Tuple[str, InlineKeyboardMarkup]:
     for i in range(0, min(len(cameos), 24), 2):
         row = []
         for c in cameos[i:i + 2]:
-            badge = "🌐 " if c.get("is_public") else ""
             n_imgs = len(c.get("images") or [])
-            row.append(InlineKeyboardButton(
-                text=f"{badge}@{c['handle']} ({n_imgs}📷)",
-                callback_data=f"cm_view:{c['id']}:{user_id}",
-            ))
+            row.append(
+                cbtn(
+                    f"@{c['handle']} ({n_imgs})",
+                    callback_data=f"cm_view:{c['id']}:{user_id}",
+                    icon_key="globe" if c.get("is_public") else "cosmos",
+                    fallback_emoji="🌐" if c.get("is_public") else "🎭",
+                )
+            )
         rows.append(row)
     rows.append([cbtn("Создать Камео", callback_data=f"cm_new:{user_id}", icon_key="astro", fallback_emoji="➕", style="primary")])
-    rows.append([InlineKeyboardButton(text="❌ Закрыть", callback_data=f"cm_close:{user_id}")])
+    rows.append([cbtn("Закрыть", callback_data=f"cm_close:{user_id}", icon_key="ban", fallback_emoji="❌")])
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -178,13 +181,13 @@ def render_cameo_picker(draft: Dict[str, Any], owner_id: int) -> Tuple[str, Inli
             "(фото персонажа автоматически подставятся при запуске).\n",
         ]
         if attached:
-            lines.append("✅ <b>Выбраны:</b> " + ", ".join(f"<code>@{html.escape(h)}</code>" for h in draft_cameo_handles(draft, owner_id)))
+            lines.append(f"{ce('check', '✅')} <b>Выбраны:</b> " + ", ".join(f"<code>@{html.escape(h)}</code>" for h in draft_cameo_handles(draft, owner_id)))
         text = "\n".join(lines)
     else:
         text = (
             f"{ce('cosmos', '🎭')} <b>Выбор Камео</b>\n\n"
-            "У вас пока нет сохранённых персонажей. Нажмите <b>➕ Создать Камео</b> "
-            "или отправьте фото с подписью <code>/cameo @тег</code>."
+            f"У вас пока нет сохранённых персонажей. Нажмите <b>Создать Камео</b> "
+            f"или отправьте фото с подписью <code>/cameo @тег</code>."
         )
 
     rows: List[List[InlineKeyboardButton]] = []
@@ -192,16 +195,18 @@ def render_cameo_picker(draft: Dict[str, Any], owner_id: int) -> Tuple[str, Inli
         row = []
         for c in cameos[i:i + 2]:
             is_on = c["handle"] in attached
-            badge = "🌐 " if c.get("is_public") else ""
-            prefix = "✅ " if is_on else "➕ "
-            row.append(InlineKeyboardButton(
-                text=f"{prefix}{badge}@{c['handle']}",
-                callback_data=f"cm_tog:{c['id']}:{owner_id}",
-                **({"style": "success"} if is_on else {}),
-            ))
+            row.append(
+                cbtn(
+                    f"@{c['handle']}",
+                    callback_data=f"cm_tog:{c['id']}:{owner_id}",
+                    icon_key="check" if is_on else ("globe" if c.get("is_public") else "cosmos"),
+                    fallback_emoji="✅" if is_on else "➕",
+                    style="success" if is_on else None,
+                )
+            )
         rows.append(row)
     rows.append([cbtn("Создать новое Камео", callback_data=f"cm_new:{owner_id}", icon_key="astro", fallback_emoji="➕", style="primary")])
-    rows.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data=f"cm_back_draft:{owner_id}")])
+    rows.append([cbtn("Назад в меню", callback_data=f"cm_back_draft:{owner_id}", icon_key="back", fallback_emoji="⬅️")])
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -212,40 +217,50 @@ def render_cameo_card(cameo: Dict[str, Any], user: Any) -> Tuple[str, InlineKeyb
     is_admin = user_access.is_admin(user)
     is_owner = int(cameo.get("owner_id") or 0) == uid
     can_manage = is_admin or is_owner
-    vis = "🌐 Публичное (доступно всем)" if cameo.get("is_public") else "🔒 Личное"
+    vis = f"{ce('globe', '🌐')} Публичное (доступно всем)" if cameo.get("is_public") else f"{ce('ban', '🔒')} Личное"
     n_imgs = len(cameo.get("images") or [])
     desc = (cameo.get("description") or "").strip()
-    desc_block = f"📝 <b>Описание:</b> <i>{html.escape(desc)}</i>\n" if desc else "📝 <b>Описание:</b> <i>не задано</i>\n"
+    desc_block = (
+        f"{ce('book', '📝')} <b>Описание:</b> <i>{html.escape(desc)}</i>\n"
+        if desc
+        else f"{ce('book', '📝')} <b>Описание:</b> <i>не задано</i>\n"
+    )
 
     text = (
-        f"🎭 <b>Камео</b> <code>@{html.escape(cameo['handle'])}</code>\n\n"
-        f"📷 <b>Фото-референсов:</b> {n_imgs} из 3\n"
+        f"{ce('cosmos', '🎭')} <b>Камео</b> <code>@{html.escape(cameo['handle'])}</code>\n\n"
+        f"{ce('wand', '📷')} <b>Фото-референсов:</b> {n_imgs} из 3\n"
         f"{desc_block}"
-        f"👁 <b>Доступ:</b> {vis}\n"
-        f"👤 <b>Автор:</b> {html.escape(cameo.get('owner_name') or str(cameo.get('owner_id') or ''))}\n\n"
-        f"💡 <i>Пишите</i> <code>@{html.escape(cameo['handle'])}</code> <i>в любом промпте или нажмите кнопку ниже:</i>"
+        f"{ce('eye', '👁')} <b>Доступ:</b> {vis}\n"
+        f"{ce('astro', '👤')} <b>Автор:</b> {html.escape(cameo.get('owner_name') or str(cameo.get('owner_id') or ''))}\n\n"
+        f"{ce('idea', '💡')} <i>Пишите</i> <code>@{html.escape(cameo['handle'])}</code> <i>в любом промпте или нажмите кнопку ниже:</i>"
     )
 
     rows: List[List[InlineKeyboardButton]] = [
         [
-            InlineKeyboardButton(text="🎬 В Видео", callback_data=f"cm_use:v:{cid}:{uid}", style="primary"),
-            InlineKeyboardButton(text="🖼 В Фото", callback_data=f"cm_use:i:{cid}:{uid}", style="primary"),
-            InlineKeyboardButton(text="🕺 Motion", callback_data=f"cm_use:m:{cid}:{uid}"),
+            cbtn("В Видео", callback_data=f"cm_use:v:{cid}:{uid}", icon_key="rocket", fallback_emoji="🎬", style="primary"),
+            cbtn("В Фото", callback_data=f"cm_use:i:{cid}:{uid}", icon_key="wand", fallback_emoji="🖼", style="primary"),
+            cbtn("Motion", callback_data=f"cm_use:m:{cid}:{uid}", icon_key="dance", fallback_emoji="🕺"),
         ],
     ]
     if fresh_draft(uid) is not None:
-        rows.append([InlineKeyboardButton(text="📌 Прикрепить к текущему меню", callback_data=f"cm_attach:{cid}:{uid}", style="success")])
-    rows.append([InlineKeyboardButton(text="🖼 Показать фото", callback_data=f"cm_pics:{cid}:{uid}")])
+        rows.append([cbtn("Прикрепить к меню", callback_data=f"cm_attach:{cid}:{uid}", icon_key="pin", fallback_emoji="📌", style="success")])
+    rows.append([cbtn("Показать фото", callback_data=f"cm_pics:{cid}:{uid}", icon_key="eye", fallback_emoji="🖼")])
     if can_manage:
-        manage_row = [InlineKeyboardButton(text="✏️ Описание", callback_data=f"cm_desc:{cid}:{uid}")]
+        manage_row = [cbtn("Описание", callback_data=f"cm_desc:{cid}:{uid}", icon_key="book", fallback_emoji="✏️")]
         if is_admin:
-            pub_lbl = "🔒 Скрыть" if cameo.get("is_public") else "🌐 Публичное"
-            manage_row.append(InlineKeyboardButton(text=pub_lbl, callback_data=f"cm_pub:{cid}:{uid}"))
-        manage_row.append(InlineKeyboardButton(text="🗑 Удалить", callback_data=f"cm_del:{cid}:{uid}", style="danger"))
+            manage_row.append(
+                cbtn(
+                    "Скрыть" if cameo.get("is_public") else "Публичное",
+                    callback_data=f"cm_pub:{cid}:{uid}",
+                    icon_key="ban" if cameo.get("is_public") else "globe",
+                    fallback_emoji="🔒" if cameo.get("is_public") else "🌐",
+                )
+            )
+        manage_row.append(cbtn("Удалить", callback_data=f"cm_del:{cid}:{uid}", icon_key="alert", fallback_emoji="🗑", style="danger"))
         rows.append(manage_row)
     rows.append([
-        InlineKeyboardButton(text="⬅️ К списку", callback_data=f"cameo_menu:{uid}"),
-        InlineKeyboardButton(text="❌ Закрыть", callback_data=f"cm_close:{uid}"),
+        cbtn("К списку", callback_data=f"cameo_menu:{uid}", icon_key="back", fallback_emoji="⬅️"),
+        cbtn("Закрыть", callback_data=f"cm_close:{uid}", icon_key="ban", fallback_emoji="❌"),
     ])
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -319,7 +334,7 @@ def render_watermark_menu(
     if from_draft:
         rows.append([cbtn("Назад в меню", callback_data=f"wm_back:{user_id}", icon_key="back", fallback_emoji="⬅️")])
     else:
-        rows.append([InlineKeyboardButton(text="❌ Закрыть", callback_data=f"wm_close:{user_id}")])
+        rows.append([cbtn("Закрыть", callback_data=f"wm_close:{user_id}", icon_key="ban", fallback_emoji="❌")])
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -415,7 +430,7 @@ def build_motion_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inli
     for mk, label in (("klingMotionControl3", "3.0"), ("klingMotionControl26", "2.6")):
         active = mk == cur_model
         model_row.append(InlineKeyboardButton(
-            text=("✅ " if active else "") + f"Kling {label}",
+            text=("✓ " if active else "") + f"Kling {label}",
             callback_data=f"mmodel:{mk}:{owner_id}",
             **({"style": "primary"} if active else {}),
         ))
@@ -424,24 +439,28 @@ def build_motion_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inli
     for r in ("720p", "1080p"):
         active = r == cur_res
         res_row.append(InlineKeyboardButton(
-            text=("✅ " if active else "") + r,
+            text=("✓ " if active else "") + r,
             callback_data=f"mres:{r}:{owner_id}",
             **({"style": "primary"} if active else {}),
         ))
     rows.append(res_row)
     orient_row = []
-    for ov, olabel in (("image", "🧍 Персонаж с фото"), ("video", "🎞 Как в видео")):
+    for ov, olabel in (("image", "Персонаж с фото"), ("video", "Как в видео")):
         active = ov == cur_orient
-        orient_row.append(InlineKeyboardButton(
-            text=("✅ " if active else "") + olabel,
-            callback_data=f"mori:{ov}:{owner_id}",
-            **({"style": "primary"} if active else {}),
-        ))
+        orient_row.append(
+            cbtn(
+                olabel,
+                callback_data=f"mori:{ov}:{owner_id}",
+                icon_key="check" if active else ("astro" if ov == "image" else "console"),
+                fallback_emoji=("✅ " if active else "") + ("🧍" if ov == "image" else "🎞"),
+                style="primary" if active else None,
+            )
+        )
     rows.append(orient_row)
     rows.append([cameo_picker_button(draft, owner_id), watermark_picker_button(owner_id)])
     ready = bool(draft.get("motion_image")) and bool(draft.get("ref_video"))
     rows.append([cbtn("Запустить", callback_data=f"gen:{owner_id}", icon_key="rocket", fallback_emoji="🕺", style="success" if ready else None)])
-    rows.append([InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}", style="danger")])
+    rows.append([cbtn("Отмена", callback_data=f"can:{owner_id}", icon_key="ban", fallback_emoji="❌", style="danger")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -460,7 +479,7 @@ def build_model_grid_rows(
         is_active = mkey == cur_model
         btn_kwargs = {"style": "primary"} if is_active else {}
         if is_active:
-            lbl = f"✅ {lbl}"
+            lbl = f"✓ {lbl}"
         cur_row.append(
             InlineKeyboardButton(
                 text=lbl,
@@ -534,14 +553,14 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     if minfo.get("backend") == "davinci_voice":
         if step != "model":
             cost = calculate_credit_cost(cur_model, 0, "")
-            btn_label = f"🎙 Озвучить (~{cost} кр.)" if cost > 0 else "🎙 Озвучить"
+            btn_label = f"Озвучить (~{cost} кр.)" if cost > 0 else "Озвучить"
             rows = [
                 [
-                    InlineKeyboardButton(text="🔄 Сменить модель", callback_data=f"wstep:model:{owner_id}"),
-                    InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}", style="danger")
+                    cbtn("Сменить модель", callback_data=f"wstep:model:{owner_id}", icon_key="replay", fallback_emoji="🔄"),
+                    cbtn("Отмена", callback_data=f"can:{owner_id}", icon_key="ban", fallback_emoji="❌", style="danger"),
                 ],
                 [
-                    InlineKeyboardButton(text=btn_label, callback_data=f"gen:{owner_id}", style="success")
+                    cbtn(btn_label, callback_data=f"gen:{owner_id}", icon_key="voice", fallback_emoji="🎙", style="success")
                 ]
             ]
             return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -571,33 +590,34 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
             ])
         else:
             grid_lbl = ref_grid_button_label(draft)
+            grid_icon = "check" if get_ref_grid_size(draft) > 0 else "grid"
             if minfo.get("multi_ref"):
                 mode_lbl = (
-                    f"🎯 Референс ({ref_count}/{ref_limit} фото)"
+                    f"Референс ({ref_count}/{ref_limit})"
                     if ref_mode == "ref"
-                    else f"🎬 Старт-кадр ({ref_count} фото)"
+                    else f"Старт-кадр ({ref_count})"
                 )
                 rows.append([
-                    InlineKeyboardButton(text=mode_lbl, callback_data=f"rmode:{owner_id}"),
-                    InlineKeyboardButton(text=grid_lbl, callback_data=f"rgrid:{owner_id}"),
-                    InlineKeyboardButton(text="🗑 Очистить", callback_data=f"rclear:{owner_id}", style="danger"),
+                    cbtn(mode_lbl, callback_data=f"rmode:{owner_id}", icon_key="aim_green" if ref_mode == "ref" else "flame", fallback_emoji="🎯"),
+                    cbtn(grid_lbl, callback_data=f"rgrid:{owner_id}", icon_key=grid_icon, fallback_emoji="🔲"),
+                    cbtn("Очистить", callback_data=f"rclear:{owner_id}", icon_key="ban", fallback_emoji="🗑", style="danger"),
                 ])
                 rows.append([cameo_picker_button(draft, owner_id)])
             else:
                 rows.append([
-                    InlineKeyboardButton(text=f"📎 Референс: {ref_count} фото ✅", callback_data=f"ref_hint:{owner_id}"),
-                    InlineKeyboardButton(text=grid_lbl, callback_data=f"rgrid:{owner_id}"),
-                    InlineKeyboardButton(text="🗑 Удалить", callback_data=f"rclear:{owner_id}", style="danger"),
+                    cbtn(f"Референс: {ref_count} фото", callback_data=f"ref_hint:{owner_id}", icon_key="check", fallback_emoji="📎"),
+                    cbtn(grid_lbl, callback_data=f"rgrid:{owner_id}", icon_key=grid_icon, fallback_emoji="🔲"),
+                    cbtn("Удалить", callback_data=f"rclear:{owner_id}", icon_key="ban", fallback_emoji="🗑", style="danger"),
                 ])
 
         # Video + Audio Reference compact row
         vid_btn = (
-            InlineKeyboardButton(text="🎞 Видео ✅ (Удалить 🗑)", callback_data=f"rclearvideo:{owner_id}", style="danger")
+            cbtn("Удалить видео", callback_data=f"rclearvideo:{owner_id}", icon_key="ban", fallback_emoji="🗑", style="danger")
             if draft.get("ref_video")
             else cbtn("+ Видео", callback_data=f"video_hint:{owner_id}", icon_key="console", fallback_emoji="🎞", style="primary")
         )
         aud_btn = (
-            InlineKeyboardButton(text="🎵 Аудио ✅ (Удалить 🗑)", callback_data=f"rclearaudio:{owner_id}", style="danger")
+            cbtn("Удалить аудио", callback_data=f"rclearaudio:{owner_id}", icon_key="ban", fallback_emoji="🗑", style="danger")
             if draft.get("audio_bytes")
             else cbtn("+ Аудио", callback_data=f"audio_hint:{owner_id}", icon_key="mega", fallback_emoji="🎵", style="primary")
         )
@@ -606,7 +626,7 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
         # Watermark + Cancel row
         rows.append([
             watermark_picker_button(owner_id),
-            InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}", style="danger"),
+            cbtn("Отмена", callback_data=f"can:{owner_id}", icon_key="ban", fallback_emoji="❌", style="danger"),
         ])
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -624,7 +644,7 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
         cur_row = []
         for d in model_durs:
             is_active = d == cur_dur
-            lbl = f"✅ {d}с" if is_active else f"{d}с"
+            lbl = f"✓ {d}с" if is_active else f"{d}с"
             btn_kwargs = {"style": "primary"} if is_active else {}
             cur_row.append(InlineKeyboardButton(text=lbl, callback_data=f"sd:{d}:{owner_id}", **btn_kwargs))
             if len(cur_row) == 6:
@@ -634,8 +654,8 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
             rows.append(cur_row)
 
         rows.append([
-            InlineKeyboardButton(text="⬅️ Назад к выбору модели", callback_data=f"wstep:model:{owner_id}"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}", style="danger")
+            cbtn("Назад к модели", callback_data=f"wstep:model:{owner_id}", icon_key="back", fallback_emoji="⬅️"),
+            cbtn("Отмена", callback_data=f"can:{owner_id}", icon_key="ban", fallback_emoji="❌", style="danger"),
         ])
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -663,33 +683,50 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
                 )
             )
         else:
-            label = f"✅ {r}" if is_active else r
+            label = f"✓ {r}" if is_active else r
             btn_kwargs = {"style": "primary"} if is_active else {}
             res_buttons.append(InlineKeyboardButton(text=label, callback_data=f"sr:{r}:{owner_id}", **btn_kwargs))
     rows.append(res_buttons)
 
     # Ratio Row
-    ratio_labels = {"auto": "🔄 Авто", "16:9": "16:9 🖥", "9:16": "9:16 📱", "1:1": "1:1 ⏹"}
+    ratio_labels = {"auto": "Авто", "16:9": "16:9", "9:16": "9:16", "1:1": "1:1"}
     ratio_buttons = []
     for rat in ratio_choices:
         lbl = ratio_labels.get(rat, rat)
         is_active = rat == ratio
-        btn_kwargs = {"style": "primary"} if is_active else {}
-        if is_active:
-            lbl = f"✅ {lbl}"
-        ratio_buttons.append(InlineKeyboardButton(text=lbl, callback_data=f"sa:{rat}:{owner_id}", **btn_kwargs))
+        if rat == "auto":
+            ratio_buttons.append(
+                cbtn(
+                    "✓ Авто" if is_active else "Авто",
+                    callback_data=f"sa:{rat}:{owner_id}",
+                    icon_key="replay",
+                    fallback_emoji="🔄",
+                    style="primary" if is_active else None,
+                )
+            )
+        else:
+            btn_kwargs = {"style": "primary"} if is_active else {}
+            if is_active:
+                lbl = f"✓ {lbl}"
+            ratio_buttons.append(InlineKeyboardButton(text=lbl, callback_data=f"sa:{rat}:{owner_id}", **btn_kwargs))
     rows.append(ratio_buttons)
 
     # Audio toggle for models supporting audio generation
     if minfo.get("has_audio") and minfo.get("backend") != "minimax":
-        audio_label = "🔊 Звук: Вкл ✅" if audio else "🔇 Звук: Выкл"
-        audio_kwargs = {"style": "success"} if audio else {}
-        rows.append([InlineKeyboardButton(text=audio_label, callback_data=f"tg:{'1' if not audio else '0'}:{owner_id}", **audio_kwargs)])
+        rows.append([
+            cbtn(
+                "Звук: Вкл" if audio else "Звук: Выкл",
+                callback_data=f"tg:{'1' if not audio else '0'}:{owner_id}",
+                icon_key="mega" if audio else "ban",
+                fallback_emoji="🔊" if audio else "🔇",
+                style="success" if audio else None,
+            )
+        ])
 
     # Navigation buttons to return to Step 1 or Step 2
     rows.append([
-        InlineKeyboardButton(text=f"🔄 Модель: {minfo.get('short', cur_model)}", callback_data=f"wstep:model:{owner_id}"),
-        InlineKeyboardButton(text=f"⏱ Длительность: {dur}с", callback_data=f"wstep:duration:{owner_id}")
+        cbtn(f"Модель: {minfo.get('short', cur_model)}", callback_data=f"wstep:model:{owner_id}", icon_key="replay", fallback_emoji="🔄"),
+        cbtn(f"Длительность: {dur}с", callback_data=f"wstep:duration:{owner_id}", icon_key="load_hourglass", fallback_emoji="⏱"),
     ])
     rows.append([watermark_picker_button(owner_id)])
 
@@ -698,7 +735,7 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     btn_text = f"Сгенерировать видео (~{cost} кр.)" if cost > 0 else "Сгенерировать видео"
     rows.append([
         cbtn(btn_text, callback_data=f"gen:{owner_id}", icon_key="rocket", fallback_emoji="🚀", style="success"),
-        InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}", style="danger")
+        cbtn("Отмена", callback_data=f"can:{owner_id}", icon_key="ban", fallback_emoji="❌", style="danger"),
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -740,13 +777,11 @@ def build_image_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
         ])
     else:
         grid_lbl = ref_grid_button_label(draft)
+        grid_icon = "check" if get_ref_grid_size(draft) > 0 else "grid"
         rows.append([
-            InlineKeyboardButton(
-                text=f"📎 Референсы: {ref_count}/{ref_limit} фото ✅",
-                callback_data=f"ref_hint:{owner_id}"
-            ),
-            InlineKeyboardButton(text=grid_lbl, callback_data=f"rgrid:{owner_id}"),
-            InlineKeyboardButton(text="🗑 Очистить", callback_data=f"rclear:{owner_id}", style="danger"),
+            cbtn(f"Референсы: {ref_count}/{ref_limit}", callback_data=f"ref_hint:{owner_id}", icon_key="check", fallback_emoji="📎"),
+            cbtn(grid_lbl, callback_data=f"rgrid:{owner_id}", icon_key=grid_icon, fallback_emoji="🔲"),
+            cbtn("Очистить", callback_data=f"rclear:{owner_id}", icon_key="ban", fallback_emoji="🗑", style="danger"),
         ])
         rows.append([cameo_picker_button(draft, owner_id)])
 
@@ -765,7 +800,7 @@ def build_image_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
                 )
             )
         else:
-            lbl = f"✅ {r}" if is_active else r
+            lbl = f"✓ {r}" if is_active else r
             btn_kwargs = {"style": "primary"} if is_active else {}
             res_buttons.append(InlineKeyboardButton(text=lbl, callback_data=f"sir:{r}:{owner_id}", **btn_kwargs))
     rows.append(res_buttons)
@@ -774,7 +809,7 @@ def build_image_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     ratio_buttons = []
     for rat in IMAGE_RATIO_OPTIONS:
         is_active = rat == ratio
-        lbl = f"✅ {rat}" if is_active else rat
+        lbl = f"✓ {rat}" if is_active else rat
         btn_kwargs = {"style": "primary"} if is_active else {}
         ratio_buttons.append(InlineKeyboardButton(text=lbl, callback_data=f"sia:{rat}:{owner_id}", **btn_kwargs))
     rows.append(ratio_buttons)
@@ -785,7 +820,7 @@ def build_image_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     btn_text = f"Сгенерировать фото (~{cost} кр.)" if cost > 0 else "Сгенерировать фото"
     rows.append([
         cbtn(btn_text, callback_data=f"gen:{owner_id}", icon_key="wand", fallback_emoji="🎨", style="success"),
-        InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}", style="danger")
+        cbtn("Отмена", callback_data=f"can:{owner_id}", icon_key="ban", fallback_emoji="❌", style="danger"),
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -803,7 +838,7 @@ def get_ref_grid_size(draft: Dict[str, Any]) -> int:
 
 def ref_grid_button_label(draft: Dict[str, Any]) -> str:
     size = get_ref_grid_size(draft)
-    return f"✅ 🔲 Сетка {size}×{size}" if size > 0 else "🔲 Сетка на референс"
+    return f"Сетка {size}×{size}" if size > 0 else "Сетка на референс"
 
 
 def sync_draft_references(draft: Dict[str, Any]) -> None:
@@ -885,24 +920,26 @@ def format_motion_draft_text(draft: Dict[str, Any]) -> str:
     sec = int(draft.get("motion_sec") or 0)
     res = draft.get("resolution", "720p")
     model_name = MODELS.get(draft.get("model_key", MOTION_MODEL_KEY), MODELS[MOTION_MODEL_KEY])["name"]
-    step1 = "✅ Фото персонажа" if has_img else "1️⃣ Пришли фото персонажа"
+    step1 = f"{ce('check', '✅')} Фото персонажа" if has_img else f"{ce('spark', '1.')} Пришли фото персонажа"
     if has_vid:
-        step2 = "✅ Видео с движением"
+        step2 = f"{ce('check', '✅')} Видео с движением"
     elif has_img:
-        step2 = "2️⃣ Пришли видео с движением"
+        step2 = f"{ce('bolt', '2.')} Пришли видео с движением"
     else:
-        step2 = "2️⃣ Видео с движением (после фото)"
+        step2 = f"{ce('dot', '2.')} Видео с движением (после фото)"
     if has_vid and sec and not (3 <= sec <= 30):
-        warn = f"\n⚠️ Видео {sec} сек — нужно от 3 до 30 сек"
+        warn = f"\n{ce('warn', '⚠️')} Видео {sec} сек — нужно от 3 до 30 сек"
     else:
         warn = ""
-    dur = f"⏱ Длительность: <b>{sec} сек</b> (как у видео)\n" if sec else ""
+    dur = f"{ce('load_hourglass', '⏱')} Длительность: <b>{sec} сек</b> (как у видео)\n" if sec else ""
     orient = motion_orient_of(draft)
     orient_line = (
-        "🧍 Персонаж и поза — с фото\n" if orient == "image" else "🎞 Поза и кадр — как в видео, персонаж — с фото\n"
+        f"{ce('astro', '🧍')} Персонаж и поза — с фото\n"
+        if orient == "image"
+        else f"{ce('console', '🎞')} Поза и кадр — как в видео, персонаж — с фото\n"
     )
     return (
-        f"🕺 <b>{html.escape(model_name)}</b> · {res}\n\n"
+        f"{ce('dance', '🕺')} <b>{html.escape(model_name)}</b> · {res}\n\n"
         f"{step1}\n{step2}\n{dur}{orient_line}"
         "<i>Персонаж повторит движения из видео.</i>"
         f"{warn}"
@@ -927,33 +964,33 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
         grid_note = f" <i>(с сеткой {g_size}×{g_size})</i>" if g_size > 0 else ""
         if minfo.get("multi_ref"):
             mode_str = "Референс персонажа/сцены" if ref_mode == "ref" else "Первый кадр (Start Frame)"
-            ref_badge = f"📎 Прикреплено: <b>{ref_count} из {ref_limit} фото</b> ({mode_str}){grid_note}"
+            ref_badge = f"Прикреплено: <b>{ref_count} из {ref_limit} фото</b> ({mode_str}){grid_note}"
         else:
-            ref_badge = f"🖼 Прикреплено: <b>{ref_count} фото</b> (Image-to-Video){grid_note}"
+            ref_badge = f"Прикреплено: <b>{ref_count} фото</b> (Image-to-Video){grid_note}"
     else:
-        ref_badge = f"📝 По тексту <i>(отправьте фото в чат, чтобы добавить референс — до {ref_limit} шт.)</i>"
+        ref_badge = f"По тексту <i>(отправьте фото в чат, чтобы добавить референс — до {ref_limit} шт.)</i>"
 
-    user_line = f"👤 <b>Автор:</b> {draft.get('user_name')}\n" if draft.get("user_name") else ""
-    video_line = "🎞 <b>Видео-референс:</b> прикреплен к видео ✅\n" if draft.get("ref_video") else ""
-    audio_ref_line = "🎵 <b>Аудио-референс:</b> прикреплен к видео ✅\n" if draft.get("audio_bytes") else ""
+    user_line = f"{ce('astro', '👤')} <b>Автор:</b> {draft.get('user_name')}\n" if draft.get("user_name") else ""
+    video_line = f"{ce('console', '🎞')} <b>Видео-референс:</b> прикреплен к видео {ce('check', '✅')}\n" if draft.get("ref_video") else ""
+    audio_ref_line = f"{ce('mega', '🎵')} <b>Аудио-референс:</b> прикреплен к видео {ce('check', '✅')}\n" if draft.get("audio_bytes") else ""
     c_handles = draft_cameo_handles(draft, int(draft.get("owner_id") or 0))
     cameo_line = (
-        "🎭 <b>Камео:</b> " + ", ".join(f"<code>@{html.escape(h)}</code>" for h in c_handles) + "\n"
+        f"{ce('cosmos', '🎭')} <b>Камео:</b> " + ", ".join(f"<code>@{html.escape(h)}</code>" for h in c_handles) + "\n"
         if c_handles else ""
     )
 
     if minfo.get("backend") == "davinci_voice":
-        audio_ref = "🎵 Аудио-референс прикреплен (Voice Changer)" if draft.get("audio_bytes") else ref_badge
+        audio_ref = "Аудио-референс прикреплен (Voice Changer)" if draft.get("audio_bytes") else ref_badge
         cost = calculate_credit_cost(cur_model, 0, "")
-        cost_line = f"💳 <b>Стоимость:</b> ~{cost} кредитов\n" if cost > 0 else ""
+        cost_line = f"{ce('card', '💳')} <b>Стоимость:</b> ~{cost} кредитов\n" if cost > 0 else ""
         return (
-            f"{ce('planet', '🎙')} <b>Меню озвучки ElevenLabs V3</b>\n\n"
+            f"{ce('voice', '🎙')} <b>Меню озвучки ElevenLabs V3</b>\n\n"
             f"{user_line}"
-            f"🤖 <b>Модель:</b> {minfo['name']} — <i>{minfo['desc']}</i>\n"
-            f"📝 <b>Текст для озвучки:</b> <i>{html.escape(str(prompt))}</i>\n"
-            f"📌 <b>Референс:</b> {audio_ref}\n"
+            f"{ce('console', '🤖')} <b>Модель:</b> {minfo['name']} — <i>{minfo['desc']}</i>\n"
+            f"{ce('book', '📝')} <b>Текст для озвучки:</b> <i>{html.escape(str(prompt))}</i>\n"
+            f"{ce('pin', '📌')} <b>Референс:</b> {audio_ref}\n"
             f"{cost_line}\n"
-            f"👇 <i>Нажмите «Озвучить» или переключите модель:</i>\n"
+            f"{ce('down', '👇')} <i>Нажмите «Озвучить» или переключите модель:</i>\n"
             f"<code>build: {BUILD_ID}</code>"
         )
 
@@ -972,7 +1009,7 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
             f"{cameo_line}"
             f"{video_line}"
             f"{audio_ref_line}\n"
-            f"{ce('spark', '👇')} <i>Выберите нейросеть для генерации ниже:</i>\n"
+            f"{ce('down', '👇')} <i>Выберите нейросеть для генерации ниже:</i>\n"
             f"<code>build: {BUILD_ID}</code>"
         )
 
@@ -980,14 +1017,14 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
         return (
             f"{ce('load_hourglass', '⏱')} <b>Шаг 2 из 3: Выберите длительность видео</b>\n\n"
             f"{user_line}"
-            f"🤖 <b>Модель:</b> {minfo['name']} ({min_dur}–{max_dur} сек)\n"
-            f"📝 <b>Промпт:</b> <i>{html.escape(str(prompt))}</i>\n"
-            f"📌 <b>Референсы:</b> {ref_badge}\n"
+            f"{ce('console', '🤖')} <b>Модель:</b> {minfo['name']} ({min_dur}–{max_dur} сек)\n"
+            f"{ce('idea', '📝')} <b>Промпт:</b> <i>{html.escape(str(prompt))}</i>\n"
+            f"{ce('pin', '📌')} <b>Референсы:</b> {ref_badge}\n"
             f"{cameo_line}"
             f"{video_line}"
             f"{audio_ref_line}\n"
-            f"⏱ Выбрано: <b>{dur} сек</b>\n\n"
-            f"👇 <i>Нажмите кнопку с нужным количеством секунд (от {min_dur} до {max_dur}с):</i>\n"
+            f"{ce('load_orbit', '⏱')} Выбрано: <b>{dur} сек</b>\n\n"
+            f"{ce('down', '👇')} <i>Нажмите кнопку с нужным количеством секунд (от {min_dur} до {max_dur}с):</i>\n"
             f"<code>build: {BUILD_ID}</code>"
         )
 
@@ -1001,25 +1038,33 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
     ratio = draft.get("ratio", DEFAULT_RATIO)
     ratio_display = "Авто (как в видео)" if ratio == "auto" else ratio
     audio = draft.get("audio", DEFAULT_AUDIO)
-    audio_line = f"🔊 <b>Звук:</b> {'Включен ✅' if audio else 'Выключен 🔇'}\n" if minfo.get("has_audio") else ""
+    audio_line = (
+        f"{ce('mega' if audio else 'ban', '🔊')} <b>Звук:</b> {'Включен' if audio else 'Выключен'}\n"
+        if minfo.get("has_audio")
+        else ""
+    )
 
     cost = calculate_credit_cost(cur_model, dur, res)
-    cost_line = f"💳 <b>Стоимость:</b> ~{cost} кредитов\n" if cost > 0 else "💳 <b>Стоимость:</b> Бесплатно\n"
+    cost_line = (
+        f"{ce('card', '💳')} <b>Стоимость:</b> ~{cost} кредитов\n"
+        if cost > 0
+        else f"{ce('card', '💳')} <b>Стоимость:</b> Бесплатно\n"
+    )
 
     return (
         f"{ce('load_gears', '⚙️')} <b>Шаг 3 из 3: Настройка качества и запуск</b>\n\n"
         f"{user_line}"
         f"{ce('console', '🤖')} <b>Модель:</b> {minfo['name']}\n"
-        f"⏱ <b>Длительность:</b> {dur_str}\n"
+        f"{ce('load_hourglass', '⏱')} <b>Длительность:</b> {dur_str}\n"
         f"{ce('idea', '📝')} <b>Промпт:</b> <i>{html.escape(str(prompt))}</i>\n"
         f"{ce('pin', '📌')} <b>Референсы:</b> {ref_badge}\n"
         f"{cameo_line}"
         f"{video_line}"
         f"{audio_ref_line}"
-        f"📐 <b>Разрешение и формат:</b> {res} | {ratio_display}\n"
+        f"{ce('uhd', '📐')} <b>Разрешение и формат:</b> {res} | {ratio_display}\n"
         f"{audio_line}"
         f"{cost_line}\n"
-        f"👇 <i>Выберите настройки качества и нажмите «Сгенерировать видео»:</i>\n"
+        f"{ce('down', '👇')} <i>Выберите настройки качества и нажмите «Сгенерировать видео»:</i>\n"
         f"<code>build: {BUILD_ID}</code>"
     )
 
@@ -1040,18 +1085,22 @@ def format_image_draft_text(draft: Dict[str, Any]) -> str:
     if ref_count > 0:
         g_size = get_ref_grid_size(draft)
         grid_note = f" <i>(с сеткой {g_size}×{g_size})</i>" if g_size > 0 else ""
-        ref_badge = f"📎 Прикреплено: <b>{ref_count} из {ref_limit} фото-референсов</b> ✅{grid_note}"
+        ref_badge = f"Прикреплено: <b>{ref_count} из {ref_limit} фото-референсов</b>{grid_note}"
     else:
-        ref_badge = f"📝 По тексту <i>(пришлите фото в чат для добавления референса — до {ref_limit} шт.)</i>"
+        ref_badge = f"По тексту <i>(пришлите фото в чат для добавления референса — до {ref_limit} шт.)</i>"
 
-    user_line = f"👤 <b>Автор:</b> {draft.get('user_name')}\n" if draft.get("user_name") else ""
+    user_line = f"{ce('astro', '👤')} <b>Автор:</b> {draft.get('user_name')}\n" if draft.get("user_name") else ""
     c_handles = draft_cameo_handles(draft, int(draft.get("owner_id") or 0))
     cameo_line = (
-        "🎭 <b>Камео:</b> " + ", ".join(f"<code>@{html.escape(h)}</code>" for h in c_handles) + "\n"
+        f"{ce('cosmos', '🎭')} <b>Камео:</b> " + ", ".join(f"<code>@{html.escape(h)}</code>" for h in c_handles) + "\n"
         if c_handles else ""
     )
     cost = calculate_credit_cost(cur_model, 1, res)
-    cost_line = f"💳 <b>Стоимость:</b> ~{cost} кр.\n" if cost > 0 else "💳 <b>Стоимость:</b> Бесплатно\n"
+    cost_line = (
+        f"{ce('card', '💳')} <b>Стоимость:</b> ~{cost} кр.\n"
+        if cost > 0
+        else f"{ce('card', '💳')} <b>Стоимость:</b> Бесплатно\n"
+    )
 
     return (
         f"{ce('wand', '🖼')} <b>Отдельное меню генерации изображений</b>\n\n"
@@ -1238,9 +1287,9 @@ async def handle_start_and_help(message: Message, state: FSMContext):
     text = (
         f"{ce('nova', '👋')} <b>{html.escape(first_name)}, это Poco AI</b>\n"
         f"Видео, фото и Motion за пару тапов {ce('shot', '⚡')}\n\n"
-        f"{how} {ce('bolt', '👇')}\n\n"
+        f"{how} {ce('down', '👇')}\n\n"
         f"<blockquote>{ce('pin', '📎')} Фото с подписью станет референсом · {ce('cosmos', '🎭')} Камео: /cameo\n"
-        f"{ce('gem', '💧')} Ватермарка: /watermark · {ce('card', '💳')} /balance · 🔲 /grid · {ce('console', '🤖')} /model</blockquote>"
+        f"{ce('gem', '💧')} Ватермарка: /watermark · {ce('card', '💳')} /balance · {ce('grid', '🔲')} /grid · {ce('console', '🤖')} /model</blockquote>"
     )
     if in_group:
         await message.reply(text, reply_markup=start_kb, parse_mode="HTML")
@@ -1437,12 +1486,12 @@ def _is_admin_user(message: Message) -> bool:
 async def handle_set_token(message: Message, command: CommandObject, queue: GenerationQueue):
     """Update DaVinci x-token on the fly without restarting the bot."""
     if not _is_admin_user(message):
-        await message.reply("🔒 Доступ только для создателя @GermanUstinf.", parse_mode="HTML")
+        await message.reply(f"{ce('ban', '🔒')} Доступ только для создателя @GermanUstinf.", parse_mode="HTML")
         return
     raw = (command.args or "").strip()
     if not raw:
         await message.reply(
-            "🔑 <b>Обновление токена DaVinci AI:</b>\n"
+            f"{ce('vip', '🔑')} <b>Обновление токена DaVinci AI:</b>\n"
             "Отправьте: <code>/token ваш_x_token</code>",
             parse_mode="HTML",
         )
@@ -1451,7 +1500,7 @@ async def handle_set_token(message: Message, command: CommandObject, queue: Gene
     new_tok = parts[0].strip()
     new_ref = parts[1].strip() if len(parts) > 1 else None
     queue.davinci_client.set_token(new_tok, new_ref)
-    await message.reply("✅ <b>Токен DaVinci AI успешно обновлен и сохранен!</b>", parse_mode="HTML")
+    await message.reply(f"{ce('check', '✅')} <b>Токен DaVinci AI успешно обновлен и сохранен!</b>", parse_mode="HTML")
 
 
 @router.message(Command("id", "whoami", ignore_case=True, ignore_mention=True))
@@ -1461,9 +1510,13 @@ async def handle_id_command(message: Message):
     user_un = message.from_user.username
     chat_id = message.chat.id
     chat_type = message.chat.type
-    access_status = "👑 Создатель/Администратор" if user_access.is_admin(message.from_user) else ("✅ Доступ разрешен" if user_access.is_user_allowed(message.from_user) else "⛔ Нет индивидуального доступа в ЛС")
+    access_status = (
+        f"{ce('vip', '👑')} Создатель/Администратор"
+        if user_access.is_admin(message.from_user)
+        else (f"{ce('check', '✅')} Доступ разрешен" if user_access.is_user_allowed(message.from_user) else f"{ce('ban', '⛔')} Нет индивидуального доступа в ЛС")
+    )
     await message.reply(
-        f"👤 <b>Ваш профиль в Telegram:</b>\n"
+        f"{ce('astro', '👤')} <b>Ваш профиль в Telegram:</b>\n"
         f"• <b>ID:</b> <code>{user_id}</code>\n"
         f"• <b>Username:</b> @{user_un or 'отсутствует'}\n"
         f"• <b>Имя:</b> {html.escape(message.from_user.full_name or '')}\n"
@@ -1485,10 +1538,10 @@ async def handle_admin_auth_command(message: Message, command: CommandObject):
         if user_id not in config.ADMIN_TELEGRAM_IDS:
             config.ADMIN_TELEGRAM_IDS.append(user_id)
         await message.reply(
-            f"👑 <b>Вы успешно авторизованы как Администратор!</b>\n\n"
-            f"👤 <b>Username:</b> @{user_un or 'не задан'}\n"
-            f"🆔 <b>Ваш ID:</b> <code>{user_id}</code>\n\n"
-            f"✨ Теперь вам доступны команды:\n"
+            f"{ce('vip', '👑')} <b>Вы успешно авторизованы как Администратор!</b>\n\n"
+            f"{ce('astro', '👤')} <b>Username:</b> @{user_un or 'не задан'}\n"
+            f"{ce('console', '🆔')} <b>Ваш ID:</b> <code>{user_id}</code>\n\n"
+            f"{ce('spark', '✨')} Теперь вам доступны команды:\n"
             f"• <code>/genkey [заметка]</code> — генерация ключа доступа\n"
             f"• <code>/keys</code> — просмотр активных ключей\n"
             f"• <code>/token [x-token]</code> — обновление токена DaVinci",
@@ -1496,7 +1549,7 @@ async def handle_admin_auth_command(message: Message, command: CommandObject):
         )
     else:
         await message.reply(
-            f"🔑 <b>Авторизация администратора:</b>\n"
+            f"{ce('vip', '🔑')} <b>Авторизация администратора:</b>\n"
             f"Отправьте команду с мастер-паролем:\n"
             f"<code>/admin ваш_пароль</code>\n\n"
             f"<i>Ваш ID: <code>{user_id}</code>, Username: @{user_un or 'не задан'}</i>",
@@ -1518,11 +1571,11 @@ async def handle_genkey_command(message: Message, command: CommandObject):
     )
     if not is_admin:
         await message.reply(
-            f"🔒 <b>Доступ запрещен.</b>\n"
+            f"{ce('ban', '🔒')} <b>Доступ запрещен.</b>\n"
             f"Генерация ключей доступна только создателю бота @GermanUstinf.\n\n"
-            f"👤 Ваш username: @{user_un or 'отсутствует'}\n"
-            f"🆔 Ваш ID: <code>{user_id}</code>\n\n"
-            f"💡 Чтобы войти с паролем создателя, введите: <code>/admin ваш_пароль</code>",
+            f"{ce('astro', '👤')} Ваш username: @{user_un or 'отсутствует'}\n"
+            f"{ce('console', '🆔')} Ваш ID: <code>{user_id}</code>\n\n"
+            f"{ce('idea', '💡')} Чтобы войти с паролем создателя, введите: <code>/admin ваш_пароль</code>",
             parse_mode="HTML",
         )
         return
@@ -1532,10 +1585,10 @@ async def handle_genkey_command(message: Message, command: CommandObject):
     new_key = access_manager.generate_key(note=note, created_by=f"@{message.from_user.username or user_id}")
 
     await message.reply(
-        f"✨ <b>Новый ключ доступа к POCO AI Studio сгенерирован:</b>\n\n"
-        f"🔑 <code>{new_key}</code>\n\n"
-        f"📝 <b>Заметка:</b> {html.escape(note)}\n"
-        f"🌐 <b>Сайт студии:</b> http://localhost:7860\n\n"
+        f"{ce('spark', '✨')} <b>Новый ключ доступа к POCO AI Studio сгенерирован:</b>\n\n"
+        f"{ce('vip', '🔑')} <code>{new_key}</code>\n\n"
+        f"{ce('book', '📝')} <b>Заметка:</b> {html.escape(note)}\n"
+        f"{ce('globe', '🌐')} <b>Сайт студии:</b> http://localhost:7860\n\n"
         f"<i>Нажмите на ключ в сообщении выше, чтобы скопировать и отправить пользователю!</i>",
         parse_mode="HTML",
     )
@@ -1727,19 +1780,22 @@ async def handle_admin_forwarded_user_in_pm(message: Message):
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(
-                text="✅ Разрешить доступ в ЛС и везде" if not is_allowed else "🔄 Обновить доступ в ЛС",
-                callback_data=f"allow_user_btn:{uid}"
+            cbtn(
+                "Разрешить доступ в ЛС и везде" if not is_allowed else "Обновить доступ в ЛС",
+                callback_data=f"allow_user_btn:{uid}",
+                icon_key="check" if not is_allowed else "replay",
+                fallback_emoji="✅" if not is_allowed else "🔄",
+                style="success",
             )
         ]
     ])
 
     await message.reply(
-        f"👤 <b>Пользователь из пересланного сообщения:</b>\n"
+        f"{ce('astro', '👤')} <b>Пользователь из пересланного сообщения:</b>\n"
         f"• Имя: <b>{u_name}</b>\n"
         f"• Юзернейм: {u_tag}\n"
         f"• Telegram ID: <code>{uid}</code>\n"
-        f"• Статус доступа: <i>{'✅ Есть доступ' if is_allowed else '⛔ Нет доступа в ЛС'}</i>\n\n"
+        f"• Статус доступа: <i>{ce('check', '✅') + ' Есть доступ' if is_allowed else ce('ban', '⛔') + ' Нет доступа в ЛС'}</i>\n\n"
         f"Нажмите кнопку ниже, чтобы выдать пользователю доступ к боту вне группы (в ЛС бота):",
         reply_markup=kb,
         parse_mode="HTML"
@@ -1765,7 +1821,7 @@ async def handle_allow_user_callback(call: CallbackQuery):
 
     try:
         await call.message.edit_text(
-            f"✅ <b>Доступ успешно выдан!</b>\n\n"
+            f"{ce('check', '✅')} <b>Доступ успешно выдан!</b>\n\n"
             f"Пользователь с ID <code>{uid}</code> теперь может свободно пользоваться ботом <b>вне группы (в ЛС бота)</b>.\n"
             f"Администратор: {admin_tag}",
             parse_mode="HTML"
@@ -1777,8 +1833,8 @@ async def handle_allow_user_callback(call: CallbackQuery):
         await call.bot.send_message(
             chat_id=uid,
             text=(
-                f"🎉 <b>Администратор {admin_tag} одобрил ваш доступ к Poco AI вне группы (в ЛС бота)!</b>\n\n"
-                f"✨ Теперь вам доступны все генерации, выбор моделей и настройки прямо здесь в диалоге с ботом.\n"
+                f"{ce('party', '🎉')} <b>Администратор {admin_tag} одобрил ваш доступ к Poco AI вне группы (в ЛС бота)!</b>\n\n"
+                f"{ce('spark', '✨')} Теперь вам доступны все генерации, выбор моделей и настройки прямо здесь в диалоге с ботом.\n"
                 f"Нажмите /start или отправьте описание видео для начала работы!"
             ),
             parse_mode="HTML"
@@ -1940,7 +1996,7 @@ async def handle_last_command(message: Message, command: CommandObject, queue: G
     raw = (command.args or "").strip()
     count = int(raw) if raw.isdigit() else 1
     status_msg = await message.reply(
-        "📥 <b>Забираю готовую генерацию с сайта и накладываю ватермарку...</b>",
+        f"{ce('load_starburst', '📥')} <b>Забираю готовую генерацию с сайта и накладываю ватермарку...</b>",
         parse_mode="HTML",
     )
     try:
@@ -1957,16 +2013,16 @@ async def handle_last_command(message: Message, command: CommandObject, queue: G
             except Exception:
                 pass
         else:
-            await status_msg.edit_text("⚠️ На сайте пока нет завершенных генераций.", parse_mode="HTML")
+            await status_msg.edit_text(f"{ce('warn', '⚠️')} На сайте пока нет завершенных генераций.", parse_mode="HTML")
     except Exception as e:
-        await status_msg.edit_text(f"❌ <b>Ошибка получения файла с сайта:</b> {html.escape(str(e))}", parse_mode="HTML")
+        await status_msg.edit_text(f"{ce('alert', '❌')} <b>Ошибка получения файла с сайта:</b> {html.escape(str(e))}", parse_mode="HTML")
 
 
 @router.message(Command("balance", "credits", "account", "баланс", "кредиты"))
 async def handle_balance_command(message: Message, queue: GenerationQueue):
     """View current DaVinci AI account credit balance, plan tier, and generation stats."""
     status_msg = await message.reply(
-        "🔄 <b>Запрашиваю актуальный баланс кредитов...</b>",
+        f"{ce('load_neon', '🔄')} <b>Запрашиваю актуальный баланс кредитов...</b>",
         parse_mode="HTML"
     )
     try:
@@ -1977,24 +2033,24 @@ async def handle_balance_command(message: Message, queue: GenerationQueue):
         tier = data["tier_name"]
         renewal = data["renewal_date"]
         gen_count = data["generation_count"]
-        auto_refill = "Включено ✅" if data["auto_refill"] else "Выключено ❌"
+        auto_refill = f"Включено {ce('check', '✅')}" if data["auto_refill"] else f"Выключено {ce('ban', '❌')}"
 
         text = (
-            f"💳 <b>Баланс Poco AI</b>\n\n"
-            f"💰 <b>Всего кредитов:</b> <code>{total:,}</code>\n"
+            f"{ce('card', '💳')} <b>Баланс Poco AI</b>\n\n"
+            f"{ce('coin', '💰')} <b>Всего кредитов:</b> <code>{total:,}</code>\n"
             f"├ <i>Пополняемые (Consumable):</i> <code>{consumable:,}</code>\n"
             f"└ <i>Тарифные (Plan):</i> <code>{plan:,}</code>\n\n"
-            f"👑 <b>Тариф:</b> {tier} (Premium ✅)\n"
-            f"📅 <b>Продление подписки:</b> {renewal}\n"
-            f"📊 <b>Всего генераций на аккаунте:</b> {gen_count}\n"
-            f"⚙️ <b>Авто-пополнение кредитов:</b> {auto_refill}\n\n"
-            f"💡 <i>Перед каждой генерацией в меню показывается точная стоимость задачи в кредитах!</i>"
+            f"{ce('vip', '👑')} <b>Тариф:</b> {tier} (Premium {ce('check_y', '✅')})\n"
+            f"{ce('load_hourglass', '📅')} <b>Продление подписки:</b> {renewal}\n"
+            f"{ce('console', '📊')} <b>Всего генераций на аккаунте:</b> {gen_count}\n"
+            f"{ce('load_gears', '⚙️')} <b>Авто-пополнение кредитов:</b> {auto_refill}\n\n"
+            f"{ce('idea', '💡')} <i>Перед каждой генерацией в меню показывается точная стоимость задачи в кредитах!</i>"
         )
         await status_msg.edit_text(text, parse_mode="HTML")
     except Exception as e:
         logger.error(f"Failed to fetch balance: {e}", exc_info=True)
         await status_msg.edit_text(
-            f"❌ <b>Не удалось получить баланс кредитов:</b>\n{html.escape(str(e))}",
+            f"{ce('alert', '❌')} <b>Не удалось получить баланс кредитов:</b>\n{html.escape(str(e))}",
             parse_mode="HTML"
         )
 
@@ -2176,25 +2232,25 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
     is_seedance = cur_model.startswith("s2_")
     min_ref_clip = 2 if is_seedance else (1 if cur_model in ("gemini_omni_12", "gemini_omni_11") else 0)
     ref_tag = " (@Video1)" if is_seedance else ""
-    info_parts = [f"• 🎞 Видео-референс прикреплен к задаче{ref_tag} · модель: <b>{minfo_v['name']}</b>"]
+    info_parts = [f"• {ce('console', '🎞')} Видео-референс прикреплен к задаче{ref_tag} · модель: <b>{minfo_v['name']}</b>"]
     if vid_dur > 0:
         meta_str = f"{vid_dur}с"
         if draft.get("ratio"):
             meta_str += f", {draft['ratio']}"
-        info_parts.append(f"• 📐 Параметры видео: <b>{meta_str}</b>")
+        info_parts.append(f"• {ce('uhd', '📐')} Параметры видео: <b>{meta_str}</b>")
         if min_ref_clip and vid_dur < min_ref_clip:
-            info_parts.append(f"• ⚙️ Короткое видео (<{min_ref_clip}с) будет автоматически адаптировано для {minfo_v['name']}")
+            info_parts.append(f"• {ce('load_gears', '⚙️')} Короткое видео (<{min_ref_clip}с) будет автоматически адаптировано для {minfo_v['name']}")
         elif vid_dur > max_d:
-            info_parts.append(f"• ✂️ Для референса будут использованы первые {max_d}с")
+            info_parts.append(f"• {ce('bolt', '✂️')} Для референса будут использованы первые {max_d}с")
     if draft.get("ref_images"):
-        info_parts.append(f"• 🧑 Референс-фото прикреплено ({len(draft['ref_images'])} шт.)")
+        info_parts.append(f"• {ce('pin', '🧑')} Референс-фото прикреплено ({len(draft['ref_images'])} шт.)")
     if video_audio:
-        info_parts.append("• 🎵 Извлечена звуковая дорожка из видео")
+        info_parts.append(f"• {ce('mega', '🎵')} Извлечена звуковая дорожка из видео")
     hint_text = "\n".join(info_parts)
     try:
         await message.reply(
-            f"🎞 <b>Видео-референс принят!</b>\n\n{hint_text}\n\n"
-            f"💡 <i>Что можно сделать дальше:</i>\n"
+            f"{ce('console', '🎞')} <b>Видео-референс принят!</b>\n\n{hint_text}\n\n"
+            f"{ce('idea', '💡')} <i>Что можно сделать дальше:</i>\n"
             f"• <b>Изменить само видео:</b> просто напишите в чат, что поменять (например, <i>«удали людей на фоне»</i> или <i>«сделай ночной неон и дождь»</i>) — фото не нужно.\n"
             f"• <b>Заменить персонажа / объект:</b> отправьте фото нового героя или предмета и нажмите <b>Запустить</b>.",
             parse_mode="HTML"
@@ -2232,10 +2288,10 @@ async def _save_cameo_shortcut(
         }
         await state.set_state(CameoState.waiting_for_handle)
         await message.reply(
-            f"📷 Принято фото для Камео: <b>{len(cameo_wizard_buffers[uid]['photos'])}/3</b>.\n\n"
+            f"{ce('wand', '📷')} Принято фото для Камео: <b>{len(cameo_wizard_buffers[uid]['photos'])}/3</b>.\n\n"
             f"Теперь отправьте короткий <code>@тег</code> персонажа (например, <code>@poco</code> или <code>@макс</code>).",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="❌ Отмена", callback_data=f"cm_cancel:{uid}")
+                cbtn("Отмена", callback_data=f"cm_cancel:{uid}", icon_key="ban", fallback_emoji="❌", style="danger")
             ]]),
             parse_mode="HTML",
         )
@@ -2243,7 +2299,7 @@ async def _save_cameo_shortcut(
 
     if norm and (len(norm) < 2 or len(norm) > 24):
         await message.reply(
-            "⚠️ Тег должен быть длиной <b>от 2 до 24</b> символов (буквы, цифры, <code>_</code>).\n"
+            f"{ce('warn', '⚠️')} Тег должен быть длиной <b>от 2 до 24</b> символов (буквы, цифры, <code>_</code>).\n"
             "Например: <code>@poco</code> или <code>@макс</code>.",
             parse_mode="HTML",
         )
@@ -2259,7 +2315,7 @@ async def _save_cameo_shortcut(
     cameo_wizard_buffers.pop(uid, None)
     await state.clear()
     text, kb = render_cameo_card(entry, message.from_user)
-    await message.reply(f"✅ <b>Камео сохранено!</b>\n\n{text}", reply_markup=kb, parse_mode="HTML")
+    await message.reply(f"{ce('check', '✅')} <b>Камео сохранено!</b>\n\n{text}", reply_markup=kb, parse_mode="HTML")
 
 
 @router.message(CameoState.waiting_for_photos, F.photo | F.document)
@@ -2272,12 +2328,12 @@ async def handle_cameo_waiting_photos(message: Message, bot: Bot, state: FSMCont
             doc.file_name and doc.file_name.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
         )
         if not is_img:
-            await message.reply("Пожалуйста, отправьте фото (JPG/PNG/WEBP) или нажмите ❌ Отмена.")
+            await message.reply(f"Пожалуйста, отправьте фото (JPG/PNG/WEBP) или нажмите {ce('ban', '❌')} Отмена.", parse_mode="HTML")
             return
 
     img_bytes = await extract_image_bytes(message, bot)
     if not img_bytes:
-        await message.reply("⚠️ Не удалось прочитать изображение. Попробуйте ещё раз.")
+        await message.reply(f"{ce('warn', '⚠️')} Не удалось прочитать изображение. Попробуйте ещё раз.", parse_mode="HTML")
         return
 
     buf = cameo_wizard_buffers.setdefault(uid, {"photos": [], "handle": "", "description": "", "last_mg": None})
@@ -2293,17 +2349,17 @@ async def handle_cameo_waiting_photos(message: Message, bot: Bot, state: FSMCont
     buf["last_mg"] = mg
 
     count = len(photos)
-    done_label = "✅ Фото готовы" if count < 3 else "✅ Сохранить (3/3)"
+    done_label = "Фото готовы" if count < 3 else "Сохранить (3/3)"
     if buf.get("handle"):
         hint = f"Тег: <code>@{html.escape(buf['handle'])}</code>\nНажмите <b>{done_label}</b> или отправьте ещё фото (до 3)."
     else:
         hint = f"Отправьте ещё фото (до 3) для лучшего сходства лица/ракурсов или нажмите <b>{done_label}</b>."
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=done_label, callback_data=f"cm_photos_done:{uid}", style="success")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"cm_cancel:{uid}")],
+        [cbtn(done_label, callback_data=f"cm_photos_done:{uid}", icon_key="check", fallback_emoji="✅", style="success")],
+        [cbtn("Отмена", callback_data=f"cm_cancel:{uid}", icon_key="ban", fallback_emoji="❌", style="danger")],
     ])
-    await message.reply(f"📷 Фото добавлено: <b>{count}/3</b>\n\n{hint}", reply_markup=kb, parse_mode="HTML")
+    await message.reply(f"{ce('wand', '📷')} Фото добавлено: <b>{count}/3</b>\n\n{hint}", reply_markup=kb, parse_mode="HTML")
 
 
 @router.message(F.photo)
@@ -2496,12 +2552,12 @@ async def process_photo_batch(
         await state.update_data(image_bytes=existing_refs[0], ref_images=existing_refs)
         quick_kb = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="🎬 Открыть меню Видео", callback_data=f"open_menu:video:{user_id}", style="success"),
-                InlineKeyboardButton(text="🖼 Открыть меню Фото", callback_data=f"open_menu:image:{user_id}", style="primary"),
+                cbtn("Открыть меню Видео", callback_data=f"open_menu:video:{user_id}", icon_key="rocket", fallback_emoji="🎬", style="success"),
+                cbtn("Открыть меню Фото", callback_data=f"open_menu:image:{user_id}", icon_key="wand", fallback_emoji="🖼", style="primary"),
             ]
         ])
         await message.answer(
-            f"🖼 <b>Фото-референс получен ({len(existing_refs)} шт.)!</b>\n\n"
+            f"{ce('wand', '🖼')} <b>Фото-референс получен ({len(existing_refs)} шт.)!</b>\n\n"
             f"• Напишите текстом промпт (что нужно сделать по этому референсу)\n"
             f"• Или отправьте ещё фото, если нужно несколько референсов\n"
             f"• Или сразу откройте нужное меню кнопкой ниже:",
@@ -2852,7 +2908,7 @@ async def handle_model_command(message: Message):
     cur_model = prefs["model_key"]
 
     await message.reply(
-        f"🤖 <b>Выбор модели по умолчанию для {get_user_display_name(message.from_user)}</b>\n\n"
+        f"{ce('console', '🤖')} <b>Выбор модели по умолчанию для {get_user_display_name(message.from_user)}</b>\n\n"
         f"Текущая модель: <b>{MODELS[cur_model]['name']}</b>\n"
         f"<i>{MODELS[cur_model]['desc']}</i>",
         reply_markup=build_pref_models_markup(cur_model, user_id),
@@ -2882,7 +2938,7 @@ async def on_set_pref_model(call: CallbackQuery):
 
     try:
         await call.message.edit_text(
-            f"🤖 <b>Выбор модели по умолчанию для {get_user_display_name(call.from_user)}</b>\n\n"
+            f"{ce('console', '🤖')} <b>Выбор модели по умолчанию для {get_user_display_name(call.from_user)}</b>\n\n"
             f"Текущая модель: <b>{MODELS[mkey]['name']}</b>\n"
             f"<i>{MODELS[mkey]['desc']}</i>",
             reply_markup=build_pref_models_markup(mkey, owner_id),
@@ -2968,26 +3024,27 @@ def build_grid_keyboard(grid_id: str, data: Dict[str, Any]) -> InlineKeyboardMar
     dim_btns = []
     for (r, c) in GRID_DIM_OPTIONS:
         text = f"{r}×{c}"
-        if r == cur_r and c == cur_c:
-            text = f"✅ {text}"
-        dim_btns.append(InlineKeyboardButton(text=text, callback_data=f"g_dim:{grid_id}:{r}:{c}"))
+        is_sel = r == cur_r and c == cur_c
+        if is_sel:
+            text = f"✓ {text}"
+        dim_btns.append(InlineKeyboardButton(text=text, callback_data=f"g_dim:{grid_id}:{r}:{c}", **({"style": "primary"} if is_sel else {})))
     dim_rows = [dim_btns[i:i + 4] for i in range(0, len(dim_btns), 4)]
 
-    col_label = f"🎨 Цвет: {GRID_COLOR_NAMES.get(cur_col, cur_col)}"
-    th_label = f"📏 Толщина: {GRID_THICKNESS_NAMES.get(cur_th, cur_th)}"
+    col_label = f"Цвет: {GRID_COLOR_NAMES.get(cur_col, cur_col)}"
+    th_label = f"Толщина: {GRID_THICKNESS_NAMES.get(cur_th, cur_th)}"
     style_btns = [
-        InlineKeyboardButton(text=col_label, callback_data=f"g_col:{grid_id}"),
-        InlineKeyboardButton(text=th_label, callback_data=f"g_th:{grid_id}"),
+        cbtn(col_label, callback_data=f"g_col:{grid_id}", icon_key="spark", fallback_emoji="🎨"),
+        cbtn(th_label, callback_data=f"g_th:{grid_id}", icon_key="uhd", fallback_emoji="📏"),
     ]
 
-    lbl_text = "🔢 Номера: Вкл ✅" if show_lbl else "🔢 Номера: Выкл"
+    lbl_text = "Номера: Вкл" if show_lbl else "Номера: Выкл"
     lbl_btns = [
-        InlineKeyboardButton(text=lbl_text, callback_data=f"g_lbl:{grid_id}")
+        cbtn(lbl_text, callback_data=f"g_lbl:{grid_id}", icon_key="check" if show_lbl else "ban", fallback_emoji="🔢", style="success" if show_lbl else None)
     ]
 
     action_btns = [
-        InlineKeyboardButton(text="🎬 В меню Видео", callback_data=f"g_use_vid:{grid_id}"),
-        InlineKeyboardButton(text="🖼 В меню Фото", callback_data=f"g_use_img:{grid_id}"),
+        cbtn("В меню Видео", callback_data=f"g_use_vid:{grid_id}", icon_key="rocket", fallback_emoji="🎬", style="primary"),
+        cbtn("В меню Фото", callback_data=f"g_use_img:{grid_id}", icon_key="wand", fallback_emoji="🖼", style="primary"),
     ]
 
     return InlineKeyboardMarkup(inline_keyboard=[*dim_rows, style_btns, lbl_btns, action_btns])
@@ -3000,10 +3057,10 @@ def format_grid_caption(session: Dict[str, Any]) -> str:
     th = GRID_THICKNESS_NAMES.get(session.get("thickness_mode", "thick"), "Толстая")
     lbl = "Да (A1, A2...)" if session.get("show_labels") else "Нет"
     return (
-        f"🔲 <b>Сетка наложена ({r}×{c})</b>\n\n"
-        f"🎨 <b>Цвет линий:</b> {col}\n"
-        f"📏 <b>Толщина линий:</b> {th}\n"
-        f"🔢 <b>Номера ячеек:</b> {lbl}\n\n"
+        f"{ce('grid', '🔲')} <b>Сетка наложена ({r}×{c})</b>\n\n"
+        f"{ce('spark', '🎨')} <b>Цвет линий:</b> {col}\n"
+        f"{ce('uhd', '📏')} <b>Толщина линий:</b> {th}\n"
+        f"{ce('console', '🔢')} <b>Номера ячеек:</b> {lbl}\n\n"
         f"<i>Нажимайте кнопки ниже для переключения сетки или отправки в меню генерации:</i>"
     )
 
@@ -3066,7 +3123,7 @@ async def handle_grid_command(message: Message, command: CommandObject, bot: Bot
 
     if not img_bytes:
         await message.reply(
-            "🔲 <b>Накладывание толстой сетки на изображение</b>\n\n"
+            f"{ce('grid', '🔲')} <b>Накладывание толстой сетки на изображение</b>\n\n"
             "• Отправьте фото с подписью <code>/grid</code> или <code>/сетка</code>\n"
             "• Или <b>ответьте (Reply)</b> на любое фото в чате командой <code>/grid</code>\n\n"
             "<b>Дополнительные параметры (необязательно):</b>\n"
@@ -3287,12 +3344,12 @@ async def handle_cameo_command(message: Message, command: CommandObject, bot: Bo
     if low in ("help", "?", "помощь"):
         text, kb = render_cameo_hub(uid)
         await message.reply(
-            "🎭 <b>Как пользоваться Камео</b>\n\n"
-            "1️⃣ <b>Создать персонажа:</b> отправьте 1–3 фото с подписью "
-            "<code>/cameo @тег описание</code> (или нажмите ➕ Создать Камео).\n"
-            "2️⃣ <b>Использовать в промпте:</b> просто напишите <code>@тег</code> в любом запросе "
-            "(видео, фото или замена персонажа в видео) — фото подтянутся автоматически!\n"
-            "3️⃣ <b>Управление:</b> <code>/cameo</code> — список, <code>/cameo del @тег</code> — удалить.\n\n"
+            f"{ce('cosmos', '🎭')} <b>Как пользоваться Камео</b>\n\n"
+            f"1. <b>Создать персонажа:</b> отправьте 1–3 фото с подписью "
+            f"<code>/cameo @тег описание</code> (или нажмите Создать Камео).\n"
+            f"2. <b>Использовать в промпте:</b> просто напишите <code>@тег</code> в любом запросе "
+            f"(видео, фото или замена персонажа в видео) — фото подтянутся автоматически!\n"
+            f"3. <b>Управление:</b> <code>/cameo</code> — список, <code>/cameo del @тег</code> — удалить.\n\n"
             + text,
             reply_markup=kb,
             parse_mode="HTML",
@@ -3303,10 +3360,10 @@ async def handle_cameo_command(message: Message, command: CommandObject, bot: Bo
         cameo_wizard_buffers[uid] = {"photos": [], "handle": "", "description": "", "last_mg": None}
         await state.set_state(CameoState.waiting_for_photos)
         await message.reply(
-            "🎭 <b>Создание нового Камео</b>\n\n"
+            f"{ce('cosmos', '🎭')} <b>Создание нового Камео</b>\n\n"
             "Отправьте <b>1–3 фото</b> персонажа (портрет, крупный план или разные ракурсы).",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="❌ Отмена", callback_data=f"cm_cancel:{uid}")
+                cbtn("Отмена", callback_data=f"cm_cancel:{uid}", icon_key="ban", fallback_emoji="❌", style="danger")
             ]]),
             parse_mode="HTML",
         )
@@ -3322,9 +3379,9 @@ async def handle_cameo_command(message: Message, command: CommandObject, bot: Bo
             return
         ok = cameo_manager.delete_cameo(norm, uid, is_admin=user_access.is_admin(message.from_user))
         if ok:
-            await message.reply(f"🗑 Камео <code>@{html.escape(norm)}</code> удалено.", parse_mode="HTML")
+            await message.reply(f"{ce('ban', '🗑')} Камео <code>@{html.escape(norm)}</code> удалено.", parse_mode="HTML")
         else:
-            await message.reply(f"⚠️ Камео <code>@{html.escape(norm)}</code> не найдено или нет прав на удаление.", parse_mode="HTML")
+            await message.reply(f"{ce('warn', '⚠️')} Камео <code>@{html.escape(norm)}</code> не найдено или нет прав на удаление.", parse_mode="HTML")
         return
 
     # Check if replying to photo(s)
@@ -3350,10 +3407,10 @@ async def handle_cameo_command(message: Message, command: CommandObject, bot: Bo
     await state.set_state(CameoState.waiting_for_photos)
     tag_hint = f" для <code>@{html.escape(norm)}</code>" if norm else ""
     await message.reply(
-        f"📷 Отправьте <b>1–3 фото</b>{tag_hint}.\n\n"
-        f"<i>После загрузки фото нажмите «✅ Фото готовы».</i>",
+        f"{ce('wand', '📷')} Отправьте <b>1–3 фото</b>{tag_hint}.\n\n"
+        f"<i>После загрузки фото нажмите «Фото готовы».</i>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="❌ Отмена", callback_data=f"cm_cancel:{uid}")
+            cbtn("Отмена", callback_data=f"cm_cancel:{uid}", icon_key="ban", fallback_emoji="❌", style="danger")
         ]]),
         parse_mode="HTML",
     )
@@ -3366,16 +3423,16 @@ async def handle_cameo_photos_state_text(message: Message, bot: Bot, state: FSMC
     if text.lower() in ("/cancel", "/stop", "отмена"):
         cameo_wizard_buffers.pop(uid, None)
         await state.clear()
-        await message.reply("❌ Создание Камео отменено.")
+        await message.reply(f"{ce('ban', '❌')} Создание Камео отменено.", parse_mode="HTML")
         return
 
     buf = cameo_wizard_buffers.get(uid) or {}
     photos: List[bytes] = list(buf.get("photos") or [])
     if not photos:
         await message.reply(
-            "📷 Сначала отправьте хотя бы <b>1 фото</b> персонажа (можно 2–3 штуки), или нажмите ❌ Отмена.",
+            f"{ce('wand', '📷')} Сначала отправьте хотя бы <b>1 фото</b> персонажа (можно 2–3 штуки), или нажмите Отмена.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="❌ Отмена", callback_data=f"cm_cancel:{uid}")
+                cbtn("Отмена", callback_data=f"cm_cancel:{uid}", icon_key="ban", fallback_emoji="❌", style="danger")
             ]]),
             parse_mode="HTML",
         )
@@ -3394,11 +3451,11 @@ async def handle_cameo_photos_state_text(message: Message, bot: Bot, state: FSMC
             cameo_wizard_buffers.pop(uid, None)
             await state.clear()
             c_text, kb = render_cameo_card(entry, message.from_user)
-            await message.reply(f"✅ <b>Камео создано!</b>\n\n{c_text}", reply_markup=kb, parse_mode="HTML")
+            await message.reply(f"{ce('check', '✅')} <b>Камео создано!</b>\n\n{c_text}", reply_markup=kb, parse_mode="HTML")
             return
         await state.set_state(CameoState.waiting_for_handle)
         await message.reply(
-            "🏷 Введите короткий <code>@тег</code> для персонажа (например: <code>@max</code> или <code>@poco</code>):",
+            f"{ce('pin', '🏷')} Введите короткий <code>@тег</code> для персонажа (например: <code>@max</code> или <code>@poco</code>):",
             parse_mode="HTML",
         )
         return
@@ -3415,7 +3472,7 @@ async def handle_cameo_photos_state_text(message: Message, bot: Bot, state: FSMC
         cameo_wizard_buffers.pop(uid, None)
         await state.clear()
         c_text, kb = render_cameo_card(entry, message.from_user)
-        await message.reply(f"✅ <b>Камео создано!</b>\n\n{c_text}", reply_markup=kb, parse_mode="HTML")
+        await message.reply(f"{ce('check', '✅')} <b>Камео создано!</b>\n\n{c_text}", reply_markup=kb, parse_mode="HTML")
         return
 
     parts = text.split(maxsplit=1)
@@ -3434,17 +3491,17 @@ async def handle_cameo_photos_state_text(message: Message, bot: Bot, state: FSMC
         cameo_wizard_buffers.pop(uid, None)
         await state.clear()
         c_text, kb = render_cameo_card(entry, message.from_user)
-        await message.reply(f"✅ <b>Камео создано!</b>\n\n{c_text}", reply_markup=kb, parse_mode="HTML")
+        await message.reply(f"{ce('check', '✅')} <b>Камео создано!</b>\n\n{c_text}", reply_markup=kb, parse_mode="HTML")
         return
 
     buf["handle"] = norm
     await state.set_state(CameoState.waiting_for_description)
     await message.reply(
-        f"🏷 Тег: <code>@{html.escape(norm)}</code>\n\n"
+        f"{ce('pin', '🏷')} Тег: <code>@{html.escape(norm)}</code>\n\n"
         f"Теперь напишите краткое описание внешности/стиля (или нажмите <b>Пропустить</b>):",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⏭ Пропустить", callback_data=f"cm_skip_desc:{uid}")],
-            [InlineKeyboardButton(text="❌ Отмена", callback_data=f"cm_cancel:{uid}")],
+            [cbtn("Пропустить", callback_data=f"cm_skip_desc:{uid}", icon_key="next", fallback_emoji="⏭")],
+            [cbtn("Отмена", callback_data=f"cm_cancel:{uid}", icon_key="ban", fallback_emoji="❌", style="danger")],
         ]),
         parse_mode="HTML",
     )
@@ -3457,7 +3514,7 @@ async def handle_cameo_waiting_handle(message: Message, state: FSMContext):
     if text.lower() in ("/cancel", "/stop", "отмена"):
         cameo_wizard_buffers.pop(uid, None)
         await state.clear()
-        await message.reply("❌ Создание Камео отменено.")
+        await message.reply(f"{ce('ban', '❌')} Создание Камео отменено.", parse_mode="HTML")
         return
 
     buf = cameo_wizard_buffers.get(uid)
@@ -3471,7 +3528,7 @@ async def handle_cameo_waiting_handle(message: Message, state: FSMContext):
     norm = cameo_manager.normalize_handle(parts[0])
     if not norm or len(norm) < 2 or len(norm) > 24:
         await message.reply(
-            "⚠️ Тег должен быть длиной <b>2–24</b> символа (буквы, цифры или <code>_</code>), например <code>@max</code>:",
+            f"{ce('warn', '⚠️')} Тег должен быть длиной <b>2–24</b> символа (буквы, цифры или <code>_</code>), например <code>@max</code>:",
             parse_mode="HTML",
         )
         return
@@ -3487,18 +3544,18 @@ async def handle_cameo_waiting_handle(message: Message, state: FSMContext):
         cameo_wizard_buffers.pop(uid, None)
         await state.clear()
         c_text, kb = render_cameo_card(entry, message.from_user)
-        await message.reply(f"✅ <b>Камео создано!</b>\n\n{c_text}", reply_markup=kb, parse_mode="HTML")
+        await message.reply(f"{ce('check', '✅')} <b>Камео создано!</b>\n\n{c_text}", reply_markup=kb, parse_mode="HTML")
         return
 
     buf["handle"] = norm
     await state.set_state(CameoState.waiting_for_description)
     await message.reply(
-        f"🏷 Тег: <code>@{html.escape(norm)}</code>\n\n"
+        f"{ce('pin', '🏷')} Тег: <code>@{html.escape(norm)}</code>\n\n"
         f"Напишите короткое описание персонажа (помогает нейросети точнее сохранять детали, "
         f"например: <i>«парень в чёрной кожанке и круглых очках»</i>), или нажмите <b>Пропустить</b>:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⏭ Пропустить", callback_data=f"cm_skip_desc:{uid}")],
-            [InlineKeyboardButton(text="❌ Отмена", callback_data=f"cm_cancel:{uid}")],
+            [cbtn("Пропустить", callback_data=f"cm_skip_desc:{uid}", icon_key="next", fallback_emoji="⏭")],
+            [cbtn("Отмена", callback_data=f"cm_cancel:{uid}", icon_key="ban", fallback_emoji="❌", style="danger")],
         ]),
         parse_mode="HTML",
     )
@@ -3511,7 +3568,7 @@ async def handle_cameo_waiting_description(message: Message, state: FSMContext):
     if text.lower() in ("/cancel", "/stop", "отмена"):
         cameo_wizard_buffers.pop(uid, None)
         await state.clear()
-        await message.reply("❌ Создание Камео отменено.")
+        await message.reply(f"{ce('ban', '❌')} Создание Камео отменено.", parse_mode="HTML")
         return
 
     buf = cameo_wizard_buffers.pop(uid, None)
@@ -3529,7 +3586,7 @@ async def handle_cameo_waiting_description(message: Message, state: FSMContext):
         description=desc,
     )
     c_text, kb = render_cameo_card(entry, message.from_user)
-    await message.reply(f"✅ <b>Камео создано!</b>\n\n{c_text}", reply_markup=kb, parse_mode="HTML")
+    await message.reply(f"{ce('check', '✅')} <b>Камео создано!</b>\n\n{c_text}", reply_markup=kb, parse_mode="HTML")
 
 
 @router.message(CameoState.editing_description, F.text)
@@ -3538,7 +3595,7 @@ async def handle_cameo_edit_description(message: Message, state: FSMContext):
     text = (message.text or "").strip()
     if text.lower() in ("/cancel", "/stop", "отмена"):
         await state.clear()
-        await message.reply("❌ Редактирование описания отменено.")
+        await message.reply(f"{ce('ban', '❌')} Редактирование описания отменено.", parse_mode="HTML")
         return
 
     data = await state.get_data()
@@ -3549,10 +3606,10 @@ async def handle_cameo_edit_description(message: Message, state: FSMContext):
         key, uid, desc, is_admin=user_access.is_admin(message.from_user)
     )
     if not entry:
-        await message.reply("⚠️ Камео не найдено или нет прав для изменения.")
+        await message.reply(f"{ce('warn', '⚠️')} Камео не найдено или нет прав для изменения.", parse_mode="HTML")
         return
     c_text, kb = render_cameo_card(entry, message.from_user)
-    await message.reply(f"✅ <b>Описание обновлено!</b>\n\n{c_text}", reply_markup=kb, parse_mode="HTML")
+    await message.reply(f"{ce('check', '✅')} <b>Описание обновлено!</b>\n\n{c_text}", reply_markup=kb, parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("cameo_menu:"))
@@ -3661,10 +3718,10 @@ async def on_cameo_new(call: CallbackQuery, state: FSMContext):
     cameo_wizard_buffers[owner_id] = {"photos": [], "handle": "", "description": "", "last_mg": None}
     await state.set_state(CameoState.waiting_for_photos)
     await call.message.answer(
-        "🎭 <b>Создание нового Камео</b>\n\n"
+        f"{ce('cosmos', '🎭')} <b>Создание нового Камео</b>\n\n"
         "Отправьте <b>1–3 фото</b> персонажа (портрет, крупный план или разные ракурсы).",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="❌ Отмена", callback_data=f"cm_cancel:{owner_id}")
+            cbtn("Отмена", callback_data=f"cm_cancel:{owner_id}", icon_key="ban", fallback_emoji="❌", style="danger")
         ]]),
         parse_mode="HTML",
     )
@@ -3693,18 +3750,18 @@ async def on_cameo_photos_done(call: CallbackQuery, state: FSMContext):
         await state.clear()
         text, kb = render_cameo_card(entry, call.from_user)
         try:
-            await call.message.edit_text(f"✅ <b>Камео сохранено!</b>\n\n{text}", reply_markup=kb, parse_mode="HTML")
+            await call.message.edit_text(f"{ce('check', '✅')} <b>Камео сохранено!</b>\n\n{text}", reply_markup=kb, parse_mode="HTML")
         except Exception:
-            await call.message.answer(f"✅ <b>Камео сохранено!</b>\n\n{text}", reply_markup=kb, parse_mode="HTML")
+            await call.message.answer(f"{ce('check', '✅')} <b>Камео сохранено!</b>\n\n{text}", reply_markup=kb, parse_mode="HTML")
         await call.answer("Готово!")
         return
 
     await state.set_state(CameoState.waiting_for_handle)
     prompt_txt = (
-        f"📷 Фото готовы: <b>{len(buf['photos'])}/3</b>.\n\n"
+        f"{ce('wand', '📷')} Фото готовы: <b>{len(buf['photos'])}/3</b>.\n\n"
         f"Теперь отправьте короткий <code>@тег</code> персонажа (например, <code>@max</code> или <code>@poco</code>):"
     )
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data=f"cm_cancel:{owner_id}")]])
+    kb = InlineKeyboardMarkup(inline_keyboard=[[cbtn("Отмена", callback_data=f"cm_cancel:{owner_id}", icon_key="ban", fallback_emoji="❌", style="danger")]])
     try:
         await call.message.edit_text(prompt_txt, reply_markup=kb, parse_mode="HTML")
     except Exception:
@@ -3732,9 +3789,9 @@ async def on_cameo_skip_desc(call: CallbackQuery, state: FSMContext):
     )
     text, kb = render_cameo_card(entry, call.from_user)
     try:
-        await call.message.edit_text(f"✅ <b>Камео создано!</b>\n\n{text}", reply_markup=kb, parse_mode="HTML")
+        await call.message.edit_text(f"{ce('check', '✅')} <b>Камео создано!</b>\n\n{text}", reply_markup=kb, parse_mode="HTML")
     except Exception:
-        await call.message.answer(f"✅ <b>Камео создано!</b>\n\n{text}", reply_markup=kb, parse_mode="HTML")
+        await call.message.answer(f"{ce('check', '✅')} <b>Камео создано!</b>\n\n{text}", reply_markup=kb, parse_mode="HTML")
     await call.answer("Создано!")
 
 
@@ -3746,7 +3803,7 @@ async def on_cameo_cancel(call: CallbackQuery, state: FSMContext):
     cameo_wizard_buffers.pop(owner_id, None)
     await state.clear()
     try:
-        await call.message.edit_text("❌ Действие с Камео отменено.")
+        await call.message.edit_text(f"{ce('ban', '❌')} Действие с Камео отменено.", parse_mode="HTML")
     except Exception:
         pass
     await call.answer("Отменено")
@@ -3784,14 +3841,15 @@ async def on_cameo_show_pics(call: CallbackQuery):
     if not imgs:
         await call.answer("Фото не найдены", show_alert=True)
         return
-    caption = f"🎭 Фото-референсы Камео @{cameo['handle']} ({len(imgs)} шт.)"
+    caption = f"{ce('cosmos', '🎭')} Фото-референсы Камео @{cameo['handle']} ({len(imgs)} шт.)"
     if len(imgs) == 1:
-        await call.message.answer_photo(BufferedInputFile(imgs[0], filename=f"{cameo['handle']}.jpg"), caption=caption)
+        await call.message.answer_photo(BufferedInputFile(imgs[0], filename=f"{cameo['handle']}.jpg"), caption=caption, parse_mode="HTML")
     else:
         media = [
             InputMediaPhoto(
                 media=BufferedInputFile(b, filename=f"{cameo['handle']}_{idx}.jpg"),
                 caption=caption if idx == 0 else None,
+                parse_mode="HTML" if idx == 0 else None,
             )
             for idx, b in enumerate(imgs[:3])
         ]
@@ -3889,10 +3947,10 @@ async def on_cameo_edit_desc_btn(call: CallbackQuery, state: FSMContext):
     await state.update_data(cameo_key=cameo["key"])
     await state.set_state(CameoState.editing_description)
     await call.message.answer(
-        f"✏️ Отправьте новое описание для <code>@{html.escape(cameo['handle'])}</code>\n"
+        f"{ce('book', '✏️')} Отправьте новое описание для <code>@{html.escape(cameo['handle'])}</code>\n"
         f"(или <code>-</code> чтобы очистить):",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="❌ Отмена", callback_data=f"cm_cancel:{owner_id}")
+            cbtn("Отмена", callback_data=f"cm_cancel:{owner_id}", icon_key="ban", fallback_emoji="❌", style="danger")
         ]]),
         parse_mode="HTML",
     )
@@ -3933,9 +3991,9 @@ async def on_cameo_delete_btn(call: CallbackQuery):
         return
     text, kb = render_cameo_hub(owner_id)
     try:
-        await call.message.edit_text(f"🗑 Камео удалено.\n\n{text}", reply_markup=kb, parse_mode="HTML")
+        await call.message.edit_text(f"{ce('ban', '🗑')} Камео удалено.\n\n{text}", reply_markup=kb, parse_mode="HTML")
     except Exception:
-        await call.message.answer(f"🗑 Камео удалено.\n\n{text}", reply_markup=kb, parse_mode="HTML")
+        await call.message.answer(f"{ce('ban', '🗑')} Камео удалено.\n\n{text}", reply_markup=kb, parse_mode="HTML")
     await call.answer("Удалено")
 
 
@@ -4053,11 +4111,11 @@ async def on_watermark_preview(call: CallbackQuery):
     await call.answer("Готовлю превью...")
     png_bytes = await watermark_utils.render_watermark_preview_card()
     if not png_bytes:
-        await call.message.answer("⚠️ Не удалось собрать превью ватермарок.")
+        await call.message.answer(f"{ce('warn', '⚠️')} Не удалось собрать превью ватермарок.", parse_mode="HTML")
         return
     await call.message.answer_photo(
         BufferedInputFile(png_bytes, filename="watermarks_preview.png"),
-        caption="💧 <b>Доступные ватермарки</b>\nВыберите нужную в меню выше.",
+        caption=f"{ce('gem', '💧')} <b>Доступные ватермарки</b>\nВыберите нужную в меню выше.",
         parse_mode="HTML",
     )
 
@@ -4153,7 +4211,10 @@ async def handle_text(message: Message, bot: Bot, state: FSMContext):
     # Private chat:
     draft_m = fresh_draft(user_id)
     if draft_m and draft_m.get("menu_mode") == "motion":
-        await message.reply("🕺 В Motion текст не нужен: пришлите фото персонажа, потом видео с движением.")
+        await message.reply(
+        f"{ce('dance', '🕺')} В Motion текст не нужен: пришлите фото персонажа, потом видео с движением.",
+        parse_mode="HTML",
+    )
         return
     # If user already has an active draft open, update its prompt without wiping references!
     if fresh_draft(user_id) is not None:
@@ -4709,7 +4770,7 @@ async def on_custom_duration_prompt(call: CallbackQuery, state: FSMContext):
         return
     await state.set_state(UserInputState.waiting_for_duration)
     await call.message.reply(
-        "⏱ <b>Введите точную длительность видео в секундах:</b>\n"
+        f"{ce('load_hourglass', '⏱')} <b>Введите точную длительность видео в секундах:</b>\n"
         "<i>Например: 1, 2, 3, 4, 7, 10, 15... (любое число от 1 до 30)</i>",
         parse_mode="HTML"
     )
@@ -4875,7 +4936,7 @@ async def on_cancel_draft(call: CallbackQuery):
     user_drafts.pop(owner_id, None)
     try:
         await call.message.edit_text(
-            "❌ <b>Генерация отменена.</b> Для нового запроса используйте /video или /image.",
+            f"{ce('ban', '❌')} <b>Генерация отменена.</b> Для нового запроса используйте /video или /image.",
             parse_mode="HTML"
         )
     except Exception:
@@ -4979,20 +5040,20 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
     if menu_mode == "image":
         chips.append(f"{resolution} · {ratio}")
     elif menu_mode == "motion":
-        chips.append(f"🕺 {resolution}")
+        chips.append(f"{ce('dance', '🕺')} {resolution}")
     else:
         dur_label = "Авто" if duration == -1 else f"{duration} сек"
         chips.append(f"{dur_label} · {resolution} · {ratio}")
     if ref_images:
-        chips.append(f"📎 {len(ref_images)}")
+        chips.append(f"{ce('pin', '📎')} {len(ref_images)}")
     if used_cameos:
-        chips.append("🎭 " + " ".join(f"@{h}" for h in used_cameos[:3]))
+        chips.append(f"{ce('cosmos', '🎭')} " + " ".join(f"@{h}" for h in used_cameos[:3]))
     if job.ref_video:
-        chips.append("🎞 видео-реф")
+        chips.append(f"{ce('console', '🎞')} видео-реф")
     wm_info = watermark_utils.get_watermark_info(job.watermark_id, user_id=call.from_user.id)
-    chips.append(f"💧 {wm_info['short']}")
+    chips.append(f"{ce('gem', '💧')} {wm_info['short']}")
     if cost > 0:
-        chips.append(f"💳 ~{cost} кр.")
+        chips.append(f"{ce('card', '💳')} ~{cost} кр.")
     quote = f"\n<blockquote expandable>{html.escape(prompt[:500])}</blockquote>" if prompt else ""
 
     try:

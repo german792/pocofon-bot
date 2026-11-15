@@ -9,14 +9,15 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 logger = logging.getLogger(__name__)
 
-# Curated custom emojis from YellowColorEmoji, greenrandom1, space_by_EmojiStikBot, LoadingsEmoji & ilovegun
+# Curated 100% ANIMATED custom emojis (YellowColorEmoji, greenrandom1, LoadingsEmoji, ilovegun — zero static)
 EMOJI_PACK: Dict[str, Tuple[str, str]] = {
-    # greenrandom1 (neon green POCO aesthetic)
+    # greenrandom1 (animated .webm — neon green POCO aesthetic)
     "spark": ("5393346680202470010", "✨"),
     "wand": ("5391215461595619398", "✨"),
     "flame": ("5391291190458983255", "🔥"),
     "console": ("5393392481733713694", "🎮"),
     "mask": ("5390810553553789663", "🎭"),
+    "cosmos": ("5390810553553789663", "🎭"),
     "gem": ("5393151890550694497", "💎"),
     "check": ("5391117231398592540", "✅"),
     "pin": ("5393348750376706864", "📌"),
@@ -26,32 +27,40 @@ EMOJI_PACK: Dict[str, Tuple[str, str]] = {
     "globe": ("5391254988179643937", "🌐"),
     "back": ("5391091830962004343", "⬅️"),
     "next": ("5393457035092172735", "➡️"),
+    "down": ("5393555299648937543", "👇"),
+    "up": ("5391212523837988003", "☝️"),
     "gift": ("5391086187374978074", "🎁"),
     "dot": ("5391076601007972395", "🟢"),
-    # YellowColorEmoji (golden yellow accents)
+    "planet": ("5393503493753413560", "🪐"),
+    "astro": ("5391143293260143367", "👽"),
+    "eye": ("5391324545175002432", "👁"),
+    "alchemy": ("5391332692727966064", "🧪"),
+    "book": ("5390953258137166783", "📖"),
+    "voice": ("5391036812430945263", "🎙"),
+    "heart": ("5393564950440451455", "💚"),
+    "crystal": ("5391143843015956922", "🌟"),
+    # YellowColorEmoji (animated .webm — golden yellow accents)
     "bolt": ("5474610502279637013", "⚡"),
     "fire": ("5474342835622782187", "🔥"),
+    "rocket": ("5474342835622782187", "🚀"),
+    "nova": ("5474241190926755356", "🌟"),
+    "twinkle": ("5474524319465874968", "✨"),
     "uhd": ("5474136007177679142", "📐"),
     "vip": ("5474209240665041113", "👑"),
     "star": ("5188612843401914868", "⭐"),
     "card": ("5474641619317698626", "💳"),
+    "coin": ("5188663180418623845", "🪙"),
     "idea": ("5188367033833630878", "💡"),
     "party": ("5188614183431710025", "🎉"),
     "check_y": ("5474484535183811843", "✅"),
     "gem_y": ("5188264839381788929", "💎"),
     "warn": ("5188414871179372207", "⚠️"),
+    "alert": ("5474259474602534008", "❌"),
+    "ban": ("5188476607039286175", "❌"),
+    "mail": ("5474356317525126077", "📩"),
+    "dot_y": ("5474382439516219269", "🟡"),
     "dance": ("5188174202686939924", "🕺"),
-    # space_by_EmojiStikBot (cosmic rockets, planets, avatars)
-    "rocket": ("5242339405351389609", "🚀"),
-    "rocket_p": ("5242592593673491113", "🚀"),
-    "planet": ("5242349537179242860", "🪐"),
-    "galaxy": ("5242227706136924612", "🌌"),
-    "astro": ("5242729551590625678", "👨\u200d🚀"),
-    "comet": ("5242574980012606719", "☄️"),
-    "ufo": ("5242284580093860699", "🛸"),
-    "nova": ("5242353329635361457", "✨"),
-    "cosmos": ("5242664693289488782", "🎭"),
-    # LoadingsEmoji (animated TGS spinners & loaders)
+    # LoadingsEmoji (animated .tgs — spinners, loaders & geometric UI)
     "load_orbit": ("6003326057363540975", "⏳"),
     "load_ring": ("6001553618849762672", "🔄"),
     "load_atom": ("6003384297120074872", "⚛️"),
@@ -62,7 +71,11 @@ EMOJI_PACK: Dict[str, Tuple[str, str]] = {
     "load_dots": ("6003714666004483380", "⏳"),
     "load_starburst": ("6003708133359227206", "🔄"),
     "load_neon": ("6003687135264115944", "🔄"),
-    # ilovegun (animated tactical & golden action accents)
+    "grid": ("6003358179423948133", "🔲"),
+    "replay": ("6001346176224334172", "🔄"),
+    "chat": ("6003378662122982771", "💬"),
+    "cube": ("6003414791387877649", "🧊"),
+    # ilovegun (animated .webm — golden & neon tactical action accents)
     "shot": ("5343845137711637758", "💥"),
     "aim_green": ("5348537264928465455", "🎯"),
     "ak_gold": ("5199598948838285850", "🔫"),
