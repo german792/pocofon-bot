@@ -54,7 +54,8 @@
     "destry_prime_hebante",
     "kukishrik",
     "zolotoytiktok",
-    "antimellstudio"
+    "antimellstudio",
+    "axolf"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -94,7 +95,8 @@
     9285030551,
     8509726288,
     7420002075,
-    5197785785
+    5197785785,
+    5982306869
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -477,6 +479,14 @@
       "name": "last",
       "added_at": 1794734304.0814734,
       "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "axolf": {
+      "user_id": 5982306869,
+      "username": "axolf",
+      "name": "тимафей наличка",
+      "added_at": 1794743765.3877187,
+      "added_by": "group_-5444101670",
       "role": "user"
     }
   }
