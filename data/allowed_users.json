@@ -60,7 +60,8 @@
     "sjisidek",
     "mya1creator",
     "tukhgf",
-    "iasln65"
+    "iasln65",
+    "sosirou"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -536,6 +537,14 @@
       "username": "Iasln65",
       "name": "@Iasln65",
       "added_at": 1794762459.0522044,
+      "added_by": "@GermanUstinf",
+      "role": "user"
+    },
+    "sosirou": {
+      "user_id": null,
+      "username": "Sosirou",
+      "name": "@Sosirou",
+      "added_at": 1794763357.4697487,
       "added_by": "@GermanUstinf",
       "role": "user"
     }
