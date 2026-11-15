@@ -56,7 +56,8 @@
     "zolotoytiktok",
     "antimellstudio",
     "axolf",
-    "nodebilyeafool"
+    "nodebilyeafool",
+    "sjisidek"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -98,7 +99,8 @@
     7420002075,
     5197785785,
     5982306869,
-    7999651446
+    7999651446,
+    6856937972
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -496,6 +498,14 @@
       "username": "NoDebilYeaFool",
       "name": "Шлёпа",
       "added_at": 1794745570.9384446,
+      "added_by": "group_-5444101670",
+      "role": "user"
+    },
+    "sjisidek": {
+      "user_id": 6856937972,
+      "username": "sjisidek",
+      "name": "Андрей",
+      "added_at": 1794747846.5536933,
       "added_by": "group_-5444101670",
       "role": "user"
     }
