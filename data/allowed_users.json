@@ -62,7 +62,8 @@
     "tukhgf",
     "iasln65",
     "sosirou",
-    "grrrmondays1"
+    "grrrmondays1",
+    "maksonaiy"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -556,6 +557,14 @@
       "username": "GrrrMondays1",
       "name": "@GrrrMondays1",
       "added_at": 1794768441.7855194,
+      "added_by": "@GermanUstinf",
+      "role": "user"
+    },
+    "maksonaiy": {
+      "user_id": null,
+      "username": "MaksonAIy",
+      "name": "@MaksonAIy",
+      "added_at": 1794768845.233518,
       "added_by": "@GermanUstinf",
       "role": "user"
     }
