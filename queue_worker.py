@@ -19,6 +19,7 @@ from api_client import (
 from config import MODELS, BASE_DIR, DEFAULT_MODEL, MAX_CONCURRENT_JOBS, calculate_credit_cost
 import image_utils
 import history_manager
+from emoji_theme import ce, cbtn
 from watermark_utils import (
     apply_watermark,
     apply_watermark_image,
@@ -114,13 +115,13 @@ def _result_keyboard(user_id: int, kind: str = "video", extra_rows=None) -> Inli
     rows = list(extra_rows or [])
     if kind == "image":
         rows.append([
-            InlineKeyboardButton(text="🖼 Ещё фото", callback_data=f"open_menu:image:{user_id}", style="success"),
-            InlineKeyboardButton(text="🎬 В видео", callback_data=f"open_menu:video:{user_id}", style="primary"),
+            cbtn("Ещё фото", callback_data=f"open_menu:image:{user_id}", icon_key="wand", fallback_emoji="🖼", style="success"),
+            cbtn("В видео", callback_data=f"open_menu:video:{user_id}", icon_key="flame", fallback_emoji="🎬", style="primary"),
         ])
     else:
         rows.append([
-            InlineKeyboardButton(text="🎬 Ещё видео", callback_data=f"open_menu:video:{user_id}", style="success"),
-            InlineKeyboardButton(text="🖼 Фото", callback_data=f"open_menu:image:{user_id}", style="primary"),
+            cbtn("Ещё видео", callback_data=f"open_menu:video:{user_id}", icon_key="flame", fallback_emoji="🎬", style="success"),
+            cbtn("Фото", callback_data=f"open_menu:image:{user_id}", icon_key="wand", fallback_emoji="🖼", style="primary"),
         ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -437,10 +438,10 @@ class GenerationQueue:
             user_line = f"👤 {job.user_name}\n" if job.user_name else ""
             ref_part = f"  ·  📎 {ref_count}" if ref_count > 0 else ""
             caption = (
-                f"🖼 <b>Изображение готово</b>\n"
+                f"{ce('spark', '🖼')} <b>Изображение готово</b>\n"
                 f"{user_line}\n"
                 f"{_quote(job.prompt)}\n"
-                f"<b>{html.escape(str(model_name))}</b>  ·  {job.resolution} · {job.ratio}{ref_part}  ·  ⚡ {total_elapsed} с"
+                f"<b>{html.escape(str(model_name))}</b>  ·  {job.resolution} · {job.ratio}{ref_part}  ·  {ce('bolt', '⚡')} {total_elapsed} с"
             )
 
             if not (temp_file and temp_file.exists()):
@@ -667,10 +668,10 @@ class GenerationQueue:
         user_line = f"👤 {job.user_name}\n" if job.user_name else ""
         ref_part = f"  ·  📎 {ref_count}" if ref_count > 0 else ""
         caption = (
-            f"🎬 <b>Видео готово</b>\n"
+            f"{ce('party', '🎬')} <b>Видео готово</b>\n"
             f"{user_line}\n"
             f"{_quote(job.prompt)}\n"
-            f"<b>{html.escape(str(model_name))}</b>  ·  {dur_label} · {job.resolution} · {job.ratio}{ref_part}  ·  ⚡ {total_elapsed} с"
+            f"<b>{html.escape(str(model_name))}</b>  ·  {dur_label} · {job.resolution} · {job.ratio}{ref_part}  ·  {ce('bolt', '⚡')} {total_elapsed} с"
         )
 
         video_input = FSInputFile(str(temp_file), filename=f"video_{job.user_id}.mp4")
