@@ -53,7 +53,8 @@
     "ustinova_tvoe_oil",
     "destry_prime_hebante",
     "kukishrik",
-    "zolotoytiktok"
+    "zolotoytiktok",
+    "antimellstudio"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -468,6 +469,14 @@
       "name": "ZOLOTOY",
       "added_at": 1794681306.2846067,
       "added_by": "group_-5444101670",
+      "role": "user"
+    },
+    "antimellstudio": {
+      "user_id": 8871319864,
+      "username": "antimellstudio",
+      "name": "last",
+      "added_at": 1794734304.0814734,
+      "added_by": "group_-1004328649380",
       "role": "user"
     }
   }
