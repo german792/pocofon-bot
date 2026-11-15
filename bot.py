@@ -131,7 +131,7 @@ def render_cameo_hub(user_id: int) -> Tuple[str, InlineKeyboardMarkup]:
     """Render user's personal + public Cameo library hub."""
     cameos = cameo_manager.list_cameos_for_user(user_id)
     if cameos:
-        lines = ["🎭 <b>Камео — ваши персонажи</b>\n"]
+        lines = [f"{ce('cosmos', '🎭')} <b>Камео — ваши персонажи</b>\n"]
         for c in cameos[:25]:
             badge = "🌐 " if c.get("is_public") else ""
             n_imgs = len(c.get("images") or [])
@@ -144,7 +144,7 @@ def render_cameo_hub(user_id: int) -> Tuple[str, InlineKeyboardMarkup]:
         text = "\n".join(lines)
     else:
         text = (
-            "🎭 <b>Камео — ваши персонажи</b>\n\n"
+            f"{ce('cosmos', '🎭')} <b>Камео — ваши персонажи</b>\n\n"
             "Пока нет сохранённых Камео.\n\n"
             "Сохраните 1–3 фото лица/персонажа под коротким <code>@тегом</code> — и используйте его "
             "в видео, фото и замене персонажа просто написав <code>@тег</code> в промпте!\n\n"
@@ -162,7 +162,7 @@ def render_cameo_hub(user_id: int) -> Tuple[str, InlineKeyboardMarkup]:
                 callback_data=f"cm_view:{c['id']}:{user_id}",
             ))
         rows.append(row)
-    rows.append([InlineKeyboardButton(text="➕ Создать Камео", callback_data=f"cm_new:{user_id}", style="primary")])
+    rows.append([cbtn("Создать Камео", callback_data=f"cm_new:{user_id}", icon_key="astro", fallback_emoji="➕", style="primary")])
     rows.append([InlineKeyboardButton(text="❌ Закрыть", callback_data=f"cm_close:{user_id}")])
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -173,7 +173,7 @@ def render_cameo_picker(draft: Dict[str, Any], owner_id: int) -> Tuple[str, Inli
     attached = set(draft_cameo_handles(draft, owner_id))
     if cameos:
         lines = [
-            "🎭 <b>Выбор Камео для генерации</b>\n",
+            f"{ce('cosmos', '🎭')} <b>Выбор Камео для генерации</b>\n",
             "Нажмите на персонажа, чтобы прикрепить/открепить его к текущему запросу "
             "(фото персонажа автоматически подставятся при запуске).\n",
         ]
@@ -182,7 +182,7 @@ def render_cameo_picker(draft: Dict[str, Any], owner_id: int) -> Tuple[str, Inli
         text = "\n".join(lines)
     else:
         text = (
-            "🎭 <b>Выбор Камео</b>\n\n"
+            f"{ce('cosmos', '🎭')} <b>Выбор Камео</b>\n\n"
             "У вас пока нет сохранённых персонажей. Нажмите <b>➕ Создать Камео</b> "
             "или отправьте фото с подписью <code>/cameo @тег</code>."
         )
@@ -200,7 +200,7 @@ def render_cameo_picker(draft: Dict[str, Any], owner_id: int) -> Tuple[str, Inli
                 **({"style": "success"} if is_on else {}),
             ))
         rows.append(row)
-    rows.append([InlineKeyboardButton(text="➕ Создать новое Камео", callback_data=f"cm_new:{owner_id}", style="primary")])
+    rows.append([cbtn("Создать новое Камео", callback_data=f"cm_new:{owner_id}", icon_key="astro", fallback_emoji="➕", style="primary")])
     rows.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data=f"cm_back_draft:{owner_id}")])
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -370,9 +370,9 @@ def voice_text_of(draft: Dict[str, Any]) -> str:
 def tabs_row(active: str, owner_id: int) -> List[InlineKeyboardButton]:
     """Three top tabs: video / photo / motion with native animated custom emoji icons."""
     items = [
-        ("video", "Видео", "flame", "🎬"),
+        ("video", "Видео", "rocket", "🎬"),
         ("image", "Фото", "wand", "🖼"),
-        ("motion", "Motion", "bolt", "🕺"),
+        ("motion", "Motion", "dance", "🕺"),
     ]
     row = []
     for key, label, icon_key, fb in items:
@@ -440,7 +440,7 @@ def build_motion_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inli
     rows.append(orient_row)
     rows.append([cameo_picker_button(draft, owner_id), watermark_picker_button(owner_id)])
     ready = bool(draft.get("motion_image")) and bool(draft.get("ref_video"))
-    rows.append([cbtn("Запустить", callback_data=f"gen:{owner_id}", icon_key="bolt", fallback_emoji="🕺", style="success" if ready else None)])
+    rows.append([cbtn("Запустить", callback_data=f"gen:{owner_id}", icon_key="rocket", fallback_emoji="🕺", style="success" if ready else None)])
     rows.append([InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}", style="danger")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -697,7 +697,7 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     cost = calculate_credit_cost(cur_model, dur, res)
     btn_text = f"Сгенерировать видео (~{cost} кр.)" if cost > 0 else "Сгенерировать видео"
     rows.append([
-        cbtn(btn_text, callback_data=f"gen:{owner_id}", icon_key="flame", fallback_emoji="🚀", style="success"),
+        cbtn(btn_text, callback_data=f"gen:{owner_id}", icon_key="rocket", fallback_emoji="🚀", style="success"),
         InlineKeyboardButton(text="❌ Отмена", callback_data=f"can:{owner_id}", style="danger")
     ])
 
@@ -947,7 +947,7 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
         cost = calculate_credit_cost(cur_model, 0, "")
         cost_line = f"💳 <b>Стоимость:</b> ~{cost} кредитов\n" if cost > 0 else ""
         return (
-            f"🎙 <b>Меню озвучки ElevenLabs V3</b>\n\n"
+            f"{ce('planet', '🎙')} <b>Меню озвучки ElevenLabs V3</b>\n\n"
             f"{user_line}"
             f"🤖 <b>Модель:</b> {minfo['name']} — <i>{minfo['desc']}</i>\n"
             f"📝 <b>Текст для озвучки:</b> <i>{html.escape(str(prompt))}</i>\n"
@@ -965,7 +965,7 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
 
     if step == "model":
         return (
-            f"{ce('flame', '🎬')} <b>Шаг 1 из 3: Выберите модель для видео</b>\n\n"
+            f"{ce('rocket', '🎬')} <b>Шаг 1 из 3: Выберите модель для видео</b>\n\n"
             f"{user_line}"
             f"{ce('idea', '📝')} <b>Промпт:</b> <i>{html.escape(str(prompt))}</i>\n"
             f"{ce('pin', '📌')} <b>Референсы:</b> {ref_badge}\n"
@@ -978,7 +978,7 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
 
     if step == "duration":
         return (
-            f"⏱ <b>Шаг 2 из 3: Выберите длительность видео</b>\n\n"
+            f"{ce('load_hourglass', '⏱')} <b>Шаг 2 из 3: Выберите длительность видео</b>\n\n"
             f"{user_line}"
             f"🤖 <b>Модель:</b> {minfo['name']} ({min_dur}–{max_dur} сек)\n"
             f"📝 <b>Промпт:</b> <i>{html.escape(str(prompt))}</i>\n"
@@ -1007,7 +1007,7 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
     cost_line = f"💳 <b>Стоимость:</b> ~{cost} кредитов\n" if cost > 0 else "💳 <b>Стоимость:</b> Бесплатно\n"
 
     return (
-        f"{ce('spark', '⚙️')} <b>Шаг 3 из 3: Настройка качества и запуск</b>\n\n"
+        f"{ce('load_gears', '⚙️')} <b>Шаг 3 из 3: Настройка качества и запуск</b>\n\n"
         f"{user_line}"
         f"{ce('console', '🤖')} <b>Модель:</b> {minfo['name']}\n"
         f"⏱ <b>Длительность:</b> {dur_str}\n"
@@ -1219,12 +1219,12 @@ async def handle_start_and_help(message: Message, state: FSMContext):
 
     start_kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            cbtn("Видео", callback_data=f"open_menu:video:{uid}", icon_key="flame", fallback_emoji="🎬", style="success"),
+            cbtn("Видео", callback_data=f"open_menu:video:{uid}", icon_key="rocket", fallback_emoji="🎬", style="success"),
             cbtn("Фото", callback_data=f"open_menu:image:{uid}", icon_key="wand", fallback_emoji="🖼", style="primary"),
-            cbtn("Motion", callback_data=f"open_menu:motion:{uid}", icon_key="bolt", fallback_emoji="🕺", style="primary"),
+            cbtn("Motion", callback_data=f"open_menu:motion:{uid}", icon_key="dance", fallback_emoji="🕺", style="primary"),
         ],
         [
-            cbtn("Камео (@персонажи)", callback_data=f"cameo_menu:{uid}", icon_key="mask", fallback_emoji="🎭"),
+            cbtn("Камео (@персонажи)", callback_data=f"cameo_menu:{uid}", icon_key="cosmos", fallback_emoji="🎭"),
             cbtn("Ватермарка", callback_data=f"wm_menu:{uid}", icon_key="gem", fallback_emoji="💧"),
         ],
     ])
@@ -1236,10 +1236,10 @@ async def handle_start_and_help(message: Message, state: FSMContext):
         else "Просто напишите, что создать, или выберите ниже"
     )
     text = (
-        f"{ce('spark', '👋')} <b>{html.escape(first_name)}, это Poco AI</b>\n"
-        f"Видео, фото и Motion за пару тапов.\n\n"
+        f"{ce('nova', '👋')} <b>{html.escape(first_name)}, это Poco AI</b>\n"
+        f"Видео, фото и Motion за пару тапов {ce('shot', '⚡')}\n\n"
         f"{how} {ce('bolt', '👇')}\n\n"
-        f"<blockquote>{ce('pin', '📎')} Фото с подписью станет референсом · {ce('mask', '🎭')} Камео: /cameo\n"
+        f"<blockquote>{ce('pin', '📎')} Фото с подписью станет референсом · {ce('cosmos', '🎭')} Камео: /cameo\n"
         f"{ce('gem', '💧')} Ватермарка: /watermark · {ce('card', '💳')} /balance · 🔲 /grid · {ce('console', '🤖')} /model</blockquote>"
     )
     if in_group:
@@ -4997,7 +4997,7 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
 
     try:
         await call.message.edit_text(
-            f"{ce('flame', '🚀')} <b>Генерация запущена</b>\n"
+            f"{ce('rocket', '🚀')} <b>Генерация запущена</b>\n"
             f"<b>{html.escape(model_info['name'])}</b>  ·  " + "  ·  ".join(chips) +
             f"{quote}",
             parse_mode="HTML"

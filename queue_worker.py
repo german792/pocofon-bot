@@ -19,7 +19,7 @@ from api_client import (
 from config import MODELS, BASE_DIR, DEFAULT_MODEL, MAX_CONCURRENT_JOBS, calculate_credit_cost
 import image_utils
 import history_manager
-from emoji_theme import ce, cbtn
+from emoji_theme import ce, cbtn, loader_emoji
 from watermark_utils import (
     apply_watermark,
     apply_watermark_image,
@@ -116,11 +116,11 @@ def _result_keyboard(user_id: int, kind: str = "video", extra_rows=None) -> Inli
     if kind == "image":
         rows.append([
             cbtn("Ещё фото", callback_data=f"open_menu:image:{user_id}", icon_key="wand", fallback_emoji="🖼", style="success"),
-            cbtn("В видео", callback_data=f"open_menu:video:{user_id}", icon_key="flame", fallback_emoji="🎬", style="primary"),
+            cbtn("В видео", callback_data=f"open_menu:video:{user_id}", icon_key="rocket", fallback_emoji="🎬", style="primary"),
         ])
     else:
         rows.append([
-            cbtn("Ещё видео", callback_data=f"open_menu:video:{user_id}", icon_key="flame", fallback_emoji="🎬", style="success"),
+            cbtn("Ещё видео", callback_data=f"open_menu:video:{user_id}", icon_key="rocket", fallback_emoji="🎬", style="success"),
             cbtn("Фото", callback_data=f"open_menu:image:{user_id}", icon_key="wand", fallback_emoji="🖼", style="primary"),
         ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -277,12 +277,12 @@ class GenerationQueue:
 
         chips = []
         if backend in ("davinci_image", "qwen_image"):
-            head = f"🖼 <b>{model_name}</b> · создаю изображение"
+            head = f"{ce('nova', '🖼')} <b>{model_name}</b> · создаю изображение"
             chips.append(f"{job.resolution} · {job.ratio}")
         elif backend == "davinci_voice":
-            head = f"🎙 <b>{model_name}</b> · озвучиваю текст"
+            head = f"{ce('planet', '🎙')} <b>{model_name}</b> · озвучиваю текст"
         else:
-            head = f"🎬 <b>{model_name}</b> · создаю видео"
+            head = f"{ce('rocket', '🎬')} <b>{model_name}</b> · создаю видео"
             chips.append(f"{dur_label} · {job.resolution} · {job.ratio}")
             if backend == "minimax":
                 chips.append("🔊 музыка")
@@ -294,12 +294,13 @@ class GenerationQueue:
             chips.append(f"💳 ~{cost} кр.")
         chips_line = "   ".join(chips)
 
+        spinner = loader_emoji(stage, elapsed)
         return (
             f"{head}\n"
             f"{user_line}\n"
             f"{_quote(job.prompt)}\n"
             f"{bar}\n"
-            f"<i>{SPINNER_FRAMES[(elapsed // 3) % len(SPINNER_FRAMES)]} {safe_stage} · {elapsed} с</i>\n\n"
+            f"<i>{spinner} {safe_stage} · {elapsed} с</i>\n\n"
             f"{chips_line}"
         )
 
@@ -441,7 +442,7 @@ class GenerationQueue:
                 f"{ce('spark', '🖼')} <b>Изображение готово</b>\n"
                 f"{user_line}\n"
                 f"{_quote(job.prompt)}\n"
-                f"<b>{html.escape(str(model_name))}</b>  ·  {job.resolution} · {job.ratio}{ref_part}  ·  {ce('bolt', '⚡')} {total_elapsed} с"
+                f"<b>{html.escape(str(model_name))}</b>  ·  {job.resolution} · {job.ratio}{ref_part}  ·  {ce('shot', '⚡')} {total_elapsed} с"
             )
 
             if not (temp_file and temp_file.exists()):
@@ -513,7 +514,7 @@ class GenerationQueue:
             except Exception:
                 await self._update_status(
                     job,
-                    "🎉 <b>Генерация завершена!</b>\n<i>Изображение отправлено сообщением выше ☝️</i>"
+                    f"{ce('party', '🎉')} <b>Генерация завершена!</b>\n<i>Изображение отправлено сообщением выше ☝️</i>"
                 )
             return
 
@@ -555,10 +556,10 @@ class GenerationQueue:
 
             user_line = f"👤 {job.user_name}\n" if job.user_name else ""
             caption = (
-                f"🎙 <b>Озвучка готова</b>\n"
+                f"{ce('planet', '🎙')} <b>Озвучка готова</b>\n"
                 f"{user_line}\n"
                 f"{_quote(job.prompt)}\n"
-                f"<b>{html.escape(str(model_name))}</b>  ·  ⚡ {total_elapsed} с"
+                f"<b>{html.escape(str(model_name))}</b>  ·  {ce('shot', '⚡')} {total_elapsed} с"
             )
 
             audio_input = FSInputFile(str(audio_file), filename=f"elevenlabs_{job.user_id}.mp3")
@@ -671,7 +672,7 @@ class GenerationQueue:
             f"{ce('party', '🎬')} <b>Видео готово</b>\n"
             f"{user_line}\n"
             f"{_quote(job.prompt)}\n"
-            f"<b>{html.escape(str(model_name))}</b>  ·  {dur_label} · {job.resolution} · {job.ratio}{ref_part}  ·  {ce('bolt', '⚡')} {total_elapsed} с"
+            f"<b>{html.escape(str(model_name))}</b>  ·  {dur_label} · {job.resolution} · {job.ratio}{ref_part}  ·  {ce('shot', '⚡')} {total_elapsed} с"
         )
 
         video_input = FSInputFile(str(temp_file), filename=f"video_{job.user_id}.mp4")

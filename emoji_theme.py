@@ -9,7 +9,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 logger = logging.getLogger(__name__)
 
-# Curated animated custom emojis extracted from YellowColorEmoji & greenrandom1
+# Curated custom emojis from YellowColorEmoji, greenrandom1, space_by_EmojiStikBot, LoadingsEmoji & ilovegun
 EMOJI_PACK: Dict[str, Tuple[str, str]] = {
     # greenrandom1 (neon green POCO aesthetic)
     "spark": ("5393346680202470010", "✨"),
@@ -41,7 +41,41 @@ EMOJI_PACK: Dict[str, Tuple[str, str]] = {
     "gem_y": ("5188264839381788929", "💎"),
     "warn": ("5188414871179372207", "⚠️"),
     "dance": ("5188174202686939924", "🕺"),
+    # space_by_EmojiStikBot (cosmic rockets, planets, avatars)
+    "rocket": ("5242339405351389609", "🚀"),
+    "rocket_p": ("5242592593673491113", "🚀"),
+    "planet": ("5242349537179242860", "🪐"),
+    "galaxy": ("5242227706136924612", "🌌"),
+    "astro": ("5242729551590625678", "👨\u200d🚀"),
+    "comet": ("5242574980012606719", "☄️"),
+    "ufo": ("5242284580093860699", "🛸"),
+    "nova": ("5242353329635361457", "✨"),
+    "cosmos": ("5242664693289488782", "🎭"),
+    # LoadingsEmoji (animated TGS spinners & loaders)
+    "load_orbit": ("6003326057363540975", "⏳"),
+    "load_ring": ("6001553618849762672", "🔄"),
+    "load_atom": ("6003384297120074872", "⚛️"),
+    "load_pulse": ("6003367185970368385", "🌀"),
+    "load_gears": ("6003859951863205054", "⚙️"),
+    "load_hourglass": ("6003342034641882211", "⏳"),
+    "load_dual": ("6003497512457997922", "🔄"),
+    "load_dots": ("6003714666004483380", "⏳"),
+    "load_starburst": ("6003708133359227206", "🔄"),
+    "load_neon": ("6003687135264115944", "🔄"),
+    # ilovegun (animated tactical & golden action accents)
+    "shot": ("5343845137711637758", "💥"),
+    "aim_green": ("5348537264928465455", "🎯"),
+    "ak_gold": ("5199598948838285850", "🔫"),
 }
+
+LOADER_CYCLE_KEYS = (
+    "load_neon",
+    "load_orbit",
+    "load_atom",
+    "load_pulse",
+    "load_dual",
+    "load_dots",
+)
 
 CUSTOM_EMOJI_TEXT_ENABLED = True
 CUSTOM_EMOJI_BUTTONS_ENABLED = True
@@ -54,6 +88,19 @@ def ce(key: str, fallback: Optional[str] = None) -> str:
     if not CUSTOM_EMOJI_TEXT_ENABLED or not cid:
         return fb
     return f'<tg-emoji emoji-id="{cid}">{fb}</tg-emoji>'
+
+
+def loader_emoji(stage: str = "", elapsed: int = 0) -> str:
+    """Pick an animated LoadingsEmoji `<tg-emoji>` suited to the current generation stage."""
+    low = (stage or "").lower()
+    if "отправка" in low or "запуск" in low:
+        return ce("load_hourglass", "⏳")
+    if "скачива" in low or "отправля" in low or "накладыва" in low:
+        return ce("load_starburst", "📤")
+    if "монта" in low or "сборк" in low or "постобработ" in low:
+        return ce("load_gears", "⚙️")
+    key = LOADER_CYCLE_KEYS[(max(0, elapsed) // 4) % len(LOADER_CYCLE_KEYS)]
+    return ce(key, "⏳")
 
 
 def cbtn(
