@@ -64,7 +64,8 @@
     "sosirou",
     "grrrmondays1",
     "maksonaiy",
-    "pop1k1337"
+    "pop1k1337",
+    "markizakisak"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -575,6 +576,14 @@
       "username": "Pop1k1337",
       "name": "@Pop1k1337",
       "added_at": 1794780378.9103122,
+      "added_by": "@GermanUstinf",
+      "role": "user"
+    },
+    "markizakisak": {
+      "user_id": null,
+      "username": "Markizakisak",
+      "name": "@Markizakisak",
+      "added_at": 1794810392.3998907,
       "added_by": "@GermanUstinf",
       "role": "user"
     }
