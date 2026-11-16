@@ -114,7 +114,8 @@
     8609605940,
     6900261657,
     5960712902,
-    5213334969
+    5213334969,
+    5604132539
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -580,7 +581,7 @@
       "role": "user"
     },
     "markizakisak": {
-      "user_id": null,
+      "user_id": 5604132539,
       "username": "Markizakisak",
       "name": "@Markizakisak",
       "added_at": 1794810392.3998907,
