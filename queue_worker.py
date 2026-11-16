@@ -167,6 +167,7 @@ class GenerationJob:
     voice_mode: str = "tts"
     motion_orient: str = "image"
     watermark_id: str = ""
+    show_watermark_username: Optional[bool] = None
     job_id: str = field(default_factory=lambda: f"tg_{uuid.uuid4().hex[:12]}")
 
     def get_all_ref_images(self) -> List[bytes]:
@@ -419,6 +420,7 @@ class GenerationQueue:
                         username=job.user_name,
                         watermark_id=job.watermark_id or None,
                         user_id=job.user_id,
+                        show_username=job.show_watermark_username,
                     )
                     if wm_ok and wm_out.exists() and wm_out.stat().st_size > 0:
                         raw_file.unlink(missing_ok=True)
@@ -631,6 +633,7 @@ class GenerationQueue:
                     target_duration=job.duration,
                     watermark_id=job.watermark_id or None,
                     user_id=job.user_id,
+                    show_username=job.show_watermark_username,
                 )
             finally:
                 if temp_audio_ref and temp_audio_ref.exists():

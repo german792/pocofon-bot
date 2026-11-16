@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import copy
+import html
 import io
 import json
 import logging
@@ -111,6 +112,17 @@ WATERMARK_PRESETS: Dict[str, Dict[str, Any]] = {
             "realme_poco_ai_watermark_alpha.webm",
         ],
     },
+    "cmf": {
+        "id": "cmf",
+        "label": "🔴 CMF AI",
+        "short": "CMF AI",
+        "desc": "Точечный логотип CMF by Nothing · POCO AI",
+        "width_scale": 1.45,
+        "still_ss": "3.5",
+        "candidates": [
+            "cmf_v2_poco_ai_watermark_alpha.webm",
+        ],
+    },
     "sora": {
         "id": "sora",
         "label": "☁️ Sora 2",
@@ -158,6 +170,7 @@ def _fetch_prefs_from_github_once() -> None:
                 _prefs_cache = {
                     "default": gh_data.get("default", DEFAULT_WATERMARK_ID),
                     "users": dict(gh_data.get("users") or {}),
+                    "user_badge": dict(gh_data.get("user_badge") or {}),
                 }
                 WATERMARK_PREFS_FILE.write_text(json.dumps(_prefs_cache, indent=2, ensure_ascii=False), encoding="utf-8")
     except Exception as e:
@@ -214,13 +227,14 @@ def _load_prefs() -> Dict[str, Any]:
         _fetch_prefs_from_github_once()
         if _prefs_cache is not None:
             return _prefs_cache
-        data: Dict[str, Any] = {"default": DEFAULT_WATERMARK_ID, "users": {}}
+        data: Dict[str, Any] = {"default": DEFAULT_WATERMARK_ID, "users": {}, "user_badge": {}}
         if WATERMARK_PREFS_FILE.exists():
             try:
                 raw = json.loads(WATERMARK_PREFS_FILE.read_text(encoding="utf-8"))
                 if isinstance(raw, dict):
                     data["default"] = raw.get("default", DEFAULT_WATERMARK_ID)
                     data["users"] = dict(raw.get("users") or {})
+                    data["user_badge"] = dict(raw.get("user_badge") or {})
             except Exception as e:
                 logger.warning(f"Failed to read {WATERMARK_PREFS_FILE}: {e}")
         _prefs_cache = data
@@ -296,6 +310,22 @@ def set_user_watermark_id(user_id: int, watermark_id: str) -> str:
     return watermark_id
 
 
+def get_user_watermark_username_enabled(user_id: Optional[int] = None) -> bool:
+    if user_id is None:
+        return False
+    data = _load_prefs()
+    return bool((data.get("user_badge") or {}).get(str(user_id), False))
+
+
+def set_user_watermark_username_enabled(user_id: int, enabled: bool) -> bool:
+    flag = bool(enabled)
+    with _prefs_lock:
+        data = _load_prefs()
+        data.setdefault("user_badge", {})[str(user_id)] = flag
+        _save_prefs(data)
+    return flag
+
+
 def resolve_watermark_id(watermark_id: Optional[str] = None, user_id: Optional[int] = None) -> str:
     if watermark_id and watermark_id in WATERMARK_PRESETS and _resolve_preset_file(watermark_id) is not None:
         return watermark_id
@@ -323,6 +353,40 @@ def get_watermark_src(watermark_id: Optional[str] = None, user_id: Optional[int]
 WATERMARK_SRC = get_watermark_src()
 
 
+def _load_ui_font(size: int, bold: bool = False):
+    """Load a crisp scalable TTF font across Windows and Ubuntu CI hosts."""
+    candidates = (
+        [
+            "arialbd.ttf",
+            r"C:\Windows\Fonts\arialbd.ttf",
+            r"C:\Windows\Fonts\segoeuib.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+        ]
+        if bold
+        else [
+            "arial.ttf",
+            r"C:\Windows\Fonts\arial.ttf",
+            r"C:\Windows\Fonts\segoeui.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+        ]
+    )
+    for font_path in candidates:
+        try:
+            return ImageFont.truetype(font_path, size=size)
+        except Exception:
+            continue
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
+
+
 async def render_watermark_preview_card() -> Optional[bytes]:
     """Render a side-by-side preview PNG of all available watermark presets."""
     presets = list_available_watermarks()
@@ -331,12 +395,8 @@ async def render_watermark_preview_card() -> Optional[bytes]:
     card_w, row_h = 760, 148
     canvas = Image.new("RGB", (card_w, max(row_h, len(presets) * row_h + 16)), (24, 28, 36))
     draw = ImageDraw.Draw(canvas)
-    try:
-        font_title = ImageFont.truetype("arial.ttf", size=22)
-        font_sub = ImageFont.truetype("arial.ttf", size=15)
-    except Exception:
-        font_title = ImageFont.load_default()
-        font_sub = ImageFont.load_default()
+    font_title = _load_ui_font(22, bold=True)
+    font_sub = _load_ui_font(15, bold=False)
 
     y = 12
     for idx, preset in enumerate(presets, start=1):
@@ -348,8 +408,8 @@ async def render_watermark_preview_card() -> Optional[bytes]:
             decode_args = ["-c:v", "libvpx-vp9"] if src.suffix.lower() == ".webm" else []
             proc = await asyncio.create_subprocess_exec(
                 "ffmpeg", "-v", "error", *decode_args,
-                "-ss", preset.get("still_ss", "3.0"),
                 "-i", str(src),
+                "-ss", preset.get("still_ss", "3.0"),
                 "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -415,41 +475,57 @@ def calculate_watermark_width(video_w: int, video_h: int, width_scale: float = 1
     return target_w
 
 
-def make_username_badge(username: str, height: int = 28) -> Tuple[Path, int, int]:
-    """Generates a stylish semi-transparent glass pill badge with the user's @username."""
-    clean_user = re.sub(r'<[^>]+>', '', str(username)).strip()
-    if clean_user and not clean_user.startswith("@"):
+def calculate_badge_height(video_w: int, video_h: int, wm_w: int) -> int:
+    """Compute prominent badge height scaled cleanly for 480p/720p/1080p/4K videos & images."""
+    return max(36, min(88, int(min(video_w, video_h) * 0.075), int(wm_w * 0.42)))
+
+
+def make_username_badge(
+    username: str,
+    height: int = 48,
+    max_width: Optional[int] = None,
+) -> Tuple[Path, int, int]:
+    """Generate a large, high-contrast glass pill badge with the user's @username."""
+    clean_user = html.unescape(re.sub(r"<[^>]+>", "", str(username or ""))).strip()
+    if clean_user and not clean_user.startswith("@") and " " not in clean_user:
         clean_user = f"@{clean_user}"
     if not clean_user:
-        clean_user = "@POCO"
+        clean_user = "@POCO_AI"
 
-    try:
-        font = ImageFont.truetype("arial.ttf", size=max(12, int(height * 0.52)))
-    except Exception:
-        font = ImageFont.load_default()
+    bh = max(28, int(height))
+    font_size = max(16, int(bh * 0.58))
+    pad_x = max(14, int(bh * 0.38))
 
     dummy = Image.new("RGBA", (1, 1))
     draw = ImageDraw.Draw(dummy)
+    font = _load_ui_font(font_size, bold=True)
     bbox = draw.textbbox((0, 0), clean_user, font=font)
     tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
 
-    pad_x = 10
+    if max_width and max_width > 60:
+        while tw + pad_x * 2 > max_width and font_size > 14:
+            font_size = max(14, font_size - 2)
+            font = _load_ui_font(font_size, bold=True)
+            bbox = draw.textbbox((0, 0), clean_user, font=font)
+            tw = bbox[2] - bbox[0]
+            th = bbox[3] - bbox[1]
+
     bw = tw + pad_x * 2
-    bh = height
+    bh = max(bh, th + max(14, int(font_size * 0.52)))
     badge = Image.new("RGBA", (bw, bh), (0, 0, 0, 0))
     d = ImageDraw.Draw(badge)
-    # Dark glass pill with neon-green border
+    border_w = max(2, bh // 20)
     d.rounded_rectangle(
         (0, 0, bw - 1, bh - 1),
         radius=bh // 2,
-        fill=(10, 20, 16, 200),
-        outline=(39, 254, 120, 230),
-        width=1
+        fill=(10, 16, 20, 222),
+        outline=(39, 254, 120, 235),
+        width=border_w,
     )
-    tx = pad_x
+    tx = (bw - tw) // 2 - bbox[0]
     ty = (bh - th) // 2 - bbox[1]
-    d.text((tx, ty), clean_user, fill=(245, 255, 250, 255), font=font)
+    d.text((tx, ty), clean_user, fill=(255, 255, 255, 255), font=font)
 
     badge_path = BASE_DIR / f"badge_{uuid.uuid4().hex[:8]}.png"
     badge.save(badge_path)
@@ -468,6 +544,37 @@ async def _run_ffmpeg_command(cmd: list[str], timeout: float = 120.0) -> Tuple[i
     return proc.returncode, err_text
 
 
+def _should_render_username_badge(
+    username: Optional[str],
+    user_id: Optional[int],
+    show_username: Optional[bool],
+) -> bool:
+    if not username:
+        return False
+    if SHOW_USERNAME_BADGE:
+        return True
+    if show_username is not None:
+        return bool(show_username)
+    return get_user_watermark_username_enabled(user_id)
+
+
+def _badge_combo_tail(
+    base_label: str,
+    pos_expr: str,
+    badge_w: int,
+    badge_h: int,
+    shortest: bool,
+) -> str:
+    short_opt = ":shortest=1" if shortest else ""
+    if badge_w > 0 and badge_h > 0:
+        return (
+            f"[wm]pad=w=max(iw\\,{badge_w}):h=ih+{badge_h + 6}:x=(ow-iw)/2:y=0:color=0x00000000[wm_pad];"
+            f"[wm_pad][2:v]overlay=(W-w)/2:H-h[wm_combo];"
+            f"[{base_label}][wm_combo]overlay={pos_expr}{short_opt}[outv]"
+        )
+    return f"[{base_label}][wm]overlay={pos_expr}{short_opt}[outv]"
+
+
 async def apply_watermark(
     input_path: Path,
     output_path: Path,
@@ -476,6 +583,7 @@ async def apply_watermark(
     target_duration: Optional[int] = None,
     watermark_id: Optional[str] = None,
     user_id: Optional[int] = None,
+    show_username: Optional[bool] = None,
 ) -> bool:
     """Overlays the animated watermark + optional username badge onto a video,
     cycling corners every time the watermark disappears (every 5.0s).
@@ -498,12 +606,12 @@ async def apply_watermark(
         my = max(18, min(56, int(vh * 0.045)))
         mid_right = "gte(mod(t,10),2)*lt(mod(t,10),4.5)+gte(mod(t,10),9)"
         bot_left = "gte(mod(t,10),4.5)*lt(mod(t,10),6.5)"
-        cycle_expr_x = f"x='if({mid_right}, W-w-{mx}, {mx})'"
-        cycle_expr_y = f"y='if({mid_right}, trunc((H-h)*0.48), if({bot_left}, H-h-{my}, {my}))'"
+        cycle_expr_x = f"if({mid_right}, W-w-{mx}, {mx})"
+        cycle_expr_y = f"if({mid_right}, trunc((H-h)*0.48), if({bot_left}, H-h-{my}, {my}))"
     else:
         c_sec = WEBM_CYCLE_SEC
-        cycle_expr_x = f"x='if(mod(floor(t/{c_sec}),2), 24, W-w-24)'"
-        cycle_expr_y = f"y='if(between(mod(floor(t/{c_sec}),4), 1, 2), H-h-24, 24)'"
+        cycle_expr_x = f"if(mod(floor(t/{c_sec}),2), 24, W-w-24)"
+        cycle_expr_y = f"if(between(mod(floor(t/{c_sec}),4), 1, 2), H-h-24, 24)"
 
     base_prep = "[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2[base];"
     non_webm_prep = (
@@ -514,52 +622,39 @@ async def apply_watermark(
 
     badge_path: Optional[Path] = None
     badge_w, badge_h = 0, 0
-    if username and SHOW_USERNAME_BADGE:
+    if _should_render_username_badge(username, user_id, show_username):
         try:
-            badge_h = max(22, int(wm_w * 0.16))
-            badge_path, badge_w, badge_h = make_username_badge(username, height=badge_h)
+            target_bh = calculate_badge_height(vw, vh, wm_w)
+            max_bw = max(120, min(int(vw * 0.54), vw - 48))
+            badge_path, badge_w, badge_h = make_username_badge(
+                username or "", height=target_bh, max_width=max_bw
+            )
         except Exception as e:
             logger.warning(f"Could not generate username badge: {e}")
             badge_path = None
+            badge_w, badge_h = 0, 0
 
     has_audio_ref = audio_ref_path is not None and audio_ref_path.exists() and audio_ref_path.stat().st_size > 0
     dur_args = ["-t", str(target_duration)] if target_duration and target_duration > 0 else []
 
+    video_pos_expr = f"x='{cycle_expr_x}':y='{cycle_expr_y}'"
     try:
         if is_webm:
+            audio_input_idx = 3 if badge_path else 2
+            filter_str = (
+                f"{base_prep}"
+                f"[1:v]scale={wm_w}:-1,format=yuva420p[wm];"
+                f"{_badge_combo_tail('base', video_pos_expr, badge_w, badge_h, shortest=True)}"
+            )
+            cmd_primary = [
+                "ffmpeg", "-y",
+                "-i", str(input_path),
+                "-c:v", "libvpx-vp9",
+                "-stream_loop", "-1",
+                "-i", str(watermark_src),
+            ]
             if badge_path:
-                # Composite watermark + username badge into one stream [wm_combo]
-                filter_str = (
-                    f"{base_prep}"
-                    f"[1:v]scale={wm_w}:-1,format=yuva420p[wm];"
-                    f"[wm]pad=w=max(iw\\,{badge_w}):h=ih+{badge_h + 4}:x=(ow-iw)/2:y=0:color=0x00000000[wm_pad];"
-                    f"[wm_pad][2:v]overlay=(W-w)/2:H-h[wm_combo];"
-                    f"[base][wm_combo]overlay={cycle_expr_x}:{cycle_expr_y}:shortest=1[outv]"
-                )
-                cmd_primary = [
-                    "ffmpeg", "-y",
-                    "-i", str(input_path),
-                    "-c:v", "libvpx-vp9",
-                    "-stream_loop", "-1",
-                    "-i", str(watermark_src),
-                    "-loop", "1",
-                    "-i", str(badge_path),
-                ]
-                audio_input_idx = 3
-            else:
-                filter_str = (
-                    f"{base_prep}"
-                    f"[1:v]scale={wm_w}:-1,format=yuva420p[wm];"
-                    f"[base][wm]overlay={cycle_expr_x}:{cycle_expr_y}:shortest=1[outv]"
-                )
-                cmd_primary = [
-                    "ffmpeg", "-y",
-                    "-i", str(input_path),
-                    "-c:v", "libvpx-vp9",
-                    "-stream_loop", "-1",
-                    "-i", str(watermark_src),
-                ]
-                audio_input_idx = 2
+                cmd_primary.extend(["-loop", "1", "-i", str(badge_path)])
 
             if has_audio_ref:
                 cmd_primary.extend(["-stream_loop", "-1", "-i", str(audio_ref_path)])
@@ -597,7 +692,7 @@ async def apply_watermark(
             try:
                 rc, err = await _run_ffmpeg_command(cmd_primary, timeout=120.0)
                 if rc == 0 and output_path.exists() and output_path.stat().st_size > 0:
-                    logger.info(f"Successfully applied watermark with user badge ({username}) and audio to {output_path}")
+                    logger.info(f"Successfully applied watermark with user badge ({username if badge_path else None}) and audio to {output_path}")
                     return True
                 logger.warning(f"libvpx-vp9 watermark attempt failed (code {rc}), trying fallback...")
             except Exception as e:
@@ -605,34 +700,19 @@ async def apply_watermark(
 
             # Fallback with colorkey / chromakey
             fb_key = "chromakey=0x05ba06:0.22:0.06" if is_sora else "colorkey=0x000000:0.15:0.02"
+            filter_str_fb = (
+                f"{base_prep}"
+                f"[1:v]{fb_key},scale={wm_w}:-1,format=yuva420p[wm];"
+                f"{_badge_combo_tail('base', video_pos_expr, badge_w, badge_h, shortest=True)}"
+            )
+            cmd_fb = [
+                "ffmpeg", "-y",
+                "-i", str(input_path),
+                "-stream_loop", "-1",
+                "-i", str(watermark_src),
+            ]
             if badge_path:
-                filter_str_fb = (
-                    f"{base_prep}"
-                    f"[1:v]{fb_key},scale={wm_w}:-1,format=yuva420p[wm];"
-                    f"[wm]pad=w=max(iw\\,{badge_w}):h=ih+{badge_h + 4}:x=(ow-iw)/2:y=0:color=0x00000000[wm_pad];"
-                    f"[wm_pad][2:v]overlay=(W-w)/2:H-h[wm_combo];"
-                    f"[base][wm_combo]overlay={cycle_expr_x}:{cycle_expr_y}:shortest=1[outv]"
-                )
-                cmd_fb = [
-                    "ffmpeg", "-y",
-                    "-i", str(input_path),
-                    "-stream_loop", "-1",
-                    "-i", str(watermark_src),
-                    "-loop", "1",
-                    "-i", str(badge_path),
-                ]
-            else:
-                filter_str_fb = (
-                    f"{base_prep}"
-                    f"[1:v]{fb_key},scale={wm_w}:-1,format=yuva420p[wm];"
-                    f"[base][wm]overlay={cycle_expr_x}:{cycle_expr_y}:shortest=1[outv]"
-                )
-                cmd_fb = [
-                    "ffmpeg", "-y",
-                    "-i", str(input_path),
-                    "-stream_loop", "-1",
-                    "-i", str(watermark_src),
-                ]
+                cmd_fb.extend(["-loop", "1", "-i", str(badge_path)])
 
             if has_audio_ref:
                 cmd_fb.extend(["-stream_loop", "-1", "-i", str(audio_ref_path)])
@@ -672,28 +752,33 @@ async def apply_watermark(
 
         else:
             # Fallback for MP4/GIF/PNG watermarks
+            audio_input_idx = 3 if badge_path else 2
             filter_str = (
                 f"{base_prep}"
                 f"{non_webm_prep}"
-                f"[base][wm]overlay={cycle_expr_x}:{cycle_expr_y}:shortest=1[outv]"
+                f"{_badge_combo_tail('base', video_pos_expr, badge_w, badge_h, shortest=True)}"
             )
             cmd = [
                 "ffmpeg", "-y",
                 "-i", str(input_path),
                 "-stream_loop", "-1",
                 "-i", str(watermark_src),
-                "-filter_complex", filter_str,
-                "-map", "[outv]",
             ]
+            if badge_path:
+                cmd.extend(["-loop", "1", "-i", str(badge_path)])
             if has_audio_ref:
                 cmd.extend([
                     "-stream_loop", "-1", "-i", str(audio_ref_path),
-                    "-map", "2:a",
+                    "-filter_complex", filter_str,
+                    "-map", "[outv]",
+                    "-map", f"{audio_input_idx}:a",
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "22",
                     "-c:a", "aac", "-b:a", "192k", "-shortest", *dur_args, str(output_path),
                 ])
             else:
                 cmd.extend([
+                    "-filter_complex", filter_str,
+                    "-map", "[outv]",
                     "-map", "0:a?",
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "22",
                     "-c:a", "copy", *dur_args, str(output_path),
@@ -715,6 +800,7 @@ async def apply_watermark_image(
     username: Optional[str] = None,
     watermark_id: Optional[str] = None,
     user_id: Optional[int] = None,
+    show_username: Optional[bool] = None,
 ) -> bool:
     """Overlays the selected watermark + optional username badge onto a static image file."""
     preset = get_watermark_info(watermark_id=watermark_id, user_id=user_id)
@@ -738,51 +824,34 @@ async def apply_watermark_image(
 
     badge_path: Optional[Path] = None
     badge_w, badge_h = 0, 0
-    if username and SHOW_USERNAME_BADGE:
+    if _should_render_username_badge(username, user_id, show_username):
         try:
-            badge_h = max(22, int(wm_w * 0.16))
-            badge_path, badge_w, badge_h = make_username_badge(username, height=badge_h)
+            target_bh = calculate_badge_height(vw, vh, wm_w)
+            max_bw = max(120, min(int(vw * 0.54), vw - 48))
+            badge_path, badge_w, badge_h = make_username_badge(
+                username or "", height=target_bh, max_width=max_bw
+            )
         except Exception as e:
             logger.warning(f"Could not generate username badge for image: {e}")
             badge_path = None
+            badge_w, badge_h = 0, 0
 
     try:
+        still_trim = f"trim=start={still_ss},setpts=PTS-STARTPTS,trim=end_frame=1,"
         if is_webm:
+            filter_str = (
+                f"[1:v]{still_trim}scale={wm_w}:-1,format=yuva420p[wm];"
+                f"{_badge_combo_tail('0:v', img_overlay_pos, badge_w, badge_h, shortest=False)}"
+            )
+            cmd_primary = [
+                "ffmpeg", "-y",
+                "-i", str(input_path),
+                "-c:v", "libvpx-vp9",
+                "-i", str(watermark_src),
+            ]
             if badge_path:
-                filter_str = (
-                    f"[1:v]scale={wm_w}:-1,format=yuva420p[wm];"
-                    f"[wm]pad=w=max(iw\\,{badge_w}):h=ih+{badge_h + 4}:x=(ow-iw)/2:y=0:color=0x00000000[wm_pad];"
-                    f"[wm_pad][2:v]overlay=(W-w)/2:H-h[wm_combo];"
-                    f"[0:v][wm_combo]overlay={img_overlay_pos}[outv]"
-                )
-                cmd_primary = [
-                    "ffmpeg", "-y",
-                    "-i", str(input_path),
-                    "-c:v", "libvpx-vp9",
-                    "-ss", still_ss,
-                    "-i", str(watermark_src),
-                    "-i", str(badge_path),
-                    "-filter_complex", filter_str,
-                    "-map", "[outv]",
-                    "-frames:v", "1",
-                    str(output_path)
-                ]
-            else:
-                filter_str = (
-                    f"[1:v]scale={wm_w}:-1,format=yuva420p[wm];"
-                    f"[0:v][wm]overlay={img_overlay_pos}[outv]"
-                )
-                cmd_primary = [
-                    "ffmpeg", "-y",
-                    "-i", str(input_path),
-                    "-c:v", "libvpx-vp9",
-                    "-ss", still_ss,
-                    "-i", str(watermark_src),
-                    "-filter_complex", filter_str,
-                    "-map", "[outv]",
-                    "-frames:v", "1",
-                    str(output_path)
-                ]
+                cmd_primary.extend(["-i", str(badge_path)])
+            cmd_primary.extend(["-filter_complex", filter_str, "-map", "[outv]", "-frames:v", "1", str(output_path)])
 
             try:
                 rc, err = await _run_ffmpeg_command(cmd_primary, timeout=60.0)
@@ -793,39 +862,18 @@ async def apply_watermark_image(
 
             # Fallback
             fb_key = "chromakey=0x05ba06:0.22:0.06" if is_sora else "colorkey=0x000000:0.15:0.02"
+            filter_str_fb = (
+                f"[1:v]{still_trim}{fb_key},scale={wm_w}:-1,format=yuva420p[wm];"
+                f"{_badge_combo_tail('0:v', img_overlay_pos, badge_w, badge_h, shortest=False)}"
+            )
+            cmd_fb = [
+                "ffmpeg", "-y",
+                "-i", str(input_path),
+                "-i", str(watermark_src),
+            ]
             if badge_path:
-                filter_str_fb = (
-                    f"[1:v]{fb_key},scale={wm_w}:-1,format=yuva420p[wm];"
-                    f"[wm]pad=w=max(iw\\,{badge_w}):h=ih+{badge_h + 4}:x=(ow-iw)/2:y=0:color=0x00000000[wm_pad];"
-                    f"[wm_pad][2:v]overlay=(W-w)/2:H-h[wm_combo];"
-                    f"[0:v][wm_combo]overlay={img_overlay_pos}[outv]"
-                )
-                cmd_fb = [
-                    "ffmpeg", "-y",
-                    "-i", str(input_path),
-                    "-ss", still_ss,
-                    "-i", str(watermark_src),
-                    "-i", str(badge_path),
-                    "-filter_complex", filter_str_fb,
-                    "-map", "[outv]",
-                    "-frames:v", "1",
-                    str(output_path)
-                ]
-            else:
-                filter_str_fb = (
-                    f"[1:v]{fb_key},scale={wm_w}:-1,format=yuva420p[wm];"
-                    f"[0:v][wm]overlay={img_overlay_pos}[outv]"
-                )
-                cmd_fb = [
-                    "ffmpeg", "-y",
-                    "-i", str(input_path),
-                    "-ss", still_ss,
-                    "-i", str(watermark_src),
-                    "-filter_complex", filter_str_fb,
-                    "-map", "[outv]",
-                    "-frames:v", "1",
-                    str(output_path)
-                ]
+                cmd_fb.extend(["-i", str(badge_path)])
+            cmd_fb.extend(["-filter_complex", filter_str_fb, "-map", "[outv]", "-frames:v", "1", str(output_path)])
 
             rc, err = await _run_ffmpeg_command(cmd_fb, timeout=60.0)
             return rc == 0 and output_path.exists() and output_path.stat().st_size > 0
@@ -838,17 +886,21 @@ async def apply_watermark_image(
             )
             filter_str = (
                 f"{non_webm_img_prep}"
-                f"[0:v][wm]overlay={img_overlay_pos}[outv]"
+                f"{_badge_combo_tail('0:v', img_overlay_pos, badge_w, badge_h, shortest=False)}"
             )
             cmd = [
                 "ffmpeg", "-y",
                 "-i", str(input_path),
                 "-i", str(watermark_src),
+            ]
+            if badge_path:
+                cmd.extend(["-i", str(badge_path)])
+            cmd.extend([
                 "-filter_complex", filter_str,
                 "-map", "[outv]",
                 "-frames:v", "1",
                 str(output_path)
-            ]
+            ])
             rc, err = await _run_ffmpeg_command(cmd, timeout=60.0)
             return rc == 0 and output_path.exists() and output_path.stat().st_size > 0
 

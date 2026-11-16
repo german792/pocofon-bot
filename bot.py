@@ -275,6 +275,28 @@ def watermark_picker_button(owner_id: int) -> InlineKeyboardButton:
     )
 
 
+def is_draft_watermark_username_on(draft: Optional[Dict[str, Any]], owner_id: int) -> bool:
+    if draft is not None and "watermark_username" in draft:
+        return bool(draft["watermark_username"])
+    return watermark_utils.get_user_watermark_username_enabled(owner_id)
+
+
+def watermark_username_button(
+    owner_id: int,
+    draft: Optional[Dict[str, Any]] = None,
+    wide: bool = False,
+) -> InlineKeyboardButton:
+    is_on = is_draft_watermark_username_on(draft, owner_id)
+    prefix = "Юзернейм на ватермарке" if wide else "Юзернейм"
+    return cbtn(
+        f"{prefix}: Вкл" if is_on else f"{prefix}: Выкл",
+        callback_data=f"wm_user:{owner_id}",
+        icon_key="check" if is_on else "astro",
+        fallback_emoji="✅" if is_on else "🏷",
+        style="success" if is_on else None,
+    )
+
+
 def render_watermark_menu(
     user_id: int,
     user: Any = None,
@@ -285,11 +307,15 @@ def render_watermark_menu(
     def_id = watermark_utils.get_default_watermark_id()
     cur_info = watermark_utils.get_watermark_info(cur_id, user_id=user_id)
     presets = watermark_utils.list_available_watermarks()
+    draft = user_drafts.get(user_id)
+    badge_on = is_draft_watermark_username_on(draft, user_id)
+    badge_status = "Включен (крупно под ватермаркой)" if badge_on else "Выключен"
 
     lines = [
         f"{ce('gem', '💧')} <b>Выбор ватермарки на видео и фото</b>\n",
         f"{ce('check', '✅')} <b>Сейчас выбрана:</b> {html.escape(cur_info['label'])}",
-        f"<i>{html.escape(cur_info.get('desc', ''))}</i>\n",
+        f"<i>{html.escape(cur_info.get('desc', ''))}</i>",
+        f"{ce('astro', '🏷')} <b>Ваш Telegram @username:</b> {badge_status}\n",
         "Выберите нужный водяной знак ниже — он сразу применится ко всем вашим новым генерациям:",
     ]
     rows: List[List[InlineKeyboardButton]] = []
@@ -321,6 +347,7 @@ def render_watermark_menu(
                 )
             rows.append(row_pair)
 
+    rows.append([watermark_username_button(user_id, draft=draft, wide=True)])
     rows.append([cbtn("Превью всех ватермарок", callback_data=f"wm_preview:{user_id}", icon_key="spark", fallback_emoji="👁", style="primary")])
     if user and user_access.is_admin(user) and cur_id != def_id:
         rows.append([
@@ -457,7 +484,8 @@ def build_motion_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inli
             )
         )
     rows.append(orient_row)
-    rows.append([cameo_picker_button(draft, owner_id), watermark_picker_button(owner_id)])
+    rows.append([cameo_picker_button(draft, owner_id)])
+    rows.append([watermark_picker_button(owner_id), watermark_username_button(owner_id, draft)])
     ready = bool(draft.get("motion_image")) and bool(draft.get("ref_video"))
     rows.append([cbtn("Запустить", callback_data=f"gen:{owner_id}", icon_key="rocket", fallback_emoji="🕺", style="success" if ready else None)])
     rows.append([cbtn("Отмена", callback_data=f"can:{owner_id}", icon_key="ban", fallback_emoji="❌", style="danger")])
@@ -759,7 +787,7 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
         cbtn(f"Модель: {minfo.get('short', cur_model)}", callback_data=f"wstep:model:{owner_id}", icon_key="replay", fallback_emoji="🔄"),
         cbtn(f"Длительность: {dur}с", callback_data=f"wstep:duration:{owner_id}", icon_key="load_hourglass", fallback_emoji="⏱"),
     ])
-    rows.append([watermark_picker_button(owner_id)])
+    rows.append([watermark_picker_button(owner_id), watermark_username_button(owner_id, draft)])
 
     # Action row
     cost = calculate_credit_cost(cur_model, dur, res, generate_audio=audio)
@@ -845,7 +873,7 @@ def build_image_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
         btn_kwargs = {"style": "primary"} if is_active else {}
         ratio_buttons.append(InlineKeyboardButton(text=lbl, callback_data=f"sia:{rat}:{owner_id}", **btn_kwargs))
     rows.append(ratio_buttons)
-    rows.append([watermark_picker_button(owner_id)])
+    rows.append([watermark_picker_button(owner_id), watermark_username_button(owner_id, draft)])
 
     # Action row
     cost = calculate_credit_cost(cur_model, 1, res)
@@ -1076,6 +1104,9 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
         else ""
     )
 
+    wm_owner = int(draft.get("owner_id") or 0)
+    wm_info = watermark_utils.get_watermark_info(draft.get("watermark_id"), user_id=wm_owner or None)
+    wm_badge_note = " + @username" if is_draft_watermark_username_on(draft, wm_owner) else ""
     cost = calculate_credit_cost(cur_model, dur, res, generate_audio=audio)
     cost_line = (
         f"{ce('card', '💳')} <b>Стоимость:</b> ~{cost} кредитов\n"
@@ -1094,6 +1125,7 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
         f"{video_line}"
         f"{audio_ref_line}"
         f"{ce('uhd', '📐')} <b>Разрешение и формат:</b> {res} | {ratio_display}\n"
+        f"{ce('gem', '💧')} <b>Ватермарка:</b> {html.escape(wm_info['short'])}{wm_badge_note}\n"
         f"{audio_line}"
         f"{cost_line}\n"
         f"{ce('down', '👇')} <i>Выберите настройки качества и нажмите «Сгенерировать видео»:</i>\n"
@@ -1278,6 +1310,8 @@ def create_draft_for_user(
         "ref_video": ref_video,
         "owner_id": user_id,
         "user_name": user_name,
+        "watermark_id": watermark_utils.get_user_watermark_id(user_id),
+        "watermark_username": watermark_utils.get_user_watermark_username_enabled(user_id),
         "original_message_id": message_id,
         "menu_message_id": None,
         "menu_chat_id": None,
@@ -4109,6 +4143,52 @@ async def on_watermark_select(call: CallbackQuery):
     await call.answer(f"Выбрана ватермарка: {info['short']}")
 
 
+@router.callback_query(F.data.startswith("wm_user:"))
+async def on_watermark_username_toggle(call: CallbackQuery):
+    owner_id = int(call.data.split(":")[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = user_drafts.get(owner_id)
+    new_val = not is_draft_watermark_username_on(draft, owner_id)
+    watermark_utils.set_user_watermark_username_enabled(owner_id, new_val)
+    if draft is not None:
+        draft["watermark_username"] = new_val
+        draft["menu_message_id"] = call.message.message_id
+        draft["menu_chat_id"] = call.message.chat.id
+
+    in_wm_menu = bool(
+        call.message.reply_markup
+        and any(
+            (b.callback_data or "").startswith(("wm_set:", "wm_preview:", "wm_back:"))
+            for row in call.message.reply_markup.inline_keyboard
+            for b in row
+        )
+    )
+    if in_wm_menu or draft is None:
+        has_back_btn = bool(
+            call.message.reply_markup
+            and any(
+                (b.callback_data or "").startswith("wm_back:")
+                for row in call.message.reply_markup.inline_keyboard
+                for b in row
+            )
+        )
+        text, kb = render_watermark_menu(owner_id, user=call.from_user, from_draft=has_back_btn)
+    else:
+        text = format_draft_text(draft)
+        kb = build_settings_keyboard(draft, owner_id)
+
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        pass
+    await call.answer(
+        "✅ @username будет показан крупно под ватермаркой"
+        if new_val
+        else "🏷 @username на ватермарке выключен"
+    )
+
+
 @router.callback_query(F.data.startswith("wm_global:"))
 async def on_watermark_set_global(call: CallbackQuery):
     _, wm_id, uid_s = call.data.split(":")
@@ -5075,6 +5155,7 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
         voice_mode=draft.get("voice_mode", "tts") if menu_mode == "voice" else "tts",
         motion_orient=motion_orient,
         watermark_id=draft.get("watermark_id") or watermark_utils.get_user_watermark_id(call.from_user.id),
+        show_watermark_username=is_draft_watermark_username_on(draft, call.from_user.id),
     )
 
     await queue.add_job(job)
@@ -5094,7 +5175,8 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
     if job.ref_video:
         chips.append(f"{ce('console', '🎞')} видео-реф")
     wm_info = watermark_utils.get_watermark_info(job.watermark_id, user_id=call.from_user.id)
-    chips.append(f"{ce('gem', '💧')} {wm_info['short']}")
+    wm_chip = f"{wm_info['short']} + @username" if job.show_watermark_username else wm_info["short"]
+    chips.append(f"{ce('gem', '💧')} {wm_chip}")
     if cost > 0:
         chips.append(f"{ce('card', '💳')} ~{cost} кр.")
     quote = f"\n<blockquote expandable>{html.escape(prompt[:500])}</blockquote>" if prompt else ""
