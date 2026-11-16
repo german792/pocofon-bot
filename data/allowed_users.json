@@ -68,7 +68,8 @@
     "markizakisak",
     "heglol",
     "qwertzxp",
-    "kars_ulf"
+    "kars_ulf",
+    "mango_mark_1488_222"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -615,6 +616,14 @@
       "username": "Kars_Ulf",
       "name": "@Kars_Ulf",
       "added_at": 1794845065.4277449,
+      "added_by": "@GermanUstinf",
+      "role": "user"
+    },
+    "mango_mark_1488_222": {
+      "user_id": null,
+      "username": "Mango_mark_1488_222",
+      "name": "@Mango_mark_1488_222",
+      "added_at": 1794849746.4503908,
       "added_by": "@GermanUstinf",
       "role": "user"
     }
