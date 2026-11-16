@@ -67,7 +67,8 @@
     "pop1k1337",
     "markizakisak",
     "heglol",
-    "qwertzxp"
+    "qwertzxp",
+    "kars_ulf"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -605,6 +606,14 @@
       "username": "qwertzxp",
       "name": "@qwertzxp",
       "added_at": 1794841086.1211472,
+      "added_by": "@GermanUstinf",
+      "role": "user"
+    },
+    "kars_ulf": {
+      "user_id": null,
+      "username": "Kars_Ulf",
+      "name": "@Kars_Ulf",
+      "added_at": 1794845065.4277449,
       "added_by": "@GermanUstinf",
       "role": "user"
     }
