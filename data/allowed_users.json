@@ -65,7 +65,8 @@
     "grrrmondays1",
     "maksonaiy",
     "pop1k1337",
-    "markizakisak"
+    "markizakisak",
+    "heglol"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -585,6 +586,14 @@
       "username": "Markizakisak",
       "name": "@Markizakisak",
       "added_at": 1794810392.3998907,
+      "added_by": "@GermanUstinf",
+      "role": "user"
+    },
+    "heglol": {
+      "user_id": null,
+      "username": "heglol",
+      "name": "@heglol",
+      "added_at": 1794822905.847069,
       "added_by": "@GermanUstinf",
       "role": "user"
     }
