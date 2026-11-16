@@ -410,6 +410,7 @@ def resolve_cameos_for_generation(
     merged_refs = list(base_refs)
     uses_image_tags = category == "video" and model_api_id in (
         "seedance25",
+        "seedance25Flash",
         "seedance2",
         "seedance2Fast",
         "seedance2Mini",

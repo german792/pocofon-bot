@@ -69,6 +69,20 @@ MODELS = {
         "durations": list(range(1, 31)),
         "desc": "Флагман Seedance 2.5 (до 30с, 1080p, звук и мульти-референсы)"
     },
+    "s2_5_flash": {
+        "name": "Seedance 2.5 Flash",
+        "short": "⚡ 2.5 Flash",
+        "category": "video",
+        "backend": "davinci",
+        "api_id": "seedance25Flash",
+        "has_audio": True,
+        "multi_ref": True,
+        "video_ref": True,
+        "ref_limit": 10,
+        "durations": list(range(4, 31)),
+        "resolutions": ["480p", "720p"],
+        "desc": "Быстрый Seedance 2.5 Flash (4–30с, 480p/720p, звук, до 10 фото и видео-референс)"
+    },
     "s2_pro": {
         "name": "Seedance 2.0",
         "short": "🎬 Seedance 2.0",
@@ -661,6 +675,9 @@ def calculate_credit_cost(model_key: str, duration: int = 5, resolution: str = "
             elif dur <= 20:
                 return 2025
             return 3038  # 30s
+        elif api_id == "seedance25Flash":
+            rate = 29 if str(resolution).lower() == "480p" else 62
+            return int(dur * rate)
         elif api_id in ("seedance2", "seedance2Fast", "seedance2Mini"):
             return int(dur * 20)
         elif api_id == "seedance":
@@ -739,6 +756,7 @@ def calculate_credit_cost(model_key: str, duration: int = 5, resolution: str = "
 
 COMPACT_MODEL_LABELS = {
     "s2_5": "✨ Seed 2.5",
+    "s2_5_flash": "⚡ Seed 2.5F",
     "s2_pro": "🎬 Seed 2.0",
     "s2_fast": "🚀 2.0 Fast",
     "s2_mini": "⚡ 2.0 Mini",

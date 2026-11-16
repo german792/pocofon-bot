@@ -532,7 +532,7 @@ def align_draft_to_model(
     cur_model = draft.get("model_key", DEFAULT_MODEL)
     ratio_choices = (
         ["auto"] + allowed_ratios
-        if draft.get("ref_video") and cur_model in ("s2_5", "s2_pro", "s2_fast", "s2_mini")
+        if draft.get("ref_video") and cur_model in ("s2_5", "s2_5_flash", "s2_pro", "s2_fast", "s2_mini")
         else allowed_ratios
     )
     ratio = draft.get("ratio", DEFAULT_RATIO)

@@ -1109,9 +1109,9 @@ class DaVinciClient:
                 max_vid_sec = 10.0
             elif effective_model_id == "kling4Flash":
                 max_vid_sec = 20.0
-            elif effective_model_id in ("seedance25", "kling4"):
+            elif effective_model_id in ("seedance25", "seedance25Flash", "kling4"):
                 max_vid_sec = 30.0
-            if effective_model_id in ("seedance25", "seedance2", "seedance2Fast", "seedance2Mini", "seedance"):
+            if effective_model_id in ("seedance25", "seedance25Flash", "seedance2", "seedance2Fast", "seedance2Mini", "seedance"):
                 min_vid_sec = 2.2
             elif effective_model_id in ("geminiOmniFlash12", "geminiOmniFlash11"):
                 min_vid_sec = 1.2
@@ -1123,7 +1123,7 @@ class DaVinciClient:
             video_bucket_path = await self.upload_media(trimmed_ref_video, ext=".mp4", content_type="video/mp4")
 
         seedance_or_wan_ref = effective_model_id in (
-            "seedance25", "seedance2", "seedance2Fast", "seedance2Mini", "seedance", "wan30", "wan30Prime"
+            "seedance25", "seedance25Flash", "seedance2", "seedance2Fast", "seedance2Mini", "seedance", "wan30", "wan30Prime"
         )
         models_without_audio_input = (
             "geminiOmniFlash12",
@@ -1153,7 +1153,7 @@ class DaVinciClient:
         # Normalize duration per effective model for the upstream API call
         dur = max(1, min(60, duration if duration > 0 else 5))
         api_dur = dur
-        if effective_model_id == "seedance25":
+        if effective_model_id in ("seedance25", "seedance25Flash"):
             api_dur = max(4, min(30, api_dur))
         elif effective_model_id in ("seedance2", "seedance2Fast", "seedance2Mini", "seedance"):
             api_dur = max(4, min(15, api_dur))
@@ -1198,7 +1198,7 @@ class DaVinciClient:
             res = None
         elif effective_model_id == "minimaxH3":
             res = "2K" if str(res).lower() in ("1080p", "2k", "4k") else "768P"
-        elif effective_model_id in ("seedance2Fast", "seedance2Mini", "wan30", "wan30Prime", "wan26", "grok"):
+        elif effective_model_id in ("seedance25Flash", "seedance2Fast", "seedance2Mini", "wan30", "wan30Prime", "wan26", "grok"):
             if res not in ("480p", "720p"):
                 res = "720p"
         elif effective_model_id in (
@@ -1226,7 +1226,7 @@ class DaVinciClient:
 
         # Normalize dimension (aspect ratio) per effective model
         dim = ratio if ratio in ("16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "auto") else "16:9"
-        if dim == "auto" and effective_model_id not in ("seedance25", "seedance2", "seedance2Fast", "seedance2Mini", "seedance", "wan30", "wan30Prime", "wan26"):
+        if dim == "auto" and effective_model_id not in ("seedance25", "seedance25Flash", "seedance2", "seedance2Fast", "seedance2Mini", "seedance", "wan30", "wan30Prime", "wan26"):
             dim = "16:9"
         if effective_model_id in ("ltx25Pro", "ltx25Fast", "geminiOmniFlash12", "geminiOmniFlash11", "veo31", "veo31fast") and dim not in ("16:9", "9:16"):
             dim = "16:9"
@@ -1247,6 +1247,7 @@ class DaVinciClient:
         # Reference images vs startFrame
         multi_ref_models = (
             "seedance25",
+            "seedance25Flash",
             "seedance2",
             "seedance2Fast",
             "seedance2Mini",
@@ -1281,7 +1282,7 @@ class DaVinciClient:
         is_character_swap = any(
             w in low for w in ("персонаж", "геро", "человек", "лиц", "свап", "swap", "character", "анимир", "animate", "замен")
         )
-        if video_bucket_path and effective_model_id in ("seedance25", "seedance2", "seedance2Fast", "seedance2Mini", "seedance", "wan30", "wan30Prime"):
+        if video_bucket_path and effective_model_id in ("seedance25", "seedance25Flash", "seedance2", "seedance2Fast", "seedance2Mini", "seedance", "wan30", "wan30Prime"):
             has_vid_tag = "@video1" in low
             has_img_tag = "@image1" in low
             if reference_images_payload:
