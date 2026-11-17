@@ -1,5 +1,5 @@
 import io
-from typing import Optional
+from typing import Optional, Tuple
 from PIL import Image, ImageDraw, ImageFilter, ImageOps, ImageFont
 
 
@@ -78,6 +78,130 @@ def generate_text_seed_image(ratio: str = "16:9") -> bytes:
     return out_buf.getvalue()
 
 
+def _draw_grid_lines(
+    target_img: Image.Image,
+    rows: int = 3,
+    cols: int = 3,
+    thickness: Optional[int] = None,
+    thickness_mode: str = "thick",
+    color: str = "contrast",
+    show_border: bool = True,
+    show_labels: bool = False,
+    label_bg: Tuple[int, ...] = (0, 0, 0),
+    label_fg: Tuple[int, ...] = (255, 255, 255),
+) -> Image.Image:
+    w, h = target_img.size
+    rows = max(1, min(rows, 50))
+    cols = max(1, min(cols, 50))
+    min_dim = min(w, h)
+
+    min_cell = min(w / cols, h / rows)
+    if thickness and thickness > 0:
+        actual_thickness = max(2, min(thickness, int(min_dim * 0.15)))
+    else:
+        mode_multipliers = {
+            "thin": 0.0035,
+            "medium": 0.007,
+            "thick": 0.012,
+            "heavy": 0.019,
+        }
+        mode_key = thickness_mode.lower()
+        mult = mode_multipliers.get(mode_key, 0.012)
+        min_px = 2 if mode_key == "thin" else 4 if mode_key == "medium" else 6
+        actual_thickness = max(min_px, int(round(min_dim * mult)))
+        max_for_cell = max(2, int(min_cell * 0.18))
+        if actual_thickness > max_for_cell:
+            actual_thickness = max_for_cell
+
+    color_map = {
+        "contrast": ((255, 255, 255), (0, 0, 0)),
+        "white": ((255, 255, 255), (0, 0, 0)),
+        "black": ((0, 0, 0), (255, 255, 255)),
+        "red": ((255, 40, 40), (0, 0, 0)),
+        "green": ((0, 255, 80), (0, 0, 0)),
+        "yellow": ((255, 225, 0), (0, 0, 0)),
+        "cyan": ((0, 230, 255), (0, 0, 0)),
+    }
+    fg_col, bg_col = color_map.get(color.lower(), color_map["contrast"])
+    is_rgba = target_img.mode == "RGBA"
+    if is_rgba:
+        fg_col = (*fg_col, 255)
+        bg_col = (*bg_col, 255)
+
+    outline_extra = max(1, int(round(actual_thickness * 0.35)))
+    total_thickness = actual_thickness + outline_extra * 2 if bg_col else actual_thickness
+
+    draw = ImageDraw.Draw(target_img)
+
+    v_xs = [int(round(w * i / cols)) for i in range(1, cols)]
+    h_ys = [int(round(h * j / rows)) for j in range(1, rows)]
+
+    if bg_col:
+        if show_border:
+            draw.rectangle([0, 0, w - 1, h - 1], outline=bg_col, width=total_thickness)
+        for x in v_xs:
+            draw.line([(x, 0), (x, h)], fill=bg_col, width=total_thickness)
+        for y in h_ys:
+            draw.line([(0, y), (w, y)], fill=bg_col, width=total_thickness)
+
+    if show_border:
+        draw.rectangle([0, 0, w - 1, h - 1], outline=fg_col, width=actual_thickness)
+    for x in v_xs:
+        draw.line([(x, 0), (x, h)], fill=fg_col, width=actual_thickness)
+    for y in h_ys:
+        draw.line([(0, y), (w, y)], fill=fg_col, width=actual_thickness)
+
+    if show_labels and min_dim >= 200:
+        cell_w = w / cols
+        cell_h = h / rows
+        font_size = max(10, min(28, int(min(cell_w, cell_h) * 0.24)))
+        try:
+            font = ImageFont.load_default(size=font_size)
+        except TypeError:
+            font = ImageFont.load_default()
+        for r in range(rows):
+            for c in range(cols):
+                label = f"{chr(65 + c)}{r + 1}"
+                offset = max(3, min(8, int(min(cell_w, cell_h) * 0.08)))
+                lx = int(c * cell_w + actual_thickness + offset)
+                ly = int(r * cell_h + actual_thickness + offset)
+                tb = draw.textbbox((lx, ly), label, font=font)
+                pad = 2
+                draw.rectangle([tb[0] - pad, tb[1] - pad, tb[2] + pad, tb[3] + pad], fill=label_bg)
+                draw.text((lx, ly), label, fill=label_fg, font=font)
+    return target_img
+
+
+def render_grid_overlay_png(
+    width: int,
+    height: int,
+    rows: int = 3,
+    cols: int = 3,
+    thickness: Optional[int] = None,
+    thickness_mode: str = "thick",
+    color: str = "contrast",
+    show_border: bool = True,
+    show_labels: bool = False,
+) -> bytes:
+    """Render a transparent RGBA PNG grid overlay of exact (width, height) for video compositing."""
+    canvas = Image.new("RGBA", (max(2, int(width)), max(2, int(height))), (0, 0, 0, 0))
+    _draw_grid_lines(
+        canvas,
+        rows=rows,
+        cols=cols,
+        thickness=thickness,
+        thickness_mode=thickness_mode,
+        color=color,
+        show_border=show_border,
+        show_labels=show_labels,
+        label_bg=(0, 0, 0, 220),
+        label_fg=(255, 255, 255, 255),
+    )
+    out = io.BytesIO()
+    canvas.save(out, format="PNG")
+    return out.getvalue()
+
+
 def overlay_grid(
     image_bytes: bytes,
     rows: int = 3,
@@ -107,85 +231,16 @@ def overlay_grid(
     elif img.mode != "RGB":
         img = img.convert("RGB")
 
-    w, h = img.size
-    rows = max(1, min(rows, 50))
-    cols = max(1, min(cols, 50))
-    min_dim = min(w, h)
-
-    # Calculate thickness: adaptive to image size and cell density so dense grids stay crisp
-    min_cell = min(w / cols, h / rows)
-    if thickness and thickness > 0:
-        actual_thickness = max(2, min(thickness, int(min_dim * 0.15)))
-    else:
-        mode_multipliers = {
-            "thin": 0.0035,
-            "medium": 0.007,
-            "thick": 0.012,
-            "heavy": 0.019,
-        }
-        mode_key = thickness_mode.lower()
-        mult = mode_multipliers.get(mode_key, 0.012)
-        min_px = 2 if mode_key == "thin" else 4 if mode_key == "medium" else 6
-        actual_thickness = max(min_px, int(round(min_dim * mult)))
-        max_for_cell = max(2, int(min_cell * 0.18))
-        if actual_thickness > max_for_cell:
-            actual_thickness = max_for_cell
-
-    color_map = {
-        "contrast": ((255, 255, 255), (0, 0, 0)),
-        "white": ((255, 255, 255), (0, 0, 0)),
-        "black": ((0, 0, 0), (255, 255, 255)),
-        "red": ((255, 40, 40), (0, 0, 0)),
-        "green": ((0, 255, 80), (0, 0, 0)),
-        "yellow": ((255, 225, 0), (0, 0, 0)),
-        "cyan": ((0, 230, 255), (0, 0, 0)),
-    }
-    fg_col, bg_col = color_map.get(color.lower(), color_map["contrast"])
-
-    outline_extra = max(1, int(round(actual_thickness * 0.35)))
-    total_thickness = actual_thickness + outline_extra * 2 if bg_col else actual_thickness
-
-    draw = ImageDraw.Draw(img)
-
-    v_xs = [int(round(w * i / cols)) for i in range(1, cols)]
-    h_ys = [int(round(h * j / rows)) for j in range(1, rows)]
-
-    # 1. Background / outline pass (crisp contrast)
-    if bg_col:
-        if show_border:
-            draw.rectangle([0, 0, w - 1, h - 1], outline=bg_col, width=total_thickness)
-        for x in v_xs:
-            draw.line([(x, 0), (x, h)], fill=bg_col, width=total_thickness)
-        for y in h_ys:
-            draw.line([(0, y), (w, y)], fill=bg_col, width=total_thickness)
-
-    # 2. Foreground main lines
-    if show_border:
-        draw.rectangle([0, 0, w - 1, h - 1], outline=fg_col, width=actual_thickness)
-    for x in v_xs:
-        draw.line([(x, 0), (x, h)], fill=fg_col, width=actual_thickness)
-    for y in h_ys:
-        draw.line([(0, y), (w, y)], fill=fg_col, width=actual_thickness)
-
-    # 3. Optional cell labels (A1, A2... or numbers)
-    if show_labels and min_dim >= 200:
-        cell_w = w / cols
-        cell_h = h / rows
-        font_size = max(10, min(28, int(min(cell_w, cell_h) * 0.24)))
-        try:
-            font = ImageFont.load_default(size=font_size)
-        except TypeError:
-            font = ImageFont.load_default()
-        for r in range(rows):
-            for c in range(cols):
-                label = f"{chr(65 + c)}{r + 1}"
-                offset = max(3, min(8, int(min(cell_w, cell_h) * 0.08)))
-                lx = int(c * cell_w + actual_thickness + offset)
-                ly = int(r * cell_h + actual_thickness + offset)
-                tb = draw.textbbox((lx, ly), label, font=font)
-                pad = 2
-                draw.rectangle([tb[0] - pad, tb[1] - pad, tb[2] + pad, tb[3] + pad], fill=(0, 0, 0))
-                draw.text((lx, ly), label, fill=(255, 255, 255), font=font)
+    _draw_grid_lines(
+        img,
+        rows=rows,
+        cols=cols,
+        thickness=thickness,
+        thickness_mode=thickness_mode,
+        color=color,
+        show_border=show_border,
+        show_labels=show_labels,
+    )
 
     out_buf = io.BytesIO()
     img.save(out_buf, format="JPEG", quality=95)

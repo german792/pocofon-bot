@@ -1092,10 +1092,10 @@ class DaVinciClient:
         """Submit video generation task to POST /video/process. Returns processId."""
         await self.ensure_valid_token()
 
-        # Route Seedance video-reference jobs to Enterprise v2 Fast (seedance25 / seedance2 upstream
-        # rejects video_edit unpredictably, whereas seedance2Fast succeeds consistently).
+        # Route legacy Seedance v1 / Seedance 2.0 (which lacks native referenceVideo) to Enterprise v2 Fast;
+        # Seedance 2.5 (up to 30s) and Seedance 2.5 Flash support referenceVideo natively.
         effective_model_id = model_id
-        if ref_video and model_id in ("seedance25", "seedance2", "seedance"):
+        if ref_video and model_id in ("seedance2", "seedance"):
             logger.info(
                 f"[video/process] Routing video-ref {model_id} -> seedance2Fast "
                 "(reliable Seedance enterprise reference-to-video engine)"

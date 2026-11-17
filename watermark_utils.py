@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 import threading
 import urllib.request
 import uuid
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from PIL import Image, ImageDraw, ImageFont
 from config import BASE_DIR
+import image_utils
 
 logger = logging.getLogger(__name__)
 
@@ -435,22 +437,38 @@ async def render_watermark_preview_card() -> Optional[bytes]:
 
 
 async def get_media_dimensions(file_path: Path) -> Tuple[int, int]:
-    """Returns (width, height) of a video or image file using ffprobe, with fallback to PIL."""
+    """Returns display (width, height) of a video or image file using ffprobe, with fallback to PIL."""
     try:
         proc = await asyncio.create_subprocess_exec(
             "ffprobe", "-v", "error",
             "-select_streams", "v:0",
-            "-show_entries", "stream=width,height",
-            "-of", "csv=p=0:s=x",
+            "-show_entries", "stream=width,height:stream_tags=rotate:stream_side_data=rotation",
+            "-of", "json",
             str(file_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=8.0)
-        out = stdout.decode().strip()
-        if "x" in out:
-            parts = out.split("\n")[0].split("x")
-            return int(parts[0]), int(parts[1])
+        info = json.loads(stdout.decode("utf-8", "ignore").strip() or "{}")
+        streams = info.get("streams") or []
+        if streams:
+            st = streams[0]
+            vw = int(st.get("width") or 0)
+            vh = int(st.get("height") or 0)
+            rot_val = (st.get("tags") or {}).get("rotate")
+            if rot_val is None:
+                for sd in st.get("side_data_list") or []:
+                    if sd.get("rotation") is not None:
+                        rot_val = sd.get("rotation")
+                        break
+            if rot_val is not None:
+                try:
+                    if abs(int(round(float(rot_val)))) % 180 == 90:
+                        vw, vh = vh, vw
+                except Exception:
+                    pass
+            if vw > 0 and vh > 0:
+                return vw, vh
     except Exception as e:
         logger.debug(f"ffprobe dimension check failed for {file_path.name}: {e}")
 
@@ -910,6 +928,64 @@ async def apply_watermark_image(
                 badge_path.unlink(missing_ok=True)
             except Exception:
                 pass
+
+
+async def overlay_grid_video(
+    video_bytes: bytes,
+    rows: int = 3,
+    cols: int = 3,
+    thickness_mode: str = "thick",
+    color: str = "contrast",
+    show_labels: bool = False,
+) -> bytes:
+    """Overlay an adaptive high-contrast grid across all frames of a video while keeping audio."""
+    if not video_bytes:
+        return video_bytes
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        in_path = tmp_dir / "in.mp4"
+        grid_path = tmp_dir / "grid.png"
+        out_path = tmp_dir / "out.mp4"
+        in_path.write_bytes(video_bytes)
+
+        vw, vh = await get_media_dimensions(in_path)
+        ew = max(2, (vw // 2) * 2)
+        eh = max(2, (vh // 2) * 2)
+        grid_png = image_utils.render_grid_overlay_png(
+            ew,
+            eh,
+            rows=rows,
+            cols=cols,
+            thickness_mode=thickness_mode,
+            color=color,
+            show_labels=show_labels,
+        )
+        grid_path.write_bytes(grid_png)
+
+        filter_str = (
+            "[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2[base];"
+            "[1:v]format=rgba[grid];"
+            "[base][grid]overlay=0:0:shortest=1[outv]"
+        )
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(in_path),
+            "-loop", "1",
+            "-i", str(grid_path),
+            "-filter_complex", filter_str,
+            "-map", "[outv]",
+            "-map", "0:a?",
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-preset", "veryfast",
+            "-crf", "21",
+            "-c:a", "copy",
+            str(out_path),
+        ]
+        rc, err = await _run_ffmpeg_command(cmd, timeout=180.0)
+        if rc != 0 or not out_path.exists() or out_path.stat().st_size == 0:
+            raise RuntimeError(f"FFmpeg video grid overlay failed ({rc}): {err[-300:]}")
+        return out_path.read_bytes()
 
 
 async def extract_frame_from_video(video_bytes: bytes) -> Optional[bytes]:

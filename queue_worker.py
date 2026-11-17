@@ -702,7 +702,11 @@ class GenerationQueue:
                         request_timeout=90.0,
                         reply_to_message_id=job.reply_to_message_id,
                         allow_sending_without_reply=True,
-                        reply_markup=_result_keyboard(job.user_id, "video"),
+                        reply_markup=_result_keyboard(
+                            job.user_id,
+                            "video",
+                            extra_rows=[[cbtn("Наложить сетку", callback_data=f"vgrid_gen:{job.user_id}", icon_key="grid", fallback_emoji="🔲")]],
+                        ),
                         **extra,
                     ),
                     timeout=95.0

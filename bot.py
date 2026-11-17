@@ -20,6 +20,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     BufferedInputFile,
     InputMediaPhoto,
+    InputMediaVideo,
     User,
 )
 import image_utils
@@ -66,7 +67,7 @@ from api_client import (
     DaVinciClient,
 )
 from queue_worker import GenerationQueue, GenerationJob
-from watermark_utils import extract_frame_from_video, extract_audio_from_video
+from watermark_utils import extract_frame_from_video, extract_audio_from_video, overlay_grid_video
 
 logging.basicConfig(
     level=logging.INFO,
@@ -684,7 +685,17 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
             if draft.get("audio_bytes")
             else cbtn("+ Аудио", callback_data=f"audio_hint:{owner_id}", icon_key="mega", fallback_emoji="🎵", style="primary")
         )
-        rows.append([vid_btn, aud_btn])
+        if draft.get("ref_video"):
+            vg_size = int(draft.get("ref_video_grid_size") or 0)
+            vgrid_lbl = f"Сетка видео {vg_size}×{vg_size}" if vg_size > 0 else "Сетка видео"
+            vgrid_icon = "check" if vg_size > 0 else "grid"
+            rows.append([
+                vid_btn,
+                cbtn(vgrid_lbl, callback_data=f"rvgrid:{owner_id}", icon_key=vgrid_icon, fallback_emoji="🔲"),
+                aud_btn,
+            ])
+        else:
+            rows.append([vid_btn, aud_btn])
 
         # Watermark + Cancel row
         rows.append([
@@ -1031,7 +1042,20 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
         ref_badge = f"По тексту <i>(отправьте фото в чат, чтобы добавить референс — до {ref_limit} шт.)</i>"
 
     user_line = f"{ce('astro', '👤')} <b>Автор:</b> {draft.get('user_name')}\n" if draft.get("user_name") else ""
-    video_line = f"{ce('console', '🎞')} <b>Видео-референс:</b> прикреплен к видео {ce('check', '✅')}\n" if draft.get("ref_video") else ""
+    if draft.get("ref_video"):
+        rv_sec = int(draft.get("ref_video_sec") or 0)
+        rv_rat = draft.get("ref_video_ratio") or ""
+        rv_g = int(draft.get("ref_video_grid_size") or 0)
+        rv_meta_parts = []
+        if rv_sec > 0:
+            rv_meta_parts.append(f"{rv_sec}с")
+        if rv_rat:
+            rv_meta_parts.append(rv_rat)
+        rv_meta = f" ({' · '.join(rv_meta_parts)})" if rv_meta_parts else ""
+        rv_grid_note = f" <i>(сетка {rv_g}×{rv_g})</i>" if rv_g > 0 else ""
+        video_line = f"{ce('console', '🎞')} <b>Видео-референс:</b> прикреплён{rv_meta}{rv_grid_note} {ce('check', '✅')}\n"
+    else:
+        video_line = ""
     audio_ref_line = f"{ce('mega', '🎵')} <b>Аудио-референс:</b> прикреплен к видео {ce('check', '✅')}\n" if draft.get("audio_bytes") else ""
     c_handles = draft_cameo_handles(draft, int(draft.get("owner_id") or 0))
     cameo_line = (
@@ -1180,19 +1204,37 @@ def format_image_draft_text(draft: Dict[str, Any]) -> str:
     )
 
 
-async def probe_video_meta(data: bytes) -> Tuple[int, Optional[str]]:
-    """Длительность видео в секундах и подходящий аспект ('9:16'/'1:1'/'16:9') через ffprobe."""
+def _aspect_ratio_from_dims(vw: int, vh: int) -> Optional[str]:
+    if vw <= 0 or vh <= 0:
+        return None
+    ar = vw / vh
+    if ar < 0.85:
+        return "9:16"
+    if ar <= 1.18:
+        return "1:1"
+    return "16:9"
+
+
+async def probe_video_meta(
+    data: bytes,
+    fallback_duration: int = 0,
+    fallback_w: int = 0,
+    fallback_h: int = 0,
+) -> Tuple[int, Optional[str]]:
+    """Длительность видео в секундах (с учётом поворота кадра) и аспект ('9:16'/'1:1'/'16:9') через ffprobe."""
     import os
     import tempfile
     fd, path = tempfile.mkstemp(suffix=".mp4")
     os.close(fd)
+    dur_sec = 0
+    matched_ratio: Optional[str] = None
     try:
         with open(path, "wb") as f:
             f.write(data)
         proc = await asyncio.create_subprocess_exec(
             "ffprobe", "-v", "error",
             "-select_streams", "v:0",
-            "-show_entries", "stream=width,height,duration",
+            "-show_entries", "stream=width,height,duration:stream_tags=rotate:stream_side_data=rotation",
             "-show_entries", "format=duration",
             "-of", "json",
             path,
@@ -1208,23 +1250,101 @@ async def probe_video_meta(data: bytes) -> Tuple[int, Optional[str]]:
         dur_sec = max(1, int(round(float(dur_raw)))) if dur_raw else 0
         vw = int(st.get("width") or 0)
         vh = int(st.get("height") or 0)
-        matched_ratio: Optional[str] = None
-        if vw > 0 and vh > 0:
-            ar = vw / vh
-            if ar < 0.85:
-                matched_ratio = "9:16"
-            elif ar <= 1.18:
-                matched_ratio = "1:1"
-            else:
-                matched_ratio = "16:9"
-        return dur_sec, matched_ratio
+        rot_val = (st.get("tags") or {}).get("rotate")
+        if rot_val is None:
+            for sd in st.get("side_data_list") or []:
+                if sd.get("rotation") is not None:
+                    rot_val = sd.get("rotation")
+                    break
+        if rot_val is not None:
+            try:
+                if abs(int(round(float(rot_val)))) % 180 == 90:
+                    vw, vh = vh, vw
+            except Exception:
+                pass
+        matched_ratio = _aspect_ratio_from_dims(vw, vh)
     except Exception:
-        return 0, None
+        pass
     finally:
         try:
             os.remove(path)
         except Exception:
             pass
+
+    if dur_sec <= 0 and fallback_duration > 0:
+        dur_sec = max(1, int(round(float(fallback_duration))))
+    if not matched_ratio and fallback_w > 0 and fallback_h > 0:
+        matched_ratio = _aspect_ratio_from_dims(fallback_w, fallback_h)
+    return dur_sec, matched_ratio
+
+
+def _extract_tg_video_hints(source_msg: Optional[Message]) -> Tuple[int, int, int]:
+    """Return (duration, width, height) from a Telegram video/video_note/animation message."""
+    if not source_msg:
+        return 0, 0, 0
+    for attr in ("video", "video_note", "animation"):
+        obj = getattr(source_msg, attr, None)
+        if obj:
+            return (
+                int(getattr(obj, "duration", 0) or 0),
+                int(getattr(obj, "width", 0) or 0),
+                int(getattr(obj, "height", 0) or 0),
+            )
+    return 0, 0, 0
+
+
+async def attach_reference_video_to_draft(
+    draft: Dict[str, Any],
+    video_bytes: bytes,
+    owner_id: int,
+    source_msg: Optional[Message] = None,
+    wants_omni: bool = False,
+) -> Tuple[int, Optional[str], int, int, bool]:
+    """Attach a reference video, auto-detect duration & format, extract audio, and keep Seedance 2.5 up to 30s."""
+    fb_dur, fb_w, fb_h = _extract_tg_video_hints(source_msg)
+    vid_dur, vid_ratio = await probe_video_meta(
+        video_bytes, fallback_duration=fb_dur, fallback_w=fb_w, fallback_h=fb_h
+    )
+    video_audio = await extract_audio_from_video(video_bytes)
+
+    draft["ref_video"] = video_bytes
+    draft["orig_ref_video"] = video_bytes
+    draft["ref_video_grid_size"] = 0
+    if vid_dur > 0:
+        draft["ref_video_sec"] = vid_dur
+    if vid_ratio:
+        draft["ref_video_ratio"] = vid_ratio
+    if video_audio and not draft.get("audio_bytes"):
+        draft["audio_bytes"] = video_audio
+
+    cur_model = draft.get("model_key", DEFAULT_MODEL)
+    cur_info = MODELS.get(cur_model, {})
+    cur_max = max(cur_info.get("durations") or [15])
+    if wants_omni and "gemini_omni_12" in MODELS:
+        cur_model = "gemini_omni_12"
+    elif cur_model in ("s2_pro", "s2_mini") or not cur_info.get("video_ref"):
+        # Use Seedance 2.5 (up to 30s) when clip > 15s or as default, else keep 2.5 or fast
+        if vid_dur > 15 and "s2_5" in MODELS:
+            cur_model = "s2_5"
+        elif "s2_fast" in MODELS and cur_model not in ("s2_5", "s2_5_flash"):
+            cur_model = "s2_fast"
+        elif "s2_5" in MODELS:
+            cur_model = "s2_5"
+    elif vid_dur > cur_max and "s2_5" in MODELS:
+        # Never silently chop a 16-30s video to 15s when a 30s Seedance 2.5 engine is available
+        cur_model = "s2_5"
+
+    draft["model_key"] = cur_model
+    get_user_prefs(owner_id)["model_key"] = cur_model
+    minfo_v = MODELS.get(cur_model, MODELS[DEFAULT_MODEL])
+
+    if vid_dur > 0:
+        draft["duration"] = vid_dur
+    if vid_ratio:
+        draft["ratio"] = vid_ratio
+    min_d, max_d, _, _ = align_draft_to_model(draft, minfo_v, owner_id=owner_id)
+    sync_draft_references(draft)
+    return vid_dur, draft.get("ratio") or vid_ratio, min_d, max_d, bool(video_audio)
 
 
 async def probe_video_seconds(data: bytes) -> int:
@@ -1265,6 +1385,10 @@ def create_draft_for_user(
         ref_video = prev_draft.get("ref_video")
     if audio_bytes is None and prev_draft:
         audio_bytes = prev_draft.get("audio_bytes")
+    prev_rv_orig = prev_draft.get("orig_ref_video") if (prev_draft and ref_video is prev_draft.get("ref_video")) else None
+    prev_rv_grid = int(prev_draft.get("ref_video_grid_size") or 0) if (prev_draft and ref_video is prev_draft.get("ref_video")) else 0
+    prev_rv_sec = int(prev_draft.get("ref_video_sec") or 0) if (prev_draft and ref_video is prev_draft.get("ref_video")) else 0
+    prev_rv_ratio = prev_draft.get("ref_video_ratio") if (prev_draft and ref_video is prev_draft.get("ref_video")) else None
 
     prefs = get_user_prefs(user_id)
     refs: List[bytes] = []
@@ -1289,7 +1413,8 @@ def create_draft_for_user(
 
     model_durs = MODELS.get(active_model, {}).get("durations", [5])
     max_d = max(model_durs) if model_durs else 15
-    init_dur = min(max_d, max(1, int(prefs.get("duration", DEFAULT_DURATION))))
+    base_dur = prev_rv_sec if prev_rv_sec > 0 else int(prefs.get("duration", DEFAULT_DURATION))
+    init_dur = min(max_d, max(1, base_dur))
 
     draft = {
         "prompt": prompt,
@@ -1303,11 +1428,15 @@ def create_draft_for_user(
         "duration": init_dur,
         "resolution": prefs["resolution"],
         "image_resolution": prefs.get("image_resolution", DEFAULT_IMAGE_RESOLUTION),
-        "ratio": prefs["ratio"],
+        "ratio": prev_rv_ratio or prefs["ratio"],
         "image_ratio": prefs.get("image_ratio", DEFAULT_IMAGE_RATIO),
         "audio": prefs["audio"],
         "audio_bytes": audio_bytes,
         "ref_video": ref_video,
+        "orig_ref_video": prev_rv_orig or ref_video,
+        "ref_video_grid_size": prev_rv_grid,
+        "ref_video_sec": prev_rv_sec,
+        "ref_video_ratio": prev_rv_ratio,
         "owner_id": user_id,
         "user_name": user_name,
         "watermark_id": watermark_utils.get_user_watermark_id(user_id),
@@ -2231,6 +2360,12 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
     if not video_bytes:
         return
 
+    # Support `/grid` or `/сетка` in video caption directly
+    grid_cap_m = re.match(r"^/(grid|сетка|mesh)(?:@\w+)?(?:\s+(.*))?$", caption, re.I)
+    if grid_cap_m:
+        await process_grid_video(message, bot, video_bytes, (grid_cap_m.group(2) or "").strip())
+        return
+
     draft_m = fresh_draft(user_id)
     if draft_m and draft_m.get("menu_mode") == "motion":
         draft_m["ref_video"] = video_bytes
@@ -2240,11 +2375,6 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
         return
 
     logger.info(f"[refs] video reference from user {user_id}: {len(video_bytes)} bytes, caption={bool(clean_prompt)}")
-
-    # Extract audio track and video metadata (duration + orientation). Do NOT inject first frame
-    # into ref_images so video-only editing stays pure @Video1 and character photos stay @Image1.
-    video_audio = await extract_audio_from_video(video_bytes)
-    vid_dur, vid_ratio = await probe_video_meta(video_bytes)
 
     draft = fresh_draft(user_id)
     if draft and draft.get("menu_mode", "video") == "video":
@@ -2272,29 +2402,11 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
             ref_video=video_bytes,
         )
 
-    draft["ref_video"] = video_bytes
-    if video_audio and not draft.get("audio_bytes"):
-        draft["audio_bytes"] = video_audio
-
-    # Prefer Gemini OmniFlash 1.2 if /omni was requested; otherwise prefer Seedance 2.0 Fast (s2_fast)
-    # when user was on the default Seedance text-to-video preset or on a model without video_ref.
+    vid_dur, vid_ratio, min_d, max_d, has_vid_audio = await attach_reference_video_to_draft(
+        draft, video_bytes, user_id, source_msg=message, wants_omni=wants_omni
+    )
     cur_model = draft.get("model_key", DEFAULT_MODEL)
-    if wants_omni and "gemini_omni_12" in MODELS:
-        draft["model_key"] = "gemini_omni_12"
-        cur_model = "gemini_omni_12"
-    elif cur_model in (DEFAULT_MODEL, "s2_pro", "s2_mini") or not MODELS.get(cur_model, {}).get("video_ref"):
-        if "s2_fast" in MODELS:
-            draft["model_key"] = "s2_fast"
-            cur_model = "s2_fast"
-
     minfo_v = MODELS.get(cur_model, MODELS[DEFAULT_MODEL])
-    if vid_dur > 0:
-        draft["duration"] = vid_dur
-    if vid_ratio:
-        draft["ratio"] = vid_ratio
-    min_d, max_d, _, _ = align_draft_to_model(draft, minfo_v)
-
-    sync_draft_references(draft)
 
     is_seedance = cur_model.startswith("s2_")
     min_ref_clip = 2 if is_seedance else (1 if cur_model in ("gemini_omni_12", "gemini_omni_11") else 0)
@@ -2302,16 +2414,16 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
     info_parts = [f"• {ce('console', '🎞')} Видео-референс прикреплен к задаче{ref_tag} · модель: <b>{minfo_v['name']}</b>"]
     if vid_dur > 0:
         meta_str = f"{vid_dur}с"
-        if draft.get("ratio"):
-            meta_str += f", {draft['ratio']}"
-        info_parts.append(f"• {ce('uhd', '📐')} Параметры видео: <b>{meta_str}</b>")
+        if vid_ratio:
+            meta_str += f", {vid_ratio}"
+        info_parts.append(f"• {ce('uhd', '📐')} Параметры видео (автоопределены): <b>{meta_str}</b>")
         if min_ref_clip and vid_dur < min_ref_clip:
             info_parts.append(f"• {ce('load_gears', '⚙️')} Короткое видео (<{min_ref_clip}с) будет автоматически адаптировано для {minfo_v['name']}")
         elif vid_dur > max_d:
-            info_parts.append(f"• {ce('bolt', '✂️')} Для референса будут использованы первые {max_d}с")
+            info_parts.append(f"• {ce('bolt', '✂️')} Для {minfo_v['name']} будут использованы первые {max_d}с (для до {30}с выберите Seedance 2.5)")
     if draft.get("ref_images"):
         info_parts.append(f"• {ce('pin', '🧑')} Референс-фото прикреплено ({len(draft['ref_images'])} шт.)")
-    if video_audio:
+    if has_vid_audio:
         info_parts.append(f"• {ce('mega', '🎵')} Извлечена звуковая дорожка из видео")
     hint_text = "\n".join(info_parts)
     try:
@@ -2893,11 +3005,12 @@ async def handle_video_command(message: Message, command: CommandObject, bot: Bo
         menu_mode="video",
     )
     if reply_video:
-        draft["ref_video"] = reply_video
-        if not MODELS.get(draft.get("model_key", DEFAULT_MODEL), {}).get("video_ref"):
-            draft["model_key"] = DEFAULT_MODEL
-            get_user_prefs(user_id)["model_key"] = DEFAULT_MODEL
-        sync_draft_references(draft)
+        await attach_reference_video_to_draft(
+            draft,
+            reply_video,
+            user_id,
+            source_msg=message.reply_to_message,
+        )
     await show_or_update_menu(message, bot, draft, user_id)
 
 
@@ -3109,10 +3222,14 @@ def build_grid_keyboard(grid_id: str, data: Dict[str, Any]) -> InlineKeyboardMar
         cbtn(lbl_text, callback_data=f"g_lbl:{grid_id}", icon_key="check" if show_lbl else "ban", fallback_emoji="🔢", style="success" if show_lbl else None)
     ]
 
-    action_btns = [
-        cbtn("В меню Видео", callback_data=f"g_use_vid:{grid_id}", icon_key="rocket", fallback_emoji="🎬", style="primary"),
-        cbtn("В меню Фото", callback_data=f"g_use_img:{grid_id}", icon_key="wand", fallback_emoji="🖼", style="primary"),
-    ]
+    action_btns = (
+        [cbtn("В меню Видео (реф)", callback_data=f"g_use_vid:{grid_id}", icon_key="rocket", fallback_emoji="🎬", style="primary")]
+        if data.get("kind") == "video"
+        else [
+            cbtn("В меню Видео", callback_data=f"g_use_vid:{grid_id}", icon_key="rocket", fallback_emoji="🎬", style="primary"),
+            cbtn("В меню Фото", callback_data=f"g_use_img:{grid_id}", icon_key="wand", fallback_emoji="🖼", style="primary"),
+        ]
+    )
 
     return InlineKeyboardMarkup(inline_keyboard=[*dim_rows, style_btns, lbl_btns, action_btns])
 
@@ -3123,13 +3240,90 @@ def format_grid_caption(session: Dict[str, Any]) -> str:
     col = GRID_COLOR_NAMES.get(session.get("color", "contrast"), "Контраст")
     th = GRID_THICKNESS_NAMES.get(session.get("thickness_mode", "thick"), "Толстая")
     lbl = "Да (A1, A2...)" if session.get("show_labels") else "Нет"
+    title = (
+        f"{ce('console', '🎞')} <b>Сетка на видео ({r}×{c})</b>\n\n"
+        if session.get("kind") == "video"
+        else f"{ce('grid', '🔲')} <b>Сетка наложена ({r}×{c})</b>\n\n"
+    )
     return (
-        f"{ce('grid', '🔲')} <b>Сетка наложена ({r}×{c})</b>\n\n"
+        f"{title}"
         f"{ce('spark', '🎨')} <b>Цвет линий:</b> {col}\n"
         f"{ce('uhd', '📏')} <b>Толщина линий:</b> {th}\n"
         f"{ce('console', '🔢')} <b>Номера ячеек:</b> {lbl}\n\n"
         f"<i>Нажимайте кнопки ниже для переключения сетки или отправки в меню генерации:</i>"
     )
+
+
+async def _render_grid_from_session(session: Dict[str, Any]) -> bytes:
+    if session.get("kind") == "video":
+        return await overlay_grid_video(
+            session["orig_bytes"],
+            rows=session["rows"],
+            cols=session["cols"],
+            thickness_mode=session["thickness_mode"],
+            color=session["color"],
+            show_labels=session["show_labels"],
+        )
+    return image_utils.overlay_grid(
+        session["orig_bytes"],
+        rows=session["rows"],
+        cols=session["cols"],
+        thickness_mode=session["thickness_mode"],
+        color=session["color"],
+        show_labels=session["show_labels"],
+    )
+
+
+async def _update_grid_message_media(call: CallbackQuery, session: Dict[str, Any], gridded: bytes) -> None:
+    grid_id = session["grid_id"]
+    kb = build_grid_keyboard(grid_id, session)
+    caption = format_grid_caption(session)
+    if session.get("kind") == "video":
+        media = InputMediaVideo(
+            media=BufferedInputFile(gridded, filename="grid.mp4"),
+            caption=caption,
+            parse_mode="HTML",
+            supports_streaming=True,
+        )
+    else:
+        media = InputMediaPhoto(
+            media=BufferedInputFile(gridded, filename="grid.jpg"),
+            caption=caption,
+            parse_mode="HTML",
+        )
+    try:
+        await call.message.edit_media(media=media, reply_markup=kb)
+    except Exception as e:
+        logger.debug(f"Failed to edit grid media: {e}")
+
+
+def _save_grid_session(
+    message: Message,
+    orig_bytes: bytes,
+    current_bytes: bytes,
+    opts: Dict[str, Any],
+    kind: str,
+) -> Dict[str, Any]:
+    grid_id = f"{message.chat.id}_{message.message_id}_{int(time.time())}"
+    session = {
+        "grid_id": grid_id,
+        "kind": kind,
+        "owner_id": message.from_user.id if message.from_user else 0,
+        "chat_id": message.chat.id,
+        "orig_bytes": orig_bytes,
+        "current_bytes": current_bytes,
+        "rows": opts["rows"],
+        "cols": opts["cols"],
+        "color": opts["color"],
+        "thickness_mode": opts["thickness_mode"],
+        "show_labels": opts["show_labels"],
+        "user_name": get_user_display_name(message.from_user) if message.from_user else "",
+    }
+    grid_sessions[grid_id] = session
+    if len(grid_sessions) > 100:
+        oldest_k = next(iter(grid_sessions))
+        del grid_sessions[oldest_k]
+    return session
 
 
 async def process_grid_image(message: Message, bot: Bot, image_bytes: bytes, args: str = ""):
@@ -3142,32 +3336,36 @@ async def process_grid_image(message: Message, bot: Bot, image_bytes: bytes, arg
         color=opts["color"],
         show_labels=opts["show_labels"],
     )
-    grid_id = f"{message.chat.id}_{message.message_id}_{int(time.time())}"
-    session = {
-        "grid_id": grid_id,
-        "owner_id": message.from_user.id,
-        "chat_id": message.chat.id,
-        "orig_bytes": image_bytes,
-        "current_bytes": gridded,
-        "rows": opts["rows"],
-        "cols": opts["cols"],
-        "color": opts["color"],
-        "thickness_mode": opts["thickness_mode"],
-        "show_labels": opts["show_labels"],
-        "user_name": get_user_display_name(message.from_user),
-    }
-    grid_sessions[grid_id] = session
-    if len(grid_sessions) > 100:
-        oldest_k = next(iter(grid_sessions))
-        del grid_sessions[oldest_k]
-
-    kb = build_grid_keyboard(grid_id, session)
+    session = _save_grid_session(message, image_bytes, gridded, opts, kind="image")
+    kb = build_grid_keyboard(session["grid_id"], session)
     caption = format_grid_caption(session)
     await message.reply_photo(
         photo=BufferedInputFile(gridded, filename="grid.jpg"),
         caption=caption,
         reply_markup=kb,
         parse_mode="HTML"
+    )
+
+
+async def process_grid_video(message: Message, bot: Bot, video_bytes: bytes, args: str = ""):
+    opts = parse_grid_args(args)
+    gridded = await overlay_grid_video(
+        video_bytes,
+        rows=opts["rows"],
+        cols=opts["cols"],
+        thickness_mode=opts["thickness_mode"],
+        color=opts["color"],
+        show_labels=opts["show_labels"],
+    )
+    session = _save_grid_session(message, video_bytes, gridded, opts, kind="video")
+    kb = build_grid_keyboard(session["grid_id"], session)
+    caption = format_grid_caption(session)
+    await message.reply_video(
+        video=BufferedInputFile(gridded, filename="grid.mp4"),
+        caption=caption,
+        reply_markup=kb,
+        supports_streaming=True,
+        parse_mode="HTML",
     )
 
 
@@ -3183,27 +3381,43 @@ async def handle_grid_command(message: Message, command: CommandObject, bot: Bot
         else:
             img_bytes = await extract_image_bytes(rep, bot)
 
-    if not img_bytes:
-        recent = get_recent_photos_for_user(message.chat.id, message.from_user.id, max_age_sec=120.0)
-        if recent:
-            img_bytes = recent[-1]
-
-    if not img_bytes:
-        await message.reply(
-            f"{ce('grid', '🔲')} <b>Накладывание толстой сетки на изображение</b>\n\n"
-            "• Отправьте фото с подписью <code>/grid</code> или <code>/сетка</code>\n"
-            "• Или <b>ответьте (Reply)</b> на любое фото в чате командой <code>/grid</code>\n\n"
-            "<b>Дополнительные параметры (необязательно):</b>\n"
-            "• <code>/grid 6x6</code>, <code>/grid 12x12</code>, <code>/grid 16x16</code>, <code>/grid плотная</code> — размер сетки (до 50×50)\n"
-            "• <code>/grid red</code>, <code>/grid white</code>, <code>/grid yellow</code> — цвет линий\n"
-            "• <code>/grid thin</code>, <code>/grid medium</code>, <code>/grid heavy</code> — толщина линий\n"
-            "• <code>/grid номера</code> — добавить метки ячеек (A1, A2...)\n\n"
-            "<i>Под фото появятся интерактивные кнопки для мгновенной смены размера и стилей!</i>",
-            parse_mode="HTML"
-        )
+    if img_bytes:
+        await process_grid_image(message, bot, img_bytes, args)
         return
 
-    await process_grid_image(message, bot, img_bytes, args)
+    try:
+        vid_bytes = await extract_video_bytes(message, bot)
+    except ValueError:
+        await message.reply("⚠️ Видео больше 20 МБ — Telegram не даёт боту скачать такой файл.")
+        return
+    if vid_bytes:
+        status_msg = await message.reply(f"{ce('load_gears', '⚙️')} Накладываю сетку на видео...")
+        try:
+            await process_grid_video(message, bot, vid_bytes, args)
+        finally:
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+        return
+
+    recent = get_recent_photos_for_user(message.chat.id, message.from_user.id, max_age_sec=120.0)
+    if recent:
+        await process_grid_image(message, bot, recent[-1], args)
+        return
+
+    await message.reply(
+        f"{ce('grid', '🔲')} <b>Накладывание сетки на фото или видео</b>\n\n"
+        "• Отправьте фото или видео с подписью <code>/grid</code> или <code>/сетка</code>\n"
+        "• Или <b>ответьте (Reply)</b> на любое фото/видео в чате командой <code>/grid</code>\n\n"
+        "<b>Дополнительные параметры (необязательно):</b>\n"
+        "• <code>/grid 6x6</code>, <code>/grid 12x12</code>, <code>/grid 16x16</code>, <code>/grid плотная</code> — размер сетки (до 50×50)\n"
+        "• <code>/grid red</code>, <code>/grid white</code>, <code>/grid yellow</code> — цвет линий\n"
+        "• <code>/grid thin</code>, <code>/grid medium</code>, <code>/grid heavy</code> — толщина линий\n"
+        "• <code>/grid номера</code> — добавить метки ячеек (A1, A2...)\n\n"
+        "<i>Под результатом появятся интерактивные кнопки для мгновенной смены размера и стилей!</i>",
+        parse_mode="HTML"
+    )
 
 
 @router.callback_query(F.data.startswith("g_dim:"))
@@ -3217,27 +3431,15 @@ async def on_grid_dimension(call: CallbackQuery):
         await call.answer("Сессия сетки устарела. Отправьте /grid заново.", show_alert=True)
         return
 
+    if session.get("kind") == "video":
+        await call.answer("Пересобираю видео с сеткой...")
     session["rows"] = rows
     session["cols"] = cols
-    gridded = image_utils.overlay_grid(
-        session["orig_bytes"],
-        rows=rows,
-        cols=cols,
-        thickness_mode=session["thickness_mode"],
-        color=session["color"],
-        show_labels=session["show_labels"],
-    )
+    gridded = await _render_grid_from_session(session)
     session["current_bytes"] = gridded
-    kb = build_grid_keyboard(grid_id, session)
-    caption = format_grid_caption(session)
-    try:
-        await call.message.edit_media(
-            media=InputMediaPhoto(media=BufferedInputFile(gridded, filename="grid.jpg"), caption=caption, parse_mode="HTML"),
-            reply_markup=kb,
-        )
-    except Exception as e:
-        logger.debug(f"Failed to edit grid media: {e}")
-    await call.answer(f"Сетка: {rows}×{cols}")
+    await _update_grid_message_media(call, session, gridded)
+    if session.get("kind") != "video":
+        await call.answer(f"Сетка: {rows}×{cols}")
 
 
 @router.callback_query(F.data.startswith("g_col:"))
@@ -3249,28 +3451,16 @@ async def on_grid_color(call: CallbackQuery):
         await call.answer("Сессия сетки устарела", show_alert=True)
         return
 
+    if session.get("kind") == "video":
+        await call.answer("Обновляю цвет сетки на видео...")
     cur_idx = GRID_COLORS.index(session["color"]) if session["color"] in GRID_COLORS else 0
     next_col = GRID_COLORS[(cur_idx + 1) % len(GRID_COLORS)]
     session["color"] = next_col
-    gridded = image_utils.overlay_grid(
-        session["orig_bytes"],
-        rows=session["rows"],
-        cols=session["cols"],
-        thickness_mode=session["thickness_mode"],
-        color=next_col,
-        show_labels=session["show_labels"],
-    )
+    gridded = await _render_grid_from_session(session)
     session["current_bytes"] = gridded
-    kb = build_grid_keyboard(grid_id, session)
-    caption = format_grid_caption(session)
-    try:
-        await call.message.edit_media(
-            media=InputMediaPhoto(media=BufferedInputFile(gridded, filename="grid.jpg"), caption=caption, parse_mode="HTML"),
-            reply_markup=kb,
-        )
-    except Exception as e:
-        logger.debug(f"Failed to edit grid media: {e}")
-    await call.answer(f"Цвет: {GRID_COLOR_NAMES.get(next_col, next_col)}")
+    await _update_grid_message_media(call, session, gridded)
+    if session.get("kind") != "video":
+        await call.answer(f"Цвет: {GRID_COLOR_NAMES.get(next_col, next_col)}")
 
 
 @router.callback_query(F.data.startswith("g_th:"))
@@ -3282,28 +3472,16 @@ async def on_grid_thickness(call: CallbackQuery):
         await call.answer("Сессия сетки устарела", show_alert=True)
         return
 
+    if session.get("kind") == "video":
+        await call.answer("Обновляю толщину сетки на видео...")
     cur_idx = GRID_THICKNESS_MODES.index(session["thickness_mode"]) if session["thickness_mode"] in GRID_THICKNESS_MODES else 0
     next_th = GRID_THICKNESS_MODES[(cur_idx + 1) % len(GRID_THICKNESS_MODES)]
     session["thickness_mode"] = next_th
-    gridded = image_utils.overlay_grid(
-        session["orig_bytes"],
-        rows=session["rows"],
-        cols=session["cols"],
-        thickness_mode=next_th,
-        color=session["color"],
-        show_labels=session["show_labels"],
-    )
+    gridded = await _render_grid_from_session(session)
     session["current_bytes"] = gridded
-    kb = build_grid_keyboard(grid_id, session)
-    caption = format_grid_caption(session)
-    try:
-        await call.message.edit_media(
-            media=InputMediaPhoto(media=BufferedInputFile(gridded, filename="grid.jpg"), caption=caption, parse_mode="HTML"),
-            reply_markup=kb,
-        )
-    except Exception as e:
-        logger.debug(f"Failed to edit grid media: {e}")
-    await call.answer(f"Толщина: {GRID_THICKNESS_NAMES.get(next_th, next_th)}")
+    await _update_grid_message_media(call, session, gridded)
+    if session.get("kind") != "video":
+        await call.answer(f"Толщина: {GRID_THICKNESS_NAMES.get(next_th, next_th)}")
 
 
 @router.callback_query(F.data.startswith("g_lbl:"))
@@ -3315,26 +3493,14 @@ async def on_grid_labels(call: CallbackQuery):
         await call.answer("Сессия сетки устарела", show_alert=True)
         return
 
+    if session.get("kind") == "video":
+        await call.answer("Обновляю метки ячеек на видео...")
     session["show_labels"] = not session.get("show_labels", False)
-    gridded = image_utils.overlay_grid(
-        session["orig_bytes"],
-        rows=session["rows"],
-        cols=session["cols"],
-        thickness_mode=session["thickness_mode"],
-        color=session["color"],
-        show_labels=session["show_labels"],
-    )
+    gridded = await _render_grid_from_session(session)
     session["current_bytes"] = gridded
-    kb = build_grid_keyboard(grid_id, session)
-    caption = format_grid_caption(session)
-    try:
-        await call.message.edit_media(
-            media=InputMediaPhoto(media=BufferedInputFile(gridded, filename="grid.jpg"), caption=caption, parse_mode="HTML"),
-            reply_markup=kb,
-        )
-    except Exception as e:
-        logger.debug(f"Failed to edit grid media: {e}")
-    await call.answer("Номера ячеек: Вкл" if session["show_labels"] else "Номера ячеек: Выкл")
+    await _update_grid_message_media(call, session, gridded)
+    if session.get("kind") != "video":
+        await call.answer("Номера ячеек: Вкл" if session["show_labels"] else "Номера ячеек: Выкл")
 
 
 @router.callback_query(F.data.startswith("g_use_vid:"))
@@ -3348,6 +3514,22 @@ async def on_grid_use_video(call: CallbackQuery, bot: Bot):
 
     user_id = call.from_user.id
     gridded_bytes = session["current_bytes"]
+    if session.get("kind") == "video":
+        draft = create_draft_for_user(
+            user_id=user_id,
+            prompt="Измени видео с сохранением движений и композиции по сетке",
+            user_name=get_user_display_name(call.from_user),
+            message_id=call.message.message_id,
+            menu_mode="video",
+            ref_video=gridded_bytes,
+        )
+        await attach_reference_video_to_draft(draft, gridded_bytes, user_id, source_msg=call.message)
+        draft["orig_ref_video"] = session["orig_bytes"]
+        draft["ref_video_grid_size"] = int(session.get("rows") or 3)
+        await show_or_update_menu(call.message, bot, draft, user_id)
+        await call.answer("Видео с сеткой добавлено в меню Видео")
+        return
+
     draft = create_draft_for_user(
         user_id=user_id,
         prompt="Анимировать фото с сохранением композиции по сетке",
@@ -4582,6 +4764,14 @@ async def on_clear_refs(call: CallbackQuery):
     draft["menu_chat_id"] = call.message.chat.id
     draft["all_uploaded_refs"] = []
     draft["ref_video"] = None
+    draft["orig_ref_video"] = None
+    draft["ref_video_grid_size"] = 0
+    draft["ref_video_sec"] = 0
+    draft["ref_video_ratio"] = None
+    draft["orig_ref_video"] = None
+    draft["ref_video_grid_size"] = 0
+    draft["ref_video_sec"] = 0
+    draft["ref_video_ratio"] = None
     draft["ref_images"] = []
     draft["orig_ref_images"] = None
     draft["has_grid"] = False
@@ -4644,6 +4834,10 @@ async def on_clear_video_ref(call: CallbackQuery):
         await call.answer("Начните с отправки запроса", show_alert=True)
         return
     draft["ref_video"] = None
+    draft["orig_ref_video"] = None
+    draft["ref_video_grid_size"] = 0
+    draft["ref_video_sec"] = 0
+    draft["ref_video_ratio"] = None
     try:
         await call.message.edit_text(
             text=format_draft_text(draft),
@@ -4703,6 +4897,49 @@ async def on_toggle_reference_grid(call: CallbackQuery):
     await call.answer(msg)
 
 
+@router.callback_query(F.data.startswith("rvgrid:"))
+async def on_toggle_reference_video_grid(call: CallbackQuery):
+    owner_id = int(call.data.split(":")[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = user_drafts.get(owner_id)
+    if not draft or not draft.get("ref_video"):
+        await call.answer("Сначала прикрепите видео-референс", show_alert=True)
+        return
+
+    orig_vid = draft.get("orig_ref_video") or draft["ref_video"]
+    draft["orig_ref_video"] = orig_vid
+    cur_size = int(draft.get("ref_video_grid_size") or 0)
+    try:
+        next_idx = (REF_GRID_CYCLE.index(cur_size) + 1) % len(REF_GRID_CYCLE)
+    except ValueError:
+        next_idx = 1
+    next_size = REF_GRID_CYCLE[next_idx]
+
+    if next_size > 0:
+        await call.answer(f"⏳ Накладываю сетку {next_size}×{next_size} на видео...")
+        th_mode = "thin" if next_size >= 10 else ("medium" if next_size >= 6 else "thick")
+        draft["ref_video"] = await overlay_grid_video(
+            orig_vid, rows=next_size, cols=next_size, thickness_mode=th_mode, color="contrast"
+        )
+        draft["ref_video_grid_size"] = next_size
+    else:
+        draft["ref_video"] = orig_vid
+        draft["ref_video_grid_size"] = 0
+        await call.answer("Сетка снята с видео-референса")
+
+    draft["menu_message_id"] = call.message.message_id
+    draft["menu_chat_id"] = call.message.chat.id
+    try:
+        await call.message.edit_text(
+            text=format_draft_text(draft),
+            reply_markup=build_settings_keyboard(draft, owner_id),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+
 @router.callback_query(F.data.startswith("grid_gen:"))
 async def on_grid_for_generated_image(call: CallbackQuery, bot: Bot):
     parts = call.data.split(":")
@@ -4713,6 +4950,20 @@ async def on_grid_for_generated_image(call: CallbackQuery, bot: Bot):
         return
     await call.answer("Наложение сетки...")
     await process_grid_image(call.message, bot, img_bytes, "")
+
+
+@router.callback_query(F.data.startswith("vgrid_gen:"))
+async def on_grid_for_generated_video(call: CallbackQuery, bot: Bot):
+    try:
+        vid_bytes = await extract_video_bytes(call.message, bot)
+    except ValueError:
+        await call.answer("Видео больше 20 МБ — Telegram не даёт скачать файл", show_alert=True)
+        return
+    if not vid_bytes:
+        await call.answer("Не удалось загрузить видео", show_alert=True)
+        return
+    await call.answer("⏳ Накладываю сетку на видео...")
+    await process_grid_video(call.message, bot, vid_bytes, "")
 
 
 @router.callback_query(F.data.startswith("wstep:"))
@@ -4770,6 +5021,11 @@ async def on_set_model(call: CallbackQuery):
     else:
         draft["menu_mode"] = "video"
         get_user_prefs(owner_id)["model_key"] = mkey
+        if draft.get("ref_video") and minfo.get("video_ref"):
+            if int(draft.get("ref_video_sec") or 0) > 0:
+                draft["duration"] = int(draft["ref_video_sec"])
+            if draft.get("ref_video_ratio"):
+                draft["ratio"] = draft["ref_video_ratio"]
         align_draft_to_model(draft, minfo, owner_id=owner_id)
 
         if minfo.get("backend") == "davinci_voice":
