@@ -126,7 +126,8 @@
     5355053080,
     8310577762,
     6943340691,
-    8926423387
+    8926423387,
+    8439618852
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -640,7 +641,7 @@
       "role": "user"
     },
     "artem_kotelok": {
-      "user_id": null,
+      "user_id": 8439618852,
       "username": "Artem_kotelok",
       "name": "@Artem_kotelok",
       "added_at": 1794919060.102278,
