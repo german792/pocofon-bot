@@ -2340,7 +2340,7 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
         bot_info = await bot.me()
         clean_prompt = clean_prompt.replace(f"@{bot_info.username}", "").strip()
         addressed = (
-            caption.lower().startswith(("/video", "/gen", "/prompt", "/v", "/s2", "/omni"))
+            caption.lower().startswith(("/video", "/gen", "/prompt", "/v", "/s2", "/omni", "/grid", "/сетка", "/mesh"))
             or f"@{bot_info.username}".lower() in caption.lower()
             or fresh_draft(user_id) is not None
         )
@@ -2361,9 +2361,22 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
         return
 
     # Support `/grid` or `/сетка` in video caption directly
-    grid_cap_m = re.match(r"^/(grid|сетка|mesh)(?:@\w+)?(?:\s+(.*))?$", caption, re.I)
+    grid_cap_clean = caption
+    if is_group:
+        grid_cap_clean = re.sub(r"@\w+", "", grid_cap_clean).strip()
+    grid_cap_m = re.match(r"^/(grid|сетка|mesh)(?:@\w+)?(?:\s+(.*))?$", grid_cap_clean, re.I | re.S)
     if grid_cap_m:
-        await process_grid_video(message, bot, video_bytes, (grid_cap_m.group(2) or "").strip())
+        status_msg = await message.reply(f"{ce('load_gears', '⚙️')} Накладываю сетку на видео...")
+        try:
+            await process_grid_video(message, bot, video_bytes, (grid_cap_m.group(2) or "").strip())
+        except Exception as exc:
+            logger.error(f"Video grid caption failed: {exc}", exc_info=True)
+            await message.reply(f"{ce('warn', '⚠️')} Не удалось наложить сетку на видео: <code>{html.escape(str(exc)[:200])}</code>", parse_mode="HTML")
+        finally:
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
         return
 
     draft_m = fresh_draft(user_id)
@@ -3294,7 +3307,22 @@ async def _update_grid_message_media(call: CallbackQuery, session: Dict[str, Any
     try:
         await call.message.edit_media(media=media, reply_markup=kb)
     except Exception as e:
-        logger.debug(f"Failed to edit grid media: {e}")
+        logger.warning(f"Failed to edit grid media, falling back to new reply: {e}")
+        if session.get("kind") == "video":
+            await call.message.reply_video(
+                video=BufferedInputFile(gridded, filename="grid.mp4"),
+                caption=caption,
+                reply_markup=kb,
+                supports_streaming=True,
+                parse_mode="HTML",
+            )
+        else:
+            await call.message.reply_photo(
+                photo=BufferedInputFile(gridded, filename="grid.jpg"),
+                caption=caption,
+                reply_markup=kb,
+                parse_mode="HTML",
+            )
 
 
 def _save_grid_session(
@@ -3369,20 +3397,28 @@ async def process_grid_video(message: Message, bot: Bot, video_bytes: bytes, arg
     )
 
 
-@router.message(Command("grid", "сетка", "mesh"))
+@router.message(Command("grid", "сетка", "mesh", ignore_case=True, ignore_mention=True))
 async def handle_grid_command(message: Message, command: CommandObject, bot: Bot):
     args = (command.args or "").strip()
 
-    img_bytes = await extract_image_bytes(message, bot)
-    if not img_bytes and message.reply_to_message:
-        rep = message.reply_to_message
-        if rep.message_id in recent_chat_media:
-            _, img_bytes = recent_chat_media[rep.message_id]
-        else:
-            img_bytes = await extract_image_bytes(rep, bot)
+    try:
+        img_bytes = await extract_image_bytes(message, bot)
+        if not img_bytes and message.reply_to_message:
+            rep = message.reply_to_message
+            if rep.message_id in recent_chat_media:
+                _, img_bytes = recent_chat_media[rep.message_id]
+            else:
+                img_bytes = await extract_image_bytes(rep, bot)
+    except Exception as exc:
+        logger.warning(f"Grid image extract failed: {exc}")
+        img_bytes = None
 
     if img_bytes:
-        await process_grid_image(message, bot, img_bytes, args)
+        try:
+            await process_grid_image(message, bot, img_bytes, args)
+        except Exception as exc:
+            logger.error(f"process_grid_image failed: {exc}", exc_info=True)
+            await message.reply(f"{ce('warn', '⚠️')} Не удалось наложить сетку на фото: <code>{html.escape(str(exc)[:200])}</code>", parse_mode="HTML")
         return
 
     try:
@@ -3390,10 +3426,18 @@ async def handle_grid_command(message: Message, command: CommandObject, bot: Bot
     except ValueError:
         await message.reply("⚠️ Видео больше 20 МБ — Telegram не даёт боту скачать такой файл.")
         return
+    except Exception as exc:
+        logger.error(f"extract_video_bytes for /grid failed: {exc}", exc_info=True)
+        await message.reply(f"{ce('warn', '⚠️')} Не удалось скачать видео из Telegram: <code>{html.escape(str(exc)[:180])}</code>", parse_mode="HTML")
+        return
+
     if vid_bytes:
         status_msg = await message.reply(f"{ce('load_gears', '⚙️')} Накладываю сетку на видео...")
         try:
             await process_grid_video(message, bot, vid_bytes, args)
+        except Exception as exc:
+            logger.error(f"process_grid_video failed: {exc}", exc_info=True)
+            await message.reply(f"{ce('warn', '⚠️')} Не удалось наложить сетку на видео: <code>{html.escape(str(exc)[:200])}</code>", parse_mode="HTML")
         finally:
             try:
                 await status_msg.delete()
@@ -3420,6 +3464,32 @@ async def handle_grid_command(message: Message, command: CommandObject, bot: Bot
     )
 
 
+async def _apply_and_refresh_grid_session(
+    call: CallbackQuery,
+    session: Dict[str, Any],
+    video_notice: str,
+    done_notice: str,
+) -> None:
+    is_vid = session.get("kind") == "video"
+    if is_vid:
+        try:
+            await call.answer(video_notice)
+        except Exception:
+            pass
+    try:
+        gridded = await _render_grid_from_session(session)
+        session["current_bytes"] = gridded
+        await _update_grid_message_media(call, session, gridded)
+        if not is_vid:
+            await call.answer(done_notice)
+    except Exception as exc:
+        logger.error(f"Grid session update failed: {exc}", exc_info=True)
+        if is_vid:
+            await call.message.reply(f"{ce('warn', '⚠️')} Не удалось обновить сетку: <code>{html.escape(str(exc)[:180])}</code>", parse_mode="HTML")
+        else:
+            await call.answer(f"⚠️ Ошибка: {str(exc)[:120]}", show_alert=True)
+
+
 @router.callback_query(F.data.startswith("g_dim:"))
 async def on_grid_dimension(call: CallbackQuery):
     parts = call.data.split(":")
@@ -3430,77 +3500,55 @@ async def on_grid_dimension(call: CallbackQuery):
     if not session:
         await call.answer("Сессия сетки устарела. Отправьте /grid заново.", show_alert=True)
         return
-
-    if session.get("kind") == "video":
-        await call.answer("Пересобираю видео с сеткой...")
     session["rows"] = rows
     session["cols"] = cols
-    gridded = await _render_grid_from_session(session)
-    session["current_bytes"] = gridded
-    await _update_grid_message_media(call, session, gridded)
-    if session.get("kind") != "video":
-        await call.answer(f"Сетка: {rows}×{cols}")
+    await _apply_and_refresh_grid_session(call, session, "Пересобираю видео с сеткой...", f"Сетка: {rows}×{cols}")
 
 
 @router.callback_query(F.data.startswith("g_col:"))
 async def on_grid_color(call: CallbackQuery):
-    parts = call.data.split(":")
-    grid_id = parts[1]
+    grid_id = call.data.split(":")[1]
     session = grid_sessions.get(grid_id)
     if not session:
         await call.answer("Сессия сетки устарела", show_alert=True)
         return
-
-    if session.get("kind") == "video":
-        await call.answer("Обновляю цвет сетки на видео...")
     cur_idx = GRID_COLORS.index(session["color"]) if session["color"] in GRID_COLORS else 0
     next_col = GRID_COLORS[(cur_idx + 1) % len(GRID_COLORS)]
     session["color"] = next_col
-    gridded = await _render_grid_from_session(session)
-    session["current_bytes"] = gridded
-    await _update_grid_message_media(call, session, gridded)
-    if session.get("kind") != "video":
-        await call.answer(f"Цвет: {GRID_COLOR_NAMES.get(next_col, next_col)}")
+    await _apply_and_refresh_grid_session(
+        call, session, "Обновляю цвет сетки на видео...", f"Цвет: {GRID_COLOR_NAMES.get(next_col, next_col)}"
+    )
 
 
 @router.callback_query(F.data.startswith("g_th:"))
 async def on_grid_thickness(call: CallbackQuery):
-    parts = call.data.split(":")
-    grid_id = parts[1]
+    grid_id = call.data.split(":")[1]
     session = grid_sessions.get(grid_id)
     if not session:
         await call.answer("Сессия сетки устарела", show_alert=True)
         return
-
-    if session.get("kind") == "video":
-        await call.answer("Обновляю толщину сетки на видео...")
     cur_idx = GRID_THICKNESS_MODES.index(session["thickness_mode"]) if session["thickness_mode"] in GRID_THICKNESS_MODES else 0
     next_th = GRID_THICKNESS_MODES[(cur_idx + 1) % len(GRID_THICKNESS_MODES)]
     session["thickness_mode"] = next_th
-    gridded = await _render_grid_from_session(session)
-    session["current_bytes"] = gridded
-    await _update_grid_message_media(call, session, gridded)
-    if session.get("kind") != "video":
-        await call.answer(f"Толщина: {GRID_THICKNESS_NAMES.get(next_th, next_th)}")
+    await _apply_and_refresh_grid_session(
+        call, session, "Обновляю толщину сетки на видео...", f"Толщина: {GRID_THICKNESS_NAMES.get(next_th, next_th)}"
+    )
 
 
 @router.callback_query(F.data.startswith("g_lbl:"))
 async def on_grid_labels(call: CallbackQuery):
-    parts = call.data.split(":")
-    grid_id = parts[1]
+    grid_id = call.data.split(":")[1]
     session = grid_sessions.get(grid_id)
     if not session:
         await call.answer("Сессия сетки устарела", show_alert=True)
         return
-
-    if session.get("kind") == "video":
-        await call.answer("Обновляю метки ячеек на видео...")
     session["show_labels"] = not session.get("show_labels", False)
-    gridded = await _render_grid_from_session(session)
-    session["current_bytes"] = gridded
-    await _update_grid_message_media(call, session, gridded)
-    if session.get("kind") != "video":
-        await call.answer("Номера ячеек: Вкл" if session["show_labels"] else "Номера ячеек: Выкл")
+    await _apply_and_refresh_grid_session(
+        call,
+        session,
+        "Обновляю метки ячеек на видео...",
+        "Номера ячеек: Вкл" if session["show_labels"] else "Номера ячеек: Выкл",
+    )
 
 
 @router.callback_query(F.data.startswith("g_use_vid:"))
@@ -4919,10 +4967,15 @@ async def on_toggle_reference_video_grid(call: CallbackQuery):
     if next_size > 0:
         await call.answer(f"⏳ Накладываю сетку {next_size}×{next_size} на видео...")
         th_mode = "thin" if next_size >= 10 else ("medium" if next_size >= 6 else "thick")
-        draft["ref_video"] = await overlay_grid_video(
-            orig_vid, rows=next_size, cols=next_size, thickness_mode=th_mode, color="contrast"
-        )
-        draft["ref_video_grid_size"] = next_size
+        try:
+            draft["ref_video"] = await overlay_grid_video(
+                orig_vid, rows=next_size, cols=next_size, thickness_mode=th_mode, color="contrast"
+            )
+            draft["ref_video_grid_size"] = next_size
+        except Exception as exc:
+            logger.error(f"rvgrid failed: {exc}", exc_info=True)
+            await call.message.reply(f"{ce('warn', '⚠️')} Не удалось наложить сетку на видео: <code>{html.escape(str(exc)[:180])}</code>", parse_mode="HTML")
+            return
     else:
         draft["ref_video"] = orig_vid
         draft["ref_video_grid_size"] = 0
@@ -4942,28 +4995,42 @@ async def on_toggle_reference_video_grid(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("grid_gen:"))
 async def on_grid_for_generated_image(call: CallbackQuery, bot: Bot):
-    parts = call.data.split(":")
-    owner_id = int(parts[1])
-    img_bytes = await extract_image_bytes(call.message, bot)
-    if not img_bytes:
-        await call.answer("Не удалось загрузить изображение", show_alert=True)
-        return
     await call.answer("Наложение сетки...")
-    await process_grid_image(call.message, bot, img_bytes, "")
+    try:
+        img_bytes = await extract_image_bytes(call.message, bot)
+        if not img_bytes:
+            await call.message.reply("⚠️ Не удалось загрузить изображение с сервера Telegram.")
+            return
+        await process_grid_image(call.message, bot, img_bytes, "")
+    except Exception as exc:
+        logger.error(f"grid_gen failed: {exc}", exc_info=True)
+        await call.message.reply(f"{ce('warn', '⚠️')} Не удалось наложить сетку на фото: <code>{html.escape(str(exc)[:180])}</code>", parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("vgrid_gen:"))
 async def on_grid_for_generated_video(call: CallbackQuery, bot: Bot):
-    try:
-        vid_bytes = await extract_video_bytes(call.message, bot)
-    except ValueError:
-        await call.answer("Видео больше 20 МБ — Telegram не даёт скачать файл", show_alert=True)
-        return
-    if not vid_bytes:
-        await call.answer("Не удалось загрузить видео", show_alert=True)
+    vinfo = _message_video_file(call.message)
+    if vinfo and vinfo[1] and vinfo[1] > MAX_TG_DOWNLOAD_BYTES:
+        await call.answer("⚠️ Видео больше 20 МБ — Telegram не даёт скачать файл для сетки.", show_alert=True)
         return
     await call.answer("⏳ Накладываю сетку на видео...")
-    await process_grid_video(call.message, bot, vid_bytes, "")
+    status_msg = await call.message.reply(f"{ce('load_gears', '⚙️')} Скачиваю и накладываю сетку на видео...")
+    try:
+        vid_bytes = await extract_video_bytes(call.message, bot)
+        if not vid_bytes:
+            await call.message.reply("⚠️ Не удалось загрузить видео с сервера Telegram.")
+            return
+        await process_grid_video(call.message, bot, vid_bytes, "")
+    except ValueError:
+        await call.message.reply("⚠️ Видео больше 20 МБ — Telegram Bot API не даёт скачать его для повторной обработки.")
+    except Exception as exc:
+        logger.error(f"vgrid_gen failed: {exc}", exc_info=True)
+        await call.message.reply(f"{ce('warn', '⚠️')} Не удалось наложить сетку на видео: <code>{html.escape(str(exc)[:200])}</code>", parse_mode="HTML")
+    finally:
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
 
 
 @router.callback_query(F.data.startswith("wstep:"))

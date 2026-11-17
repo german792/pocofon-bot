@@ -963,11 +963,11 @@ async def overlay_grid_video(
         grid_path.write_bytes(grid_png)
 
         filter_str = (
-            "[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2[base];"
-            "[1:v]format=rgba[grid];"
+            "[0:v]setpts=PTS-STARTPTS,scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1[base];"
+            "[1:v]format=rgba,setsar=1[grid];"
             "[base][grid]overlay=0:0:shortest=1[outv]"
         )
-        cmd = [
+        base_cmd = [
             "ffmpeg", "-y",
             "-i", str(in_path),
             "-loop", "1",
@@ -979,10 +979,14 @@ async def overlay_grid_video(
             "-pix_fmt", "yuv420p",
             "-preset", "veryfast",
             "-crf", "21",
-            "-c:a", "copy",
-            str(out_path),
         ]
-        rc, err = await _run_ffmpeg_command(cmd, timeout=180.0)
+        rc, err = await _run_ffmpeg_command([*base_cmd, "-c:a", "copy", str(out_path)], timeout=180.0)
+        if rc != 0 or not out_path.exists() or out_path.stat().st_size == 0:
+            # Retry re-encoding audio to AAC in case container had Opus/Vorbis/PCM audio
+            rc, err = await _run_ffmpeg_command(
+                [*base_cmd, "-c:a", "aac", "-b:a", "128k", str(out_path)],
+                timeout=180.0,
+            )
         if rc != 0 or not out_path.exists() or out_path.stat().st_size == 0:
             raise RuntimeError(f"FFmpeg video grid overlay failed ({rc}): {err[-300:]}")
         return out_path.read_bytes()
