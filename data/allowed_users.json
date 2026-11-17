@@ -71,7 +71,8 @@
     "kars_ulf",
     "mango_mark_1488_222",
     "jooorb",
-    "artem_kotelok"
+    "artem_kotelok",
+    "blanklw"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -646,6 +647,14 @@
       "name": "@Artem_kotelok",
       "added_at": 1794919060.102278,
       "added_by": "@GermanUstinf",
+      "role": "user"
+    },
+    "blanklw": {
+      "user_id": 8871319864,
+      "username": "blanklw",
+      "name": "blanklw",
+      "added_at": 1794923188.395111,
+      "added_by": "group_-1004328649380",
       "role": "user"
     }
   }
