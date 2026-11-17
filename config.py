@@ -391,14 +391,27 @@ MODELS = {
     "elevenlabs": {
         "name": "ElevenLabs V3",
         "short": "🎙 ElevenLabs",
-        "hidden": True,  # скрыт из меню и /model
+        "hidden": True,  # скрыт из сетки Видео /model; вынесен во вкладку «Голос»
         "category": "video",  # остаётся "video" ради web.py/истории; в боте голос вынесен во вкладку «Голос»
         "backend": "davinci_voice",
         "api_id": "eleven-v3",
         "has_audio": True,
         "multi_ref": True,
         "ref_limit": 5,
-        "desc": "Текст в голос и переозвучка"
+        "desc": "ElevenLabs V3: текст в речь (TTS) и переозвучка голоса"
+    },
+    "lyria_3_pro": {
+        "name": "Google Lyria 3 Pro",
+        "short": "🎵 Lyria 3 Pro",
+        "hidden": True,  # скрыт из сетки Видео /model; вынесен во вкладку «Музыка»
+        "category": "music",
+        "backend": "davinci_music",
+        "api_id": "googleLyria3Pro",
+        "has_audio": True,
+        "multi_ref": False,
+        "ref_limit": 0,
+        "durations": [120, 180],
+        "desc": "Google Lyria 3 Pro: студийные песни и музыка (2–3 мин, вокал или инструментал)"
     },
 
     # --- EXISTING GROK & MINIMAX VIDEO MODELS ---
@@ -747,9 +760,11 @@ def calculate_credit_cost(model_key: str, duration: int = 5, resolution: str = "
             return 1
         return 15
 
-    # 3. Voice models on DaVinci backend
+    # 3. Voice & Music models on DaVinci backend
     if backend == "davinci_voice":
         return 10
+    if backend == "davinci_music":
+        return 5
 
     # 4. External models (Grok, MiniMax, Qwen Image Pro, legacy fallbacks)
     return 0
@@ -802,6 +817,8 @@ COMPACT_MODEL_LABELS = {
     "gpt_image_2_6_sunburst": "☀️ GPT Sun",
     "gpt_image_2_6_flare": "✨ GPT Flare",
     "qwen_image": "🪧 Постер",
+    "elevenlabs": "🎙 ElevenLabs",
+    "lyria_3_pro": "🎵 Lyria 3 Pro",
 }
 
 
@@ -819,8 +836,8 @@ VIDEO_MODEL_KEYS = [
 ]
 IMAGE_MODEL_KEYS = [k for k, v in MODELS.items() if v.get("category") == "image"]
 
-# --- Voice tab (ElevenLabs) ---
-VOICE_MODEL_KEY = "elevenlabs"  # вкладка голоса временно отключена
+# --- Voice tab (ElevenLabs V3) ---
+VOICE_MODEL_KEY = "elevenlabs"
 MOTION_MODEL_KEY = "klingMotionControl3"
 MOTION_MODEL_KEYS = ["klingMotionControl3", "klingMotionControl26"]
 # Голоса для вкладки «Голос». id — ElevenLabs voice_id. Первый — тот, что бот использовал раньше.
@@ -834,6 +851,31 @@ VOICES = [
     {"id": "ErXwobaYiN019PkySvjV", "name": "Antoni", "emoji": "🎩"},
 ]
 DEFAULT_VOICE_ID = VOICES[0]["id"]
+
+# --- Music tab (Google Lyria 3 Pro via POST /music/process) ---
+MUSIC_MODEL_KEY = "lyria_3_pro"
+MUSIC_GENRES = [
+    {"key": "", "label": "Авто"},
+    {"key": "pop", "label": "Pop"},
+    {"key": "hip-hop / rap", "label": "Hip-Hop"},
+]
+MUSIC_DURATIONS = [
+    {"key": "", "label": "Авто"},
+    {"key": "120", "label": "2 мин"},
+    {"key": "180", "label": "3 мин"},
+]
+MUSIC_MOODS = [
+    {"key": "", "label": "Авто"},
+    {"key": "happy ", "label": "Happy"},
+    {"key": "uplifting", "label": "Uplifting"},
+    {"key": "funny", "label": "Funny"},
+]
+MUSIC_THEMES = [
+    {"key": "", "label": "Авто"},
+    {"key": "love", "label": "Love"},
+    {"key": "film&cinema", "label": "Cinema"},
+    {"key": "motivation", "label": "Motivation"},
+]
 
 DEFAULT_MODEL = "s2_5"
 DEFAULT_IMAGE_MODEL = "nano_banana_2_1"

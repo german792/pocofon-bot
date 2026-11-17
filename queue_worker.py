@@ -165,6 +165,9 @@ class GenerationJob:
     ref_video: Optional[bytes] = None
     voice_id: str = ""
     voice_mode: str = "tts"
+    music_lyrics_mode: str = "auto"
+    music_lyrics: str = ""
+    music_specs: Dict[str, str] = field(default_factory=dict)
     motion_orient: str = "image"
     watermark_id: str = ""
     show_watermark_username: Optional[bool] = None
@@ -281,7 +284,18 @@ class GenerationQueue:
             head = f"{ce('nova', '🖼')} <b>{model_name}</b> · создаю изображение"
             chips.append(f"{job.resolution} · {job.ratio}")
         elif backend == "davinci_voice":
-            head = f"{ce('planet', '🎙')} <b>{model_name}</b> · озвучиваю текст"
+            head = f"{ce('voice', '🎙')} <b>{model_name}</b> · озвучиваю текст"
+        elif backend == "davinci_music":
+            head = f"{ce('mega', '🎵')} <b>{model_name}</b> · создаю трек"
+            m_specs = job.music_specs or {}
+            if m_specs.get("duration") == "120":
+                chips.append("2 мин")
+            elif m_specs.get("duration") == "180":
+                chips.append("3 мин")
+            if job.music_lyrics_mode == "instrumental":
+                chips.append("Инструментал")
+            elif job.music_lyrics_mode == "custom":
+                chips.append("Свой текст")
         else:
             head = f"{ce('rocket', '🎬')} <b>{model_name}</b> · создаю видео"
             chips.append(f"{dur_label} · {job.resolution} · {job.ratio}")
@@ -324,7 +338,7 @@ class GenerationQueue:
                 self.queue.task_done()
 
     def _get_client_for_backend(self, backend: str):
-        if backend in ("davinci", "davinci_image", "davinci_voice", "davinci_motion"):
+        if backend in ("davinci", "davinci_image", "davinci_voice", "davinci_music", "davinci_motion"):
             return self.davinci_client
         if backend == "v2":
             return self.v2_client
@@ -520,10 +534,16 @@ class GenerationQueue:
                 )
             return
 
-        # --- BRANCH 2: VOICE GENERATION (ElevenLabs TTS V3 / Voice Changer) ---
-        if backend == "davinci_voice":
+        # --- BRANCH 2: AUDIO GENERATION (ElevenLabs V3 Voice or Google Lyria 3 Pro Music) ---
+        if backend in ("davinci_voice", "davinci_music"):
+            is_music = backend == "davinci_music"
+            prefix = "lyria3pro" if is_music else "elevenlabs"
+            provider_label = "Lyria 3 Pro" if is_music else "ElevenLabs"
+            done_title = "Трек готов" if is_music else "Озвучка готова"
+            done_icon = ce("mega", "🎵") if is_music else ce("voice", "🎙")
+
             ts = int(asyncio.get_event_loop().time())
-            audio_file = VIDEOS_DIR / f"elevenlabs_{job.user_id}_{ts}.mp3"
+            audio_file = VIDEOS_DIR / f"{prefix}_{job.user_id}_{ts}.mp3"
 
             await self._update_status(
                 job,
@@ -531,7 +551,7 @@ class GenerationQueue:
                     job,
                     pct=99,
                     elapsed=total_elapsed,
-                    stage="Скачиваю аудиодорожку ElevenLabs..."
+                    stage=f"Скачиваю аудиодорожку {provider_label}..."
                 )
             )
 
@@ -542,7 +562,7 @@ class GenerationQueue:
                 logger.error(f"Audio download failed: {dl_err}", exc_info=True)
                 await self._update_status(
                     job,
-                    f"{ce('alert', '❌')} <b>Ошибка загрузки аудиофайла с сервера ElevenLabs.</b>"
+                    f"{ce('alert', '❌')} <b>Ошибка загрузки аудиофайла с сервера {provider_label}.</b>"
                 )
                 return
 
@@ -552,27 +572,27 @@ class GenerationQueue:
                     job,
                     pct=100,
                     elapsed=total_elapsed,
-                    stage="Отправляю озвучку в Telegram..."
+                    stage=f"Отправляю {'трек' if is_music else 'озвучку'} в Telegram..."
                 )
             )
 
             user_line = f"{ce('astro', '👤')} {job.user_name}\n" if job.user_name else ""
             caption = (
-                f"{ce('planet', '🎙')} <b>Озвучка готова</b>\n"
+                f"{done_icon} <b>{done_title}</b>\n"
                 f"{user_line}\n"
                 f"{_quote(job.prompt)}\n"
                 f"<b>{html.escape(str(model_name))}</b>  ·  {ce('shot', '⚡')} {total_elapsed} с"
             )
 
-            audio_input = FSInputFile(str(audio_file), filename=f"elevenlabs_{job.user_id}.mp3")
+            audio_input = FSInputFile(str(audio_file), filename=f"{prefix}_{job.user_id}.mp3")
             for attempt in range(1, 3):
                 try:
                     await self.bot.send_audio(
                         chat_id=job.chat_id,
                         audio=audio_input,
                         caption=caption,
-                        title=job.prompt[:40] or "ElevenLabs V3",
-                        performer="Poco AI • ElevenLabs",
+                        title=(job.prompt[:40] or ("Lyria 3 Pro" if is_music else "ElevenLabs V3")),
+                        performer=f"Poco AI • {provider_label}",
                         parse_mode="HTML",
                         reply_to_message_id=job.reply_to_message_id,
                         allow_sending_without_reply=True,
@@ -808,6 +828,16 @@ class GenerationQueue:
                     **voice_kwargs,
                 )
 
+            elif backend == "davinci_music":
+                lmode = None if (job.music_lyrics_mode or "auto") == "auto" else job.music_lyrics_mode
+                task_id = await self.davinci_client.create_music_task(
+                    prompt=job.prompt,
+                    model_key=model_info.get("api_id", "googleLyria3Pro"),
+                    lyrics_type=lmode,
+                    lyrics=job.music_lyrics or None,
+                    spec_options=job.music_specs or None,
+                )
+
             elif backend == "v2":
                 img_bytes = (
                     image_utils.prepare_user_image(job.image_bytes, job.ratio)
@@ -890,7 +920,7 @@ class GenerationQueue:
         poll_count = 0
 
         client = self._get_client_for_backend(backend)
-        poll_sleep = 3 if backend in ("grok", "minimax", "qwen_image", "davinci_image", "davinci_voice") else 5
+        poll_sleep = 3 if backend in ("grok", "minimax", "qwen_image", "davinci_image", "davinci_voice", "davinci_music") else 5
 
         while True:
             await asyncio.sleep(poll_sleep)
@@ -915,7 +945,7 @@ class GenerationQueue:
             if status == "succeeded":
                 if backend in ("qwen_image", "davinci_image"):
                     media_url = task_info.get("imageUrl") or task_info.get("videoUrl")
-                elif backend == "davinci_voice":
+                elif backend in ("davinci_voice", "davinci_music"):
                     media_url = task_info.get("audioUrl") or task_info.get("videoUrl")
                 else:
                     media_url = task_info.get("videoUrl")
@@ -967,6 +997,9 @@ class GenerationQueue:
                 elif backend == "davinci_voice":
                     pct = min(95, max(25, elapsed * 10))
                     stage = task_info.get("stage", "Синтез речи ElevenLabs V3...")
+                elif backend == "davinci_music":
+                    pct = min(95, max(20, elapsed * 4))
+                    stage = task_info.get("stage", "Сочиняю трек в Lyria 3 Pro...")
                 else:
                     pct = estimate_progress(elapsed, job.duration, status, srv_progress)
                     if status == "queued":

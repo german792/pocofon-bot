@@ -759,7 +759,7 @@ class DaVinciClient:
     - Video models: Seedance 2.5, Seedance 2.0, Seedance 2.0 Fast, Seedance 2.0 Mini, Seedance 1.5 Pro,
       Kling 4.0, Kling 4.0 Flash, Flux 3, Flux 3 Max, LTX 2.5 Pro, Gemini Omni Flash 1.2
     - Image models: Nano Banana 2.1, Nano Banana Pro, Nano Banana, Flux 3 Image, Flux 3 Klein, Qwen Image 3.0
-    - Voice models: ElevenLabs TTS V3 & Voice Changer
+    - Voice & Music models: ElevenLabs TTS V3 & Voice Changer, Google Lyria 3 Pro
     """
 
     def __init__(
@@ -1482,6 +1482,69 @@ class DaVinciClient:
             raise RuntimeError("Сервер DaVinci не вернул processId фото-задачи")
         return process_id
 
+    async def _normalize_audio_to_mp3(self, audio_bytes: bytes) -> bytes:
+        """Convert Telegram voice notes (.ogg/.opus/.m4a/.wav) into valid MP3 bytes when ffmpeg is available."""
+        if not audio_bytes:
+            return audio_bytes
+        if audio_bytes.startswith(b"ID3") or (len(audio_bytes) >= 2 and audio_bytes[0] == 0xFF and (audio_bytes[1] & 0xE0) == 0xE0):
+            return audio_bytes
+        ffmpeg_bin = shutil.which("ffmpeg")
+        if not ffmpeg_bin:
+            return audio_bytes
+        tmp_dir = Path(tempfile.mkdtemp(prefix="poco_aud_"))
+        try:
+            in_path = tmp_dir / "input.bin"
+            out_path = tmp_dir / "output.mp3"
+            in_path.write_bytes(audio_bytes)
+            proc = await asyncio.create_subprocess_exec(
+                ffmpeg_bin, "-y", "-i", str(in_path),
+                "-vn", "-acodec", "libmp3lame", "-b:a", "192k", str(out_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await asyncio.wait_for(proc.communicate(), timeout=45.0)
+            if proc.returncode == 0 and out_path.exists() and out_path.stat().st_size > 128:
+                return out_path.read_bytes()
+        except Exception as exc:
+            logger.warning(f"ffmpeg mp3 normalize skipped: {exc}")
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        return audio_bytes
+
+    async def _post_davinci_audio_process(self, path: str, payload: Dict[str, Any], label: str) -> str:
+        """POST to /voice/process or /music/process with automatic 401 refresh and processId extraction."""
+        resp = await self.client.post(
+            f"{self.base_url}{path}",
+            json=payload,
+            headers=self._headers(),
+        )
+        if resp.status_code == 401 and self.refresh_token:
+            await self.ensure_valid_token(force_refresh=True)
+            resp = await self.client.post(
+                f"{self.base_url}{path}",
+                json=payload,
+                headers=self._headers(),
+            )
+
+        if resp.status_code not in (200, 201):
+            try:
+                err_data = resp.json()
+                err_msg = err_data.get("data") or err_data.get("message") or err_data.get("error") or resp.text
+            except Exception:
+                err_msg = resp.text
+            raise RuntimeError(f"Ошибка {label} ({resp.status_code}): {err_msg}")
+
+        data = resp.json().get("data")
+        if isinstance(data, dict):
+            process_id = str(data.get("processId") or data.get("id") or "")
+        elif isinstance(data, list):
+            process_id = str(data[0]) if data else ""
+        else:
+            process_id = str(data or "")
+        if not process_id:
+            raise RuntimeError(f"Сервер {label} не вернул processId задачи")
+        return process_id
+
     async def create_voice_task(
         self,
         prompt: str,
@@ -1492,7 +1555,8 @@ class DaVinciClient:
         await self.ensure_valid_token()
 
         if audio_bytes:
-            audio_bp = await self.upload_media(audio_bytes, ext=".mp3", content_type="audio/mpeg")
+            mp3_bytes = await self._normalize_audio_to_mp3(audio_bytes)
+            audio_bp = await self.upload_media(mp3_bytes, ext=".mp3", content_type="audio/mpeg")
             payload: Dict[str, Any] = {
                 "type": "voice-changer",
                 "modelKey": "voice-changer",
@@ -1512,32 +1576,44 @@ class DaVinciClient:
                 "stability": 0.5,
             }
 
-        resp = await self.client.post(
-            f"{self.base_url}/voice/process",
-            json=payload,
-            headers=self._headers(),
+        return await self._post_davinci_audio_process("/voice/process", payload, "ElevenLabs")
+
+    async def create_music_task(
+        self,
+        prompt: str,
+        model_key: str = "googleLyria3Pro",
+        lyrics_type: Optional[str] = None,
+        lyrics: Optional[str] = None,
+        spec_options: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Submit music generation task (Google Lyria 3 Pro) to POST /music/process. Returns processId."""
+        await self.ensure_valid_token()
+        clean_prompt = (prompt or "").strip() or "Atmospheric modern track with rich studio production"
+        payload: Dict[str, Any] = {
+            "modelKey": model_key or "googleLyria3Pro",
+            "prompt": clean_prompt,
+        }
+        clean_lyrics = (lyrics or "").strip()
+        if lyrics_type == "instrumental":
+            payload["lyricsType"] = "instrumental"
+        elif lyrics_type == "custom" and clean_lyrics:
+            payload["lyricsType"] = "custom"
+            payload["lyrics"] = clean_lyrics
+
+        if spec_options:
+            cleaned_specs = {
+                str(k): v
+                for k, v in spec_options.items()
+                if v not in (None, "")
+            }
+            if cleaned_specs:
+                payload["specOptions"] = cleaned_specs
+
+        logger.info(
+            f"[music/process] model={payload['modelKey']} lyricsType={payload.get('lyricsType', 'auto')} "
+            f"specs={payload.get('specOptions')}"
         )
-        if resp.status_code == 401 and self.refresh_token:
-            await self.ensure_valid_token(force_refresh=True)
-            resp = await self.client.post(
-                f"{self.base_url}/voice/process",
-                json=payload,
-                headers=self._headers(),
-            )
-
-        if resp.status_code not in (200, 201):
-            try:
-                err_data = resp.json()
-                err_msg = err_data.get("data") or err_data.get("message") or err_data.get("error") or resp.text
-            except Exception:
-                err_msg = resp.text
-            raise RuntimeError(f"Ошибка ElevenLabs ({resp.status_code}): {err_msg}")
-
-        data = resp.json().get("data")
-        process_id = data[0] if isinstance(data, list) and data else str(data or "")
-        if not process_id:
-            raise RuntimeError("Сервер ElevenLabs не вернул processId задачи")
-        return process_id
+        return await self._post_davinci_audio_process("/music/process", payload, "Lyria 3 Pro")
 
     async def get_task(self, process_id: str) -> Dict[str, Any]:
         """Poll task status from GET /generations?page=1&limit=50 with cache-busting."""
@@ -1580,7 +1656,12 @@ class DaVinciClient:
                     if media_type == "VIDEO":
                         media_url = item.get("url")
                     else:
-                        media_url = item.get("url") or item.get("originalImageUrl") or item.get("previewImageUrl")
+                        media_url = (
+                            item.get("audioUrl")
+                            or item.get("url")
+                            or item.get("originalImageUrl")
+                            or item.get("previewImageUrl")
+                        )
 
                     if raw_status in ("COMPLETED", "SUCCEEDED", "SUCCESS", "DONE") and media_url:
                         return {

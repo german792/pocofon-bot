@@ -95,7 +95,7 @@ def get_auth_context(request: Request) -> Dict[str, Any]:
     return {"authenticated": False, "role": "guest", "user_id": None, "note": None}
 
 def get_client_for_backend(backend: str):
-    if backend in ("davinci", "davinci_image", "davinci_voice"):
+    if backend in ("davinci", "davinci_image", "davinci_voice", "davinci_music"):
         return davinci_client
     elif backend == "v2":
         return v2_client
@@ -206,6 +206,11 @@ async def process_web_generation(
                 prompt=prompt,
                 audio_bytes=audio_bytes,
             )
+        elif backend == "davinci_music":
+            sub_task_id = await davinci_client.create_music_task(
+                prompt=prompt,
+                model_key=model_info.get("api_id", "googleLyria3Pro"),
+            )
         elif backend == "v2":
             img = image_utils.prepare_user_image(prepared_images[0], ratio) if prepared_images else None
             sub_task_id = await v2_client.create_task(
@@ -266,7 +271,7 @@ async def process_web_generation(
         client = get_client_for_backend(backend)
         start_time = asyncio.get_event_loop().time()
         media_url = None
-        poll_sleep = 3 if backend in ("grok", "minimax", "qwen_image", "davinci_image", "davinci_voice") else 5
+        poll_sleep = 3 if backend in ("grok", "minimax", "qwen_image", "davinci_image", "davinci_voice", "davinci_music") else 5
         est_duration = 35 if category == "image" else (duration * 6 if duration > 0 else 45)
 
         while True:
@@ -289,7 +294,7 @@ async def process_web_generation(
             if status == "succeeded":
                 if backend in ("qwen_image", "davinci_image"):
                     media_url = task_info.get("imageUrl") or task_info.get("videoUrl")
-                elif backend == "davinci_voice":
+                elif backend in ("davinci_voice", "davinci_music"):
                     media_url = task_info.get("audioUrl") or task_info.get("videoUrl")
                 else:
                     media_url = task_info.get("videoUrl")
@@ -313,7 +318,7 @@ async def process_web_generation(
             out_path.write_bytes(img_bytes)
             task["media_url"] = f"/api/media/{out_filename}"
             task["media_type"] = "image"
-        elif backend == "davinci_voice":
+        elif backend in ("davinci_voice", "davinci_music"):
             out_filename = f"web_{task_id}.mp3"
             out_path = OUTPUTS_DIR / out_filename
             audio_data = await davinci_client.download_audio(media_url)
@@ -371,6 +376,7 @@ async def get_models():
     video_models = []
     image_models = []
     voice_models = []
+    music_models = []
 
     for key, m in config.MODELS.items():
         cat = m.get("category", "video")
@@ -392,13 +398,16 @@ async def get_models():
             image_models.append(item)
         elif m.get("backend") == "davinci_voice":
             voice_models.append(item)
-        else:
+        elif m.get("backend") == "davinci_music":
+            music_models.append(item)
+        elif cat == "video" and not m.get("hidden"):
             video_models.append(item)
 
     return {
         "video_models": video_models,
         "image_models": image_models,
         "voice_models": voice_models,
+        "music_models": music_models,
         "default_video": config.DEFAULT_MODEL,
         "default_image": config.DEFAULT_IMAGE_MODEL,
         "default_duration": config.DEFAULT_DURATION,

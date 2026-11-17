@@ -53,10 +53,15 @@ from config import (
     IMAGE_RATIO_OPTIONS,
     calculate_credit_cost,
     VOICE_MODEL_KEY,
+    MUSIC_MODEL_KEY,
     MOTION_MODEL_KEY,
     MOTION_MODEL_KEYS,
     VOICES,
     DEFAULT_VOICE_ID,
+    MUSIC_GENRES,
+    MUSIC_DURATIONS,
+    MUSIC_MOODS,
+    MUSIC_THEMES,
 )
 from api_client import (
     SeedanceAPIClient,
@@ -86,6 +91,7 @@ BUILD_ID = "poco-v9-merged-2026-11-13"
 class UserInputState(StatesGroup):
     waiting_for_prompt = State()
     waiting_for_duration = State()
+    waiting_for_lyrics = State()
 
 
 class CameoState(StatesGroup):
@@ -386,6 +392,11 @@ def get_user_prefs(user_id: int) -> Dict[str, Any]:
             "ref_mode": "ref",
             "voice_id": DEFAULT_VOICE_ID,
             "voice_mode": "tts",
+            "music_lyrics_mode": "auto",
+            "music_genre": "",
+            "music_duration": "",
+            "music_mood": "",
+            "music_theme": "",
         }
     if user_prefs[user_id].get("model_key") not in VIDEO_MODEL_KEYS:
         user_prefs[user_id]["model_key"] = DEFAULT_MODEL
@@ -410,31 +421,156 @@ def voice_text_of(draft: Dict[str, Any]) -> str:
     return "" if text in PLACEHOLDER_PROMPTS else text
 
 
-def tabs_row(active: str, owner_id: int) -> List[InlineKeyboardButton]:
-    """Three top tabs: video / photo / motion with native animated custom emoji icons."""
-    items = [
-        ("video", "Видео", "rocket", "🎬"),
-        ("image", "Фото", "wand", "🖼"),
-        ("motion", "Motion", "dance", "🕺"),
+def _tab_btn(key: str, label: str, icon_key: str, fb: str, active: str, owner_id: int) -> InlineKeyboardButton:
+    if key == active:
+        return cbtn(f"✓ {label}", f"tab:{key}:{owner_id}", icon_key=icon_key, fallback_emoji=f"✅ {fb}", style="primary")
+    return cbtn(label, f"tab:{key}:{owner_id}", icon_key=icon_key, fallback_emoji=fb)
+
+
+def tabs_rows(active: str, owner_id: int) -> List[List[InlineKeyboardButton]]:
+    """Two clean rows of top mode tabs: Video/Photo/Motion + Voice/Music."""
+    row1 = [
+        _tab_btn("video", "Видео", "rocket", "🎬", active, owner_id),
+        _tab_btn("image", "Фото", "wand", "🖼", active, owner_id),
+        _tab_btn("motion", "Motion", "dance", "🕺", active, owner_id),
     ]
-    row = []
-    for key, label, icon_key, fb in items:
-        if key == active:
-            row.append(cbtn(f"✓ {label}", f"tab:{key}:{owner_id}", icon_key=icon_key, fallback_emoji=f"✅ {fb}", style="primary"))
-        else:
-            row.append(cbtn(label, f"tab:{key}:{owner_id}", icon_key=icon_key, fallback_emoji=fb))
-    return row
+    row2 = [
+        _tab_btn("voice", "Голос", "voice", "🎙", active, owner_id),
+        _tab_btn("music", "Музыка", "mega", "🎵", active, owner_id),
+    ]
+    return [row1, row2]
+
+
+def tabs_row(active: str, owner_id: int) -> List[InlineKeyboardButton]:
+    """Primary row of top tabs (kept for compatibility)."""
+    return tabs_rows(active, owner_id)[0]
 
 
 def build_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeyboardMarkup:
-    """Build dynamic interactive inline keyboard for either Video Menu or Image Menu."""
+    """Build dynamic interactive inline keyboard for Video, Photo, Motion, Voice, or Music."""
     sync_draft_references(draft)
     menu_mode = draft.get("menu_mode", "video")
     if menu_mode == "image":
         return build_image_settings_keyboard(draft, owner_id)
     if menu_mode == "motion":
         return build_motion_settings_keyboard(draft, owner_id)
+    if menu_mode == "voice":
+        return build_voice_settings_keyboard(draft, owner_id)
+    if menu_mode == "music":
+        return build_music_settings_keyboard(draft, owner_id)
     return build_video_settings_keyboard(draft, owner_id)
+
+
+def _music_spec_label(options: List[Dict[str, str]], key: str) -> str:
+    for item in options:
+        if item["key"] == key:
+            return item["label"]
+    return options[0]["label"]
+
+
+def build_voice_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeyboardMarkup:
+    """Voice tab (ElevenLabs V3): mode (TTS / Voice Changer), voice picker, launch."""
+    mode = draft.get("voice_mode", "tts")
+    cur_voice = draft.get("voice_id", DEFAULT_VOICE_ID)
+    rows = [*tabs_rows("voice", owner_id)]
+
+    tts_on, ch_on = mode == "tts", mode == "changer"
+    rows.append([
+        cbtn("Текст → голос", callback_data=f"vmode:tts:{owner_id}", icon_key="check" if tts_on else "book", fallback_emoji=("✓ ✍️" if tts_on else "✍️"), style="primary" if tts_on else None),
+        cbtn("Переозвучка", callback_data=f"vmode:changer:{owner_id}", icon_key="check" if ch_on else "voice", fallback_emoji=("✓ 🎤" if ch_on else "🎤"), style="primary" if ch_on else None),
+    ])
+
+    row: List[InlineKeyboardButton] = []
+    for i, v in enumerate(VOICES):
+        active = v["id"] == cur_voice
+        lbl = f"✓ {v['emoji']} {v['name']}" if active else f"{v['emoji']} {v['name']}"
+        row.append(InlineKeyboardButton(text=lbl, callback_data=f"vvoice:{i}:{owner_id}", **({"style": "primary"} if active else {})))
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+
+    ready = bool(draft.get("audio_bytes")) if mode == "changer" else bool(voice_text_of(draft))
+    cost = calculate_credit_cost(VOICE_MODEL_KEY, 0, "")
+    btn_label = "Озвучить" if mode == "tts" else "Переозвучить"
+    if cost > 0:
+        btn_label += f" (~{cost} кр.)"
+    rows.append([
+        cbtn(btn_label, callback_data=f"gen:{owner_id}", icon_key="voice", fallback_emoji="🎙", style="success" if ready else None),
+        cbtn("Отмена", callback_data=f"can:{owner_id}", icon_key="ban", fallback_emoji="❌", style="danger"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_music_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeyboardMarkup:
+    """Music tab (Google Lyria 3 Pro): lyrics mode, custom lyrics, duration, genre/mood/theme, launch."""
+    rows = [*tabs_rows("music", owner_id)]
+
+    lmode = draft.get("music_lyrics_mode", "auto")
+    rows.append([
+        cbtn(
+            "✓ Авто" if lmode == "auto" else "Авто",
+            callback_data=f"mlmode:auto:{owner_id}",
+            icon_key="spark",
+            fallback_emoji="✨",
+            style="primary" if lmode == "auto" else None,
+        ),
+        cbtn(
+            "✓ Без слов" if lmode == "instrumental" else "Без слов",
+            callback_data=f"mlmode:instrumental:{owner_id}",
+            icon_key="mega",
+            fallback_emoji="🎸",
+            style="primary" if lmode == "instrumental" else None,
+        ),
+        cbtn(
+            "✓ Свой текст" if lmode == "custom" else "Свой текст",
+            callback_data=f"mlmode:custom:{owner_id}",
+            icon_key="book",
+            fallback_emoji="📝",
+            style="primary" if lmode == "custom" else None,
+        ),
+    ])
+
+    if lmode == "custom":
+        has_lyrics = bool((draft.get("music_lyrics") or "").strip())
+        rows.append([
+            cbtn(
+                "Изменить текст песни" if has_lyrics else "Ввести текст песни",
+                callback_data=f"ml_edit:{owner_id}",
+                icon_key="check" if has_lyrics else "idea",
+                fallback_emoji="📝",
+                style="primary" if not has_lyrics else None,
+            )
+        ])
+
+    cur_dur = draft.get("music_duration", "")
+    dur_row = []
+    for item in MUSIC_DURATIONS:
+        active = item["key"] == cur_dur
+        lbl = f"✓ {item['label']}" if active else item["label"]
+        dur_row.append(InlineKeyboardButton(text=lbl, callback_data=f"mdur:{item['key']}:{owner_id}", **({"style": "primary"} if active else {})))
+    rows.append(dur_row)
+
+    g_lbl = _music_spec_label(MUSIC_GENRES, draft.get("music_genre", ""))
+    m_lbl = _music_spec_label(MUSIC_MOODS, draft.get("music_mood", ""))
+    t_lbl = _music_spec_label(MUSIC_THEMES, draft.get("music_theme", ""))
+    rows.append([
+        InlineKeyboardButton(text=f"Жанр: {g_lbl}", callback_data=f"mcyc:genre:{owner_id}"),
+        InlineKeyboardButton(text=f"Настр: {m_lbl}", callback_data=f"mcyc:mood:{owner_id}"),
+        InlineKeyboardButton(text=f"Тема: {t_lbl}", callback_data=f"mcyc:theme:{owner_id}"),
+    ])
+
+    has_prompt = bool(voice_text_of(draft))
+    lyrics_ok = (lmode != "custom") or bool((draft.get("music_lyrics") or "").strip())
+    ready = has_prompt and lyrics_ok
+    cost = calculate_credit_cost(MUSIC_MODEL_KEY, 0, "")
+    btn_label = f"Создать трек (~{cost} кр.)" if cost > 0 else "Создать трек"
+    rows.append([
+        cbtn(btn_label, callback_data=f"gen:{owner_id}", icon_key="mega", fallback_emoji="🎵", style="success" if ready else None),
+        cbtn("Отмена", callback_data=f"can:{owner_id}", icon_key="ban", fallback_emoji="❌", style="danger"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def motion_orient_of(draft: Dict[str, Any]) -> str:
@@ -453,7 +589,7 @@ def build_motion_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inli
     cur_model = draft.get("model_key", MOTION_MODEL_KEY)
     cur_res = draft.get("resolution", "720p")
     cur_orient = motion_orient_of(draft)
-    rows = [tabs_row("motion", owner_id)]
+    rows = [*tabs_rows("motion", owner_id)]
     model_row = []
     for mk, label in (("klingMotionControl3", "3.0"), ("klingMotionControl26", "2.6")):
         active = mk == cur_model
@@ -632,7 +768,7 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     # STEP 1: Model Selection
     if step == "model":
         rows = [
-            tabs_row("video", owner_id),
+            *tabs_rows("video", owner_id),
             *build_model_grid_rows(VIDEO_MODEL_KEYS, cur_model, "sm", owner_id, columns=3),
         ]
 
@@ -824,13 +960,8 @@ def build_image_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     ratio = draft.get("image_ratio", DEFAULT_IMAGE_RATIO)
     ref_images: List[bytes] = draft.get("ref_images", [])
 
-    # Top Switcher Row: Video Menu vs Image Menu
-    switcher_row = tabs_row("image", owner_id)
-
-    # Dense Image Models grid (3 per row)
-    model_rows = build_model_grid_rows(IMAGE_MODEL_KEYS, cur_model, "sm", owner_id, columns=3)
-
-    rows = [switcher_row, *model_rows]
+    # Top Switcher Rows
+    rows = [*tabs_rows("image", owner_id), *build_model_grid_rows(IMAGE_MODEL_KEYS, cur_model, "sm", owner_id, columns=3)]
 
     # Reference Row (Available for ALL Image models)
     ref_count = len(ref_images)
@@ -982,7 +1113,82 @@ def format_draft_text(draft: Dict[str, Any]) -> str:
         return format_image_draft_text(draft)
     if menu_mode == "motion":
         return format_motion_draft_text(draft)
+    if menu_mode == "voice":
+        return format_voice_draft_text(draft)
+    if menu_mode == "music":
+        return format_music_draft_text(draft)
     return format_video_draft_text(draft)
+
+
+def format_voice_draft_text(draft: Dict[str, Any]) -> str:
+    mode = draft.get("voice_mode", "tts")
+    voice = next((v for v in VOICES if v["id"] == draft.get("voice_id")), VOICES[0])
+    cost = calculate_credit_cost(VOICE_MODEL_KEY, 0, "")
+    cost_line = f"\n{ce('card', '💳')} Стоимость: <b>~{cost} кр.</b>" if cost > 0 else ""
+    if mode == "changer":
+        has_audio = bool(draft.get("audio_bytes"))
+        body = (
+            f"{ce('check', '✅')} <b>Переозвучка:</b> аудио получено — выберите голос и нажмите «Переозвучить»"
+            if has_audio
+            else f"{ce('voice', '🎤')} <b>Переозвучка</b> — отправьте голосовое сообщение или аудиофайл в чат {ce('down', '👇')}"
+        )
+    else:
+        text = voice_text_of(draft)
+        body = (
+            f"{ce('book', '✍️')} <b>Текст → голос</b>\n"
+            + (
+                f"<blockquote expandable>{html.escape(text[:800])}</blockquote>"
+                if text
+                else f"Напишите текст для озвучки сообщением в чат {ce('down', '👇')}"
+            )
+        )
+    return (
+        f"{ce('voice', '🎙')} <b>ElevenLabs V3</b> · {voice['emoji']} {html.escape(voice['name'])}\n\n"
+        f"{body}"
+        f"{cost_line}\n"
+        f"<code>build: {BUILD_ID}</code>"
+    )
+
+
+def format_music_draft_text(draft: Dict[str, Any]) -> str:
+    prompt = voice_text_of(draft)
+    lmode = draft.get("music_lyrics_mode", "auto")
+    lmode_names = {
+        "auto": "Авто (вокал и слова)",
+        "instrumental": "Инструментал (без слов)",
+        "custom": "Свой текст песни",
+    }
+    dur_lbl = _music_spec_label(MUSIC_DURATIONS, draft.get("music_duration", ""))
+    genre_lbl = _music_spec_label(MUSIC_GENRES, draft.get("music_genre", ""))
+    mood_lbl = _music_spec_label(MUSIC_MOODS, draft.get("music_mood", ""))
+    theme_lbl = _music_spec_label(MUSIC_THEMES, draft.get("music_theme", ""))
+    cost = calculate_credit_cost(MUSIC_MODEL_KEY, 0, "")
+    cost_line = f"\n{ce('card', '💳')} Стоимость: <b>~{cost} кр.</b>" if cost > 0 else ""
+
+    prompt_block = (
+        f"<blockquote expandable>{html.escape(prompt[:700])}</blockquote>"
+        if prompt
+        else f"<i>Опишите трек, стиль или настроение сообщением в чат {ce('down', '👇')}</i>"
+    )
+    lyrics_block = ""
+    if lmode == "custom":
+        lyrics_txt = (draft.get("music_lyrics") or "").strip()
+        lyrics_block = (
+            f"\n{ce('book', '📝')} <b>Текст песни:</b>\n<blockquote expandable>{html.escape(lyrics_txt[:700])}</blockquote>"
+            if lyrics_txt
+            else f"\n{ce('warn', '⚠️')} Нажмите «Ввести текст песни» ниже и отправьте куплеты."
+        )
+
+    return (
+        f"{ce('mega', '🎵')} <b>Google Lyria 3 Pro</b> · 48 kHz студийный трек\n\n"
+        f"{ce('idea', '🎹')} <b>Описание трека:</b>\n{prompt_block}\n\n"
+        f"{ce('spark', '🎤')} <b>Вокал:</b> {lmode_names.get(lmode, lmode)}\n"
+        f"{ce('load_hourglass', '⏱')} <b>Длительность:</b> {dur_lbl}  ·  "
+        f"<b>Жанр:</b> {genre_lbl}  ·  <b>Настр:</b> {mood_lbl}  ·  <b>Тема:</b> {theme_lbl}"
+        f"{lyrics_block}"
+        f"{cost_line}\n"
+        f"<code>build: {BUILD_ID}</code>"
+    )
 
 
 def format_motion_draft_text(draft: Dict[str, Any]) -> str:
@@ -1400,6 +1606,10 @@ def create_draft_for_user(
     active_model = prefs["image_model_key"] if menu_mode == "image" else prefs["model_key"]
     if menu_mode == "motion":
         active_model = MOTION_MODEL_KEY
+    elif menu_mode == "voice":
+        active_model = VOICE_MODEL_KEY
+    elif menu_mode == "music":
+        active_model = MUSIC_MODEL_KEY
     if menu_mode == "image" and active_model not in IMAGE_MODEL_KEYS:
         active_model = DEFAULT_IMAGE_MODEL
     elif menu_mode == "video" and active_model not in VIDEO_MODEL_KEYS:
@@ -1432,6 +1642,14 @@ def create_draft_for_user(
         "image_ratio": prefs.get("image_ratio", DEFAULT_IMAGE_RATIO),
         "audio": prefs["audio"],
         "audio_bytes": audio_bytes,
+        "voice_id": prefs.get("voice_id", DEFAULT_VOICE_ID),
+        "voice_mode": "changer" if (menu_mode == "voice" and audio_bytes) else prefs.get("voice_mode", "tts"),
+        "music_lyrics_mode": prefs.get("music_lyrics_mode", "auto"),
+        "music_lyrics": "",
+        "music_genre": prefs.get("music_genre", ""),
+        "music_duration": prefs.get("music_duration", ""),
+        "music_mood": prefs.get("music_mood", ""),
+        "music_theme": prefs.get("music_theme", ""),
         "ref_video": ref_video,
         "orig_ref_video": prev_rv_orig or ref_video,
         "ref_video_grid_size": prev_rv_grid,
@@ -1469,6 +1687,10 @@ async def handle_start_and_help(message: Message, state: FSMContext):
             cbtn("Motion", callback_data=f"open_menu:motion:{uid}", icon_key="dance", fallback_emoji="🕺", style="primary"),
         ],
         [
+            cbtn("Голос", callback_data=f"open_menu:voice:{uid}", icon_key="voice", fallback_emoji="🎙", style="primary"),
+            cbtn("Музыка", callback_data=f"open_menu:music:{uid}", icon_key="mega", fallback_emoji="🎵", style="primary"),
+        ],
+        [
             cbtn("Камео (@персонажи)", callback_data=f"cameo_menu:{uid}", icon_key="cosmos", fallback_emoji="🎭"),
             cbtn("Ватермарка", callback_data=f"wm_menu:{uid}", icon_key="gem", fallback_emoji="💧"),
         ],
@@ -1476,16 +1698,16 @@ async def handle_start_and_help(message: Message, state: FSMContext):
 
     in_group = message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP)
     how = (
-        "Напишите <code>/video текст</code>, <code>/image текст</code> или <code>/voice текст</code>"
+        "Напишите <code>/video текст</code>, <code>/image текст</code>, <code>/voice текст</code> или <code>/music текст</code>"
         if in_group
         else "Просто напишите, что создать, или выберите ниже"
     )
     text = (
         f"{ce('nova', '👋')} <b>{html.escape(first_name)}, это Poco AI</b>\n"
-        f"Видео, фото и Motion за пару тапов {ce('shot', '⚡')}\n\n"
+        f"Видео, фото, голос (ElevenLabs V3) и музыка (Lyria 3 Pro) {ce('shot', '⚡')}\n\n"
         f"{how} {ce('down', '👇')}\n\n"
         f"<blockquote>{ce('pin', '📎')} Фото с подписью станет референсом · {ce('cosmos', '🎭')} Камео: /cameo\n"
-        f"{ce('gem', '💧')} Ватермарка: /watermark · {ce('card', '💳')} /balance · {ce('grid', '🔲')} /grid · {ce('console', '🤖')} /model</blockquote>"
+        f"{ce('voice', '🎙')} /voice · {ce('mega', '🎵')} /music · {ce('gem', '💧')} /watermark · {ce('card', '💳')} /balance · {ce('grid', '🔲')} /grid</blockquote>"
     )
     if in_group:
         await message.reply(text, reply_markup=start_kb, parse_mode="HTML")
@@ -2798,9 +3020,14 @@ async def handle_voice_or_audio(message: Message, bot: Bot, state: FSMContext):
     """Support attaching voice/audio reference for ANY video model or ElevenLabs."""
     is_group = message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP)
     raw_caption = (message.caption or "").strip()
-    clean_caption = re.sub(r"^/(?:video|gen|prompt|v|s2|voice|tts|eleven|elevenlabs)(?:@[A-Za-z0-9_]+)?\s*", "", raw_caption, flags=re.IGNORECASE).strip()
+    clean_caption = re.sub(r"^/(?:video|gen|prompt|v|s2|voice|tts|eleven|elevenlabs|music|lyria)(?:@[A-Za-z0-9_]+)?\s*", "", raw_caption, flags=re.IGNORECASE).strip()
     caption_text = clean_caption or raw_caption
-    is_eleven = "eleven" in caption_text.lower() or "озвуч" in caption_text.lower()
+    raw_low = raw_caption.lower()
+    is_eleven = (
+        raw_low.startswith(("/voice", "/tts", "/eleven", "/elevenlabs"))
+        or "eleven" in caption_text.lower()
+        or "озвуч" in caption_text.lower()
+    )
 
     if is_group and not is_eleven and not (caption_text and "видео" in caption_text.lower()):
         if message.from_user.id not in user_drafts:
@@ -2813,7 +3040,7 @@ async def handle_voice_or_audio(message: Message, bot: Bot, state: FSMContext):
     user_id = message.from_user.id
     draft = fresh_draft(user_id)
 
-    if False:  # вкладка голоса отключена
+    if draft and draft.get("menu_mode") == "voice":
         # Voice tab: the recording is the source for revoicing
         draft["audio_bytes"] = audio_bytes
         draft["voice_mode"] = "changer"
@@ -2824,15 +3051,17 @@ async def handle_voice_or_audio(message: Message, bot: Bot, state: FSMContext):
         if caption_text:
             draft["prompt"] = caption_text
     elif is_eleven:
-        # "озвуч"/eleven in caption → open the Voice tab in revoice mode
+        # "озвуч"/eleven/command in caption → open the Voice tab in revoice mode
         draft = create_draft_for_user(
             user_id=user_id,
             prompt=caption_text,
             user_name=get_user_display_name(message.from_user),
             message_id=message.message_id,
-            menu_mode="video",
+            menu_mode="voice",
             audio_bytes=audio_bytes,
         )
+        draft["voice_mode"] = "changer"
+        get_user_prefs(user_id)["voice_mode"] = "changer"
     else:
         prompt = caption_text or "Сгенерируй видео под прикрепленный звук"
         draft = create_draft_for_user(
@@ -2880,7 +3109,12 @@ async def handle_waiting_prompt(message: Message, bot: Bot, state: FSMContext):
                 model_override = "gemini_omni_12"
             text = cmd_arg
         elif cmd in ("/voice", "/tts", "/eleven", "/elevenlabs"):
-            target_mode = "video"
+            target_mode = "voice"
+            model_override = VOICE_MODEL_KEY
+            text = cmd_arg
+        elif cmd in ("/music", "/lyria", "/song", "/track", "/музыка"):
+            target_mode = "music"
+            model_override = MUSIC_MODEL_KEY
             text = cmd_arg
         else:
             await state.clear()
@@ -2888,7 +3122,7 @@ async def handle_waiting_prompt(message: Message, bot: Bot, state: FSMContext):
 
     await state.clear()
 
-    if not text:
+    if not text and target_mode not in ("voice", "music"):
         text = (
             "Стилизовать изображение по референсу в высоком качестве"
             if target_mode == "image"
@@ -2906,7 +3140,8 @@ async def handle_waiting_prompt(message: Message, bot: Bot, state: FSMContext):
     )
     if model_override:
         draft["model_key"] = model_override
-        align_draft_to_model(draft, MODELS.get(model_override, MODELS[DEFAULT_MODEL]), owner_id=message.from_user.id)
+        if target_mode == "video":
+            align_draft_to_model(draft, MODELS.get(model_override, MODELS[DEFAULT_MODEL]), owner_id=message.from_user.id)
 
     await show_or_update_menu(message, bot, draft, message.from_user.id)
 
@@ -2937,6 +3172,33 @@ async def handle_custom_duration_input(message: Message, bot: Bot, state: FSMCon
             await message.reply(f"⚠️ Для модели {MODELS.get(cur_model, {}).get('name', 'видео')} допустимо от 1 до {max_dur} сек.")
             return
     await message.reply("⚠️ Пожалуйста, отправьте число секунд (например: 1, 2, 3, 5, 10...).")
+
+
+@router.message(UserInputState.waiting_for_lyrics, F.text)
+async def handle_custom_lyrics_input(message: Message, bot: Bot, state: FSMContext):
+    user_id = message.from_user.id
+    text = (message.text or "").strip()
+    if text.lower() in ("/cancel", "/stop", "отмена"):
+        await state.clear()
+        await message.reply("❌ Ввод текста песни отменён.", parse_mode="HTML")
+        return
+    draft = fresh_draft(user_id)
+    await state.clear()
+    if not draft:
+        draft = create_draft_for_user(
+            user_id=user_id,
+            prompt="Современный студийный трек",
+            user_name=get_user_display_name(message.from_user),
+            message_id=message.message_id,
+            menu_mode="music",
+        )
+    draft["menu_mode"] = "music"
+    draft["model_key"] = MUSIC_MODEL_KEY
+    draft["music_lyrics_mode"] = "custom"
+    draft["music_lyrics"] = text
+    get_user_prefs(user_id)["music_lyrics_mode"] = "custom"
+    draft["menu_message_id"] = None
+    await show_or_update_menu(message, bot, draft, user_id)
 
 
 @router.message(Command("dur", "duration"), ~F.photo, ~F.document)
@@ -3062,10 +3324,50 @@ async def handle_image_command(message: Message, command: CommandObject, bot: Bo
     await show_or_update_menu(message, bot, draft, user_id)
 
 
-@router.message(Command("voice", "tts", "eleven", "elevenlabs"), ~F.photo, ~F.document)
-async def handle_voice_command(message: Message, bot: Bot, state: FSMContext):
+@router.message(Command("voice", "tts", "eleven", "elevenlabs", ignore_case=True, ignore_mention=True), ~F.photo, ~F.document)
+async def handle_voice_command(message: Message, command: CommandObject, bot: Bot, state: FSMContext):
+    """Open ElevenLabs V3 menu (TTS or Voice Changer)."""
     await state.clear()
-    await message.reply("🎙 Озвучка временно отключена, скоро вернём. Пока доступны 🎬 Видео, 🖼 Фото и 🕺 Motion.")
+    user_id = message.from_user.id
+    args = (command.args or "").strip()
+    replied_audio: Optional[bytes] = None
+    if message.reply_to_message:
+        replied_audio = await extract_audio_bytes(message.reply_to_message, bot)
+        if not args:
+            args = (message.reply_to_message.text or message.reply_to_message.caption or "").strip()
+
+    draft = create_draft_for_user(
+        user_id=user_id,
+        prompt=args,
+        user_name=get_user_display_name(message.from_user),
+        message_id=message.message_id,
+        menu_mode="voice",
+        audio_bytes=replied_audio,
+    )
+    draft["model_key"] = VOICE_MODEL_KEY
+    if replied_audio:
+        draft["voice_mode"] = "changer"
+    await show_or_update_menu(message, bot, draft, user_id)
+
+
+@router.message(Command("music", "lyria", "song", "track", "музыка", ignore_case=True, ignore_mention=True), ~F.photo, ~F.document)
+async def handle_music_command(message: Message, command: CommandObject, bot: Bot, state: FSMContext):
+    """Open Google Lyria 3 Pro music generation menu."""
+    await state.clear()
+    user_id = message.from_user.id
+    args = (command.args or "").strip()
+    if not args and message.reply_to_message:
+        args = (message.reply_to_message.text or message.reply_to_message.caption or "").strip()
+
+    draft = create_draft_for_user(
+        user_id=user_id,
+        prompt=args,
+        user_name=get_user_display_name(message.from_user),
+        message_id=message.message_id,
+        menu_mode="music",
+    )
+    draft["model_key"] = MUSIC_MODEL_KEY
+    await show_or_update_menu(message, bot, draft, user_id)
 
 
 @router.message(Command("motion", "mc", "dance", ignore_case=True, ignore_mention=True), ~F.photo, ~F.document)
@@ -4595,8 +4897,6 @@ async def verify_callback_owner(call: CallbackQuery, owner_id: int) -> bool:
 async def on_open_menu_from_button(call: CallbackQuery, state: FSMContext):
     parts = call.data.split(":")
     target_mode = parts[1]
-    if target_mode == "voice":  # старые кнопки из прошлых сообщений
-        target_mode = "video"
     owner_id = int(parts[2]) if len(parts) > 2 else call.from_user.id
     if not await verify_callback_owner(call, owner_id):
         return
@@ -4609,7 +4909,7 @@ async def on_open_menu_from_button(call: CallbackQuery, state: FSMContext):
     default_prompt = (
         "Фотореалистичное изображение в высоком разрешении"
         if target_mode == "image"
-        else "" if target_mode == "motion"
+        else "" if target_mode in ("motion", "voice", "music")
         else "Кинематографичное видео с плавной динамикой"
     )
     draft = user_drafts.get(uid)
@@ -4619,6 +4919,12 @@ async def on_open_menu_from_button(call: CallbackQuery, state: FSMContext):
         if target_mode == "motion":
             draft["model_key"] = MOTION_MODEL_KEY
             draft["resolution"] = draft.get("resolution", "720p")
+        elif target_mode == "voice":
+            draft["model_key"] = VOICE_MODEL_KEY
+            draft.setdefault("voice_id", get_user_prefs(uid).get("voice_id", DEFAULT_VOICE_ID))
+            draft["voice_mode"] = "changer" if draft.get("audio_bytes") else draft.get("voice_mode", "tts")
+        elif target_mode == "music":
+            draft["model_key"] = MUSIC_MODEL_KEY
         if ref_images:
             draft["ref_images"] = list(ref_images)
             draft["image_bytes"] = ref_images[0]
@@ -4655,6 +4961,21 @@ async def on_open_menu_from_button(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
+async def _refresh_draft_menu(call: CallbackQuery, draft: Dict[str, Any], owner_id: int, answer_text: str = "") -> None:
+    """Update draft menu message in place and answer the callback cleanly."""
+    draft["menu_message_id"] = call.message.message_id
+    draft["menu_chat_id"] = call.message.chat.id
+    try:
+        await call.message.edit_text(
+            text=format_draft_text(draft),
+            reply_markup=build_settings_keyboard(draft, owner_id),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+    await call.answer(answer_text)
+
+
 @router.callback_query(F.data.startswith("tab:"))
 async def on_switch_menu_tab(call: CallbackQuery):
     parts = call.data.split(":")
@@ -4666,11 +4987,9 @@ async def on_switch_menu_tab(call: CallbackQuery):
 
     draft = user_drafts.get(owner_id)
     if not draft:
-        await call.answer("Начните с отправки запроса /video или /image", show_alert=True)
+        await call.answer("Начните с отправки запроса /video, /image, /voice или /music", show_alert=True)
         return
 
-    draft["menu_message_id"] = call.message.message_id
-    draft["menu_chat_id"] = call.message.chat.id
     draft["menu_mode"] = target_mode
     draft["step"] = "model" if target_mode == "video" else "main"
     prefs = get_user_prefs(owner_id)
@@ -4679,21 +4998,130 @@ async def on_switch_menu_tab(call: CallbackQuery):
     elif target_mode == "motion":
         draft["model_key"] = draft.get("model_key") if draft.get("model_key") in MOTION_MODEL_KEYS else MOTION_MODEL_KEY
         draft.setdefault("resolution", "720p")
+    elif target_mode == "voice":
+        draft["model_key"] = VOICE_MODEL_KEY
+        draft.setdefault("voice_id", prefs.get("voice_id", DEFAULT_VOICE_ID))
+        draft["voice_mode"] = "changer" if draft.get("audio_bytes") else (draft.get("voice_mode") or prefs.get("voice_mode", "tts"))
+    elif target_mode == "music":
+        draft["model_key"] = MUSIC_MODEL_KEY
     else:
         mk = prefs.get("model_key", DEFAULT_MODEL)
         draft["model_key"] = mk if mk in VIDEO_MODEL_KEYS else DEFAULT_MODEL
 
     sync_draft_references(draft)
+    tab_notices = {"image": "🖼 Фото", "motion": "🕺 Motion", "voice": "🎙 Голос", "music": "🎵 Музыка"}
+    await _refresh_draft_menu(call, draft, owner_id, tab_notices.get(target_mode, "🎬 Видео"))
 
-    try:
-        await call.message.edit_text(
-            text=format_draft_text(draft),
-            reply_markup=build_settings_keyboard(draft, owner_id),
-            parse_mode="HTML"
-        )
-    except Exception:
-        pass
-    await call.answer({"image": "🖼 Фото", "motion": "🕺 Motion"}.get(target_mode, "🎬 Видео"))
+
+@router.callback_query(F.data.startswith("vmode:"))
+async def on_voice_mode(call: CallbackQuery):
+    _, mode, owner = call.data.split(":")
+    owner_id = int(owner)
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = fresh_draft(owner_id)
+    if not draft:
+        await call.answer("Откройте меню заново: /voice", show_alert=True)
+        return
+    draft["voice_mode"] = mode if mode in ("tts", "changer") else "tts"
+    get_user_prefs(owner_id)["voice_mode"] = draft["voice_mode"]
+    notice = "🎤 Отправьте голосовое или аудиофайл" if draft["voice_mode"] == "changer" else "✍️ Напишите текст в чат"
+    await _refresh_draft_menu(call, draft, owner_id, notice)
+
+
+@router.callback_query(F.data.startswith("vvoice:"))
+async def on_voice_pick(call: CallbackQuery):
+    _, idx, owner = call.data.split(":")
+    owner_id = int(owner)
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = fresh_draft(owner_id)
+    i = int(idx)
+    if not draft or not (0 <= i < len(VOICES)):
+        await call.answer("Откройте меню заново: /voice", show_alert=True)
+        return
+    draft["voice_id"] = VOICES[i]["id"]
+    get_user_prefs(owner_id)["voice_id"] = draft["voice_id"]
+    await _refresh_draft_menu(call, draft, owner_id, f"Голос: {VOICES[i]['name']}")
+
+
+@router.callback_query(F.data.startswith("mlmode:"))
+async def on_music_lyrics_mode(call: CallbackQuery):
+    _, mode, owner = call.data.split(":")
+    owner_id = int(owner)
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = fresh_draft(owner_id)
+    if not draft:
+        await call.answer("Откройте меню заново: /music", show_alert=True)
+        return
+    lmode = mode if mode in ("auto", "instrumental", "custom") else "auto"
+    draft["music_lyrics_mode"] = lmode
+    get_user_prefs(owner_id)["music_lyrics_mode"] = lmode
+    labels = {"auto": "✨ Авто текст", "instrumental": "🎸 Инструментал", "custom": "📝 Свой текст"}
+    await _refresh_draft_menu(call, draft, owner_id, labels[lmode])
+
+
+@router.callback_query(F.data.startswith("ml_edit:"))
+async def on_music_edit_lyrics(call: CallbackQuery, state: FSMContext):
+    owner_id = int(call.data.split(":")[1])
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = fresh_draft(owner_id)
+    if not draft:
+        await call.answer("Откройте меню заново: /music", show_alert=True)
+        return
+    await state.set_state(UserInputState.waiting_for_lyrics)
+    await call.answer()
+    await call.message.reply(
+        f"{ce('book', '📝')} Отправьте <b>текст песни</b> следующим сообщением (куплеты / припевы) или /cancel для отмены.",
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data.startswith("mdur:"))
+async def on_music_duration(call: CallbackQuery):
+    _, dur_key, owner = call.data.split(":")
+    owner_id = int(owner)
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = fresh_draft(owner_id)
+    if not draft:
+        await call.answer("Откройте меню заново: /music", show_alert=True)
+        return
+    valid = {d["key"] for d in MUSIC_DURATIONS}
+    draft["music_duration"] = dur_key if dur_key in valid else ""
+    get_user_prefs(owner_id)["music_duration"] = draft["music_duration"]
+    lbl = _music_spec_label(MUSIC_DURATIONS, draft["music_duration"])
+    await _refresh_draft_menu(call, draft, owner_id, f"⏱ Длительность: {lbl}")
+
+
+@router.callback_query(F.data.startswith("mcyc:"))
+async def on_music_cycle_spec(call: CallbackQuery):
+    _, field, owner = call.data.split(":")
+    owner_id = int(owner)
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = fresh_draft(owner_id)
+    if not draft:
+        await call.answer("Откройте меню заново: /music", show_alert=True)
+        return
+    spec_map = {
+        "genre": ("music_genre", MUSIC_GENRES, "Жанр"),
+        "mood": ("music_mood", MUSIC_MOODS, "Настроение"),
+        "theme": ("music_theme", MUSIC_THEMES, "Тема"),
+    }
+    if field not in spec_map:
+        await call.answer()
+        return
+    dkey, options, title = spec_map[field]
+    keys = [o["key"] for o in options]
+    cur = draft.get(dkey, "")
+    nxt = keys[(keys.index(cur) + 1) % len(keys)] if cur in keys else keys[0]
+    draft[dkey] = nxt
+    get_user_prefs(owner_id)[dkey] = nxt
+    lbl = _music_spec_label(options, nxt)
+    await _refresh_draft_menu(call, draft, owner_id, f"{title}: {lbl}")
 
 
 @router.callback_query(F.data.startswith("mres:"))
@@ -5393,21 +5821,38 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
         return
 
     peek = user_drafts.get(owner_id)
-    if peek and peek.get("menu_mode") == "motion":
-        if not peek.get("motion_image"):
-            await call.answer("📸 Сначала пришлите фото персонажа", show_alert=True)
-            return
-        if not peek.get("ref_video"):
-            await call.answer("🎞 Теперь пришлите видео с движением", show_alert=True)
-            return
-        sec = int(peek.get("motion_sec") or 0)
-        if sec and not (3 <= sec <= 30):
-            await call.answer(f"Видео {sec} сек — нужно от 3 до 30 сек", show_alert=True)
-            return
+    if peek:
+        pmode = peek.get("menu_mode")
+        if pmode == "motion":
+            if not peek.get("motion_image"):
+                await call.answer("📸 Сначала пришлите фото персонажа", show_alert=True)
+                return
+            if not peek.get("ref_video"):
+                await call.answer("🎞 Теперь пришлите видео с движением", show_alert=True)
+                return
+            sec = int(peek.get("motion_sec") or 0)
+            if sec and not (3 <= sec <= 30):
+                await call.answer(f"Видео {sec} сек — нужно от 3 до 30 сек", show_alert=True)
+                return
+        elif pmode == "voice":
+            vmode = peek.get("voice_mode", "tts")
+            if vmode == "changer" and not peek.get("audio_bytes"):
+                await call.answer("🎤 Сначала отправьте голосовое сообщение или аудиофайл", show_alert=True)
+                return
+            if vmode == "tts" and not voice_text_of(peek):
+                await call.answer("✍️ Напишите текст для озвучки сообщением в чат", show_alert=True)
+                return
+        elif pmode == "music":
+            if not voice_text_of(peek):
+                await call.answer("🎵 Напишите описание трека или стиля сообщением в чат", show_alert=True)
+                return
+            if peek.get("music_lyrics_mode") == "custom" and not (peek.get("music_lyrics") or "").strip():
+                await call.answer("📝 Введите текст песни или выберите Авто / Без слов", show_alert=True)
+                return
 
     draft = user_drafts.pop(owner_id, None)
     if not draft:
-        await call.answer("Параметры устарели. Отправьте новый запрос /video или /image.", show_alert=True)
+        await call.answer("Параметры устарели. Отправьте новый запрос /video, /image, /voice или /music.", show_alert=True)
         return
 
     # Clear recent user photos so next request starts completely fresh
@@ -5416,15 +5861,20 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
 
     sync_draft_references(draft)
     menu_mode = draft.get("menu_mode", "video")
-    model_key = draft.get("model_key", DEFAULT_IMAGE_MODEL if menu_mode == "image" else DEFAULT_MODEL)
+    if menu_mode == "voice":
+        model_key = VOICE_MODEL_KEY
+    elif menu_mode == "music":
+        model_key = MUSIC_MODEL_KEY
+    else:
+        model_key = draft.get("model_key", DEFAULT_IMAGE_MODEL if menu_mode == "image" else DEFAULT_MODEL)
     if menu_mode == "motion":
         model_key = model_key if model_key in MOTION_MODEL_KEYS else MOTION_MODEL_KEY
     model_info = MODELS.get(model_key, MODELS[DEFAULT_MODEL])
     if menu_mode == "image":
         align_image_draft_to_model(draft, model_info, owner_id=owner_id)
-    elif menu_mode == "video" and model_info.get("backend") != "davinci_voice":
+    elif menu_mode == "video" and model_info.get("backend") not in ("davinci_voice", "davinci_music"):
         align_draft_to_model(draft, model_info, owner_id=owner_id)
-    prompt = draft.get("prompt", "")
+    prompt = voice_text_of(draft) if menu_mode in ("voice", "music") else draft.get("prompt", "")
     duration = draft["duration"]
     resolution = draft["image_resolution"] if menu_mode == "image" else draft["resolution"]
     ratio = draft["image_ratio"] if menu_mode == "image" else draft["ratio"]
@@ -5442,6 +5892,8 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
     if menu_mode == "motion":
         ref_images = [draft["motion_image"]]
         duration = int(draft.get("motion_sec") or 0) or -1
+    elif menu_mode in ("voice", "music"):
+        ref_images = []
     else:
         pre_handles = draft_cameo_handles(draft, call.from_user.id)
         if draft.get("ref_video") and pre_handles and prompt.strip() == "Измени видео, сохранив движение и композицию":
@@ -5457,6 +5909,19 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
             model_api_id=model_info.get("api_id") or "",
             category=model_info.get("category") or menu_mode,
         )
+
+    music_specs: Dict[str, str] = {}
+    if menu_mode == "music":
+        for spec_name, d_field in (
+            ("genre", "music_genre"),
+            ("duration", "music_duration"),
+            ("mood", "music_mood"),
+            ("theme", "music_theme"),
+        ):
+            val = (draft.get(d_field) or "")
+            if val:
+                music_specs[spec_name] = val
+
     job = GenerationJob(
         user_id=call.from_user.id,
         chat_id=call.message.chat.id,
@@ -5476,6 +5941,9 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
         ref_video=draft.get("ref_video"),
         voice_id=draft.get("voice_id", "") if menu_mode == "voice" else "",
         voice_mode=draft.get("voice_mode", "tts") if menu_mode == "voice" else "tts",
+        music_lyrics_mode=draft.get("music_lyrics_mode", "auto") if menu_mode == "music" else "auto",
+        music_lyrics=draft.get("music_lyrics", "") if menu_mode == "music" else "",
+        music_specs=music_specs if menu_mode == "music" else {},
         motion_orient=motion_orient,
         watermark_id=draft.get("watermark_id") or watermark_utils.get_user_watermark_id(call.from_user.id),
         show_watermark_username=is_draft_watermark_username_on(draft, call.from_user.id),
@@ -5488,6 +5956,14 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
         chips.append(f"{resolution} · {ratio}")
     elif menu_mode == "motion":
         chips.append(f"{ce('dance', '🕺')} {resolution}")
+    elif menu_mode == "voice":
+        voice_obj = next((v for v in VOICES if v["id"] == job.voice_id), VOICES[0])
+        chips.append("Переозвучка" if job.voice_mode == "changer" else "Текст → голос")
+        chips.append(f"{voice_obj['emoji']} {voice_obj['name']}")
+    elif menu_mode == "music":
+        chips.append(_music_spec_label(MUSIC_DURATIONS, draft.get("music_duration", "")))
+        l_lbl = {"auto": "Авто", "instrumental": "Без слов", "custom": "Свой текст"}.get(job.music_lyrics_mode, "Авто")
+        chips.append(l_lbl)
     else:
         dur_label = "Авто" if duration == -1 else f"{duration} сек"
         chips.append(f"{dur_label} · {resolution} · {ratio}")
@@ -5497,9 +5973,10 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
         chips.append(f"{ce('cosmos', '🎭')} " + " ".join(f"@{h}" for h in used_cameos[:3]))
     if job.ref_video:
         chips.append(f"{ce('console', '🎞')} видео-реф")
-    wm_info = watermark_utils.get_watermark_info(job.watermark_id, user_id=call.from_user.id)
-    wm_chip = f"{wm_info['short']} + @username" if job.show_watermark_username else wm_info["short"]
-    chips.append(f"{ce('gem', '💧')} {wm_chip}")
+    if menu_mode not in ("voice", "music"):
+        wm_info = watermark_utils.get_watermark_info(job.watermark_id, user_id=call.from_user.id)
+        wm_chip = f"{wm_info['short']} + @username" if job.show_watermark_username else wm_info["short"]
+        chips.append(f"{ce('gem', '💧')} {wm_chip}")
     if cost > 0:
         chips.append(f"{ce('card', '💳')} ~{cost} кр.")
     quote = f"\n<blockquote expandable>{html.escape(prompt[:500])}</blockquote>" if prompt else ""
