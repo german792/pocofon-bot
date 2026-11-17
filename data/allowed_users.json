@@ -72,7 +72,8 @@
     "mango_mark_1488_222",
     "jooorb",
     "artem_kotelok",
-    "blanklw"
+    "blanklw",
+    "magistrbelli"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -654,6 +655,14 @@
       "username": "blanklw",
       "name": "blanklw",
       "added_at": 1794923188.395111,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "magistrbelli": {
+      "user_id": 6088597327,
+      "username": "MAGISTRBELLI",
+      "name": "BELLIXBroski",
+      "added_at": 1794924819.8629918,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
