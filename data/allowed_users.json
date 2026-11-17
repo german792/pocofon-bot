@@ -70,7 +70,8 @@
     "qwertzxp",
     "kars_ulf",
     "mango_mark_1488_222",
-    "jooorb"
+    "jooorb",
+    "artem_kotelok"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -635,6 +636,14 @@
       "username": "Jooorb",
       "name": "@Jooorb",
       "added_at": 1794917548.0062163,
+      "added_by": "@GermanUstinf",
+      "role": "user"
+    },
+    "artem_kotelok": {
+      "user_id": null,
+      "username": "Artem_kotelok",
+      "name": "@Artem_kotelok",
+      "added_at": 1794919060.102278,
       "added_by": "@GermanUstinf",
       "role": "user"
     }
