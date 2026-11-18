@@ -74,7 +74,8 @@
     "artem_kotelok",
     "blanklw",
     "magistrbelli",
-    "fufaf11"
+    "fufaf11",
+    "bumahski133"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -673,6 +674,14 @@
       "username": "fufaf11",
       "name": "User 6010248940",
       "added_at": 1794927944.4383268,
+      "added_by": "@GermanUstinf",
+      "role": "user"
+    },
+    "bumahski133": {
+      "user_id": null,
+      "username": "bumahski133",
+      "name": "@bumahski133",
+      "added_at": 1795003171.923115,
       "added_by": "@GermanUstinf",
       "role": "user"
     }
