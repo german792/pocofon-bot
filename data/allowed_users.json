@@ -76,7 +76,8 @@
     "magistrbelli",
     "fufaf11",
     "bumahski133",
-    "hapaleon_dolban"
+    "hapaleon_dolban",
+    "keshaofc"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -134,7 +135,8 @@
     8926423387,
     8439618852,
     6010248940,
-    8289768832
+    8289768832,
+    8524396097
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -685,6 +687,14 @@
       "name": "@bumahski133",
       "added_at": 1795003171.923115,
       "added_by": "@GermanUstinf",
+      "role": "user"
+    },
+    "keshaofc": {
+      "user_id": 8524396097,
+      "username": "Keshaofc",
+      "name": "КЕША|ИИ",
+      "added_at": 1795011829.2298539,
+      "added_by": "group_-1004328649380",
       "role": "user"
     }
   }
