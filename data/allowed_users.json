@@ -77,7 +77,8 @@
     "fufaf11",
     "bumahski133",
     "hapaleon_dolban",
-    "keshaofc"
+    "keshaofc",
+    "vlc2222"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -694,6 +695,14 @@
       "username": "Keshaofc",
       "name": "КЕША|ИИ",
       "added_at": 1795011829.2298539,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "vlc2222": {
+      "user_id": 6338680334,
+      "username": "vlc2222",
+      "name": "𝐝𝐨𝐟𝐢𝐧𝐢𝐧",
+      "added_at": 1795194824.7340086,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
