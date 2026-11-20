@@ -5,6 +5,7 @@
 .session_cookie
 .davinci_token
 .davinci_refresh_token
+.promptwise_cookie
 cookies.txt
 data/
 

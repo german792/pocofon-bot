@@ -34,6 +34,7 @@ from api_client import (
     MiniMaxClient,
     QwenImageClient,
 )
+from promptwise_client import PromptWiseClient
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,6 +62,7 @@ app.add_middleware(
 )
 
 # API Clients
+promptwise_client = PromptWiseClient()
 davinci_client = DaVinciClient()
 api_client = SeedanceAPIClient()
 v2_client = SeedanceV2Client()
@@ -95,6 +97,8 @@ def get_auth_context(request: Request) -> Dict[str, Any]:
     return {"authenticated": False, "role": "guest", "user_id": None, "note": None}
 
 def get_client_for_backend(backend: str):
+    if backend in ("promptwise", "promptwise_image", "promptwise_motion", "promptwise_voice", "promptwise_audio"):
+        return promptwise_client
     if backend in ("davinci", "davinci_image", "davinci_voice", "davinci_music"):
         return davinci_client
     elif backend == "v2":
@@ -175,7 +179,50 @@ async def process_web_generation(
         task["progress"] = 20
 
         sub_task_id = None
-        if backend == "davinci":
+        if backend == "promptwise":
+            prepared_refs = [
+                image_utils.prepare_user_image(b, ratio or "16:9") for b in prepared_images if b
+            ]
+            sub_task_id = await promptwise_client.create_video_task(
+                model_info=model_info,
+                prompt=prompt,
+                duration=duration,
+                resolution=resolution,
+                ratio=ratio,
+                generate_audio=generate_audio,
+                ref_images=prepared_refs,
+                ref_mode=ref_mode,
+                ref_video=ref_video if model_info.get("video_ref") else None,
+                audio_bytes=audio_bytes if model_info.get("audio_ref") else None,
+            )
+        elif backend == "promptwise_motion":
+            if not prepared_images or not ref_video:
+                raise RuntimeError("Для Motion Control нужны фото персонажа и видео с движением")
+            sub_task_id = await promptwise_client.create_motion_control_task(
+                image_bytes=prepared_images[0],
+                video_bytes=ref_video,
+                prompt=prompt,
+                resolution=resolution,
+                model_id=model_info.get("api_id", "kling-3.0-motion-control"),
+            )
+        elif backend == "promptwise_image":
+            prepared_refs = [
+                image_utils.prepare_user_image(b, ratio or "1:1") for b in prepared_images if b
+            ]
+            sub_task_id = await promptwise_client.create_image_task(
+                model_info=model_info,
+                prompt=prompt,
+                resolution=resolution,
+                ratio=ratio,
+                ref_images=prepared_refs,
+            )
+        elif backend in ("promptwise_voice", "promptwise_audio"):
+            sub_task_id = await promptwise_client.create_audio_task(
+                model_info=model_info,
+                prompt=prompt,
+                duration_seconds=duration if duration and duration > 0 else None,
+            )
+        elif backend == "davinci":
             prepared_refs = [
                 image_utils.prepare_user_image(b, ratio) for b in prepared_images if b
             ]
@@ -271,7 +318,14 @@ async def process_web_generation(
         client = get_client_for_backend(backend)
         start_time = asyncio.get_event_loop().time()
         media_url = None
-        poll_sleep = 3 if backend in ("grok", "minimax", "qwen_image", "davinci_image", "davinci_voice", "davinci_music") else 5
+        poll_sleep = (
+            3
+            if backend in (
+                "promptwise_image", "promptwise_voice", "promptwise_audio",
+                "grok", "minimax", "qwen_image", "davinci_image", "davinci_voice", "davinci_music",
+            )
+            else 5
+        )
         est_duration = 35 if category == "image" else (duration * 6 if duration > 0 else 45)
 
         while True:
@@ -292,9 +346,9 @@ async def process_web_generation(
             history_manager.update_task_progress(task_id, task["progress"], task["stage"])
 
             if status == "succeeded":
-                if backend in ("qwen_image", "davinci_image"):
+                if backend in ("promptwise_image", "qwen_image", "davinci_image"):
                     media_url = task_info.get("imageUrl") or task_info.get("videoUrl")
-                elif backend in ("davinci_voice", "davinci_music"):
+                elif backend in ("promptwise_voice", "promptwise_audio", "davinci_voice", "davinci_music"):
                     media_url = task_info.get("audioUrl") or task_info.get("videoUrl")
                 else:
                     media_url = task_info.get("videoUrl")
@@ -318,10 +372,10 @@ async def process_web_generation(
             out_path.write_bytes(img_bytes)
             task["media_url"] = f"/api/media/{out_filename}"
             task["media_type"] = "image"
-        elif backend in ("davinci_voice", "davinci_music"):
+        elif backend in ("promptwise_voice", "promptwise_audio", "davinci_voice", "davinci_music"):
             out_filename = f"web_{task_id}.mp3"
             out_path = OUTPUTS_DIR / out_filename
-            audio_data = await davinci_client.download_audio(media_url)
+            audio_data = await client.download_audio(media_url)
             out_path.write_bytes(audio_data)
             task["media_url"] = f"/api/media/{out_filename}"
             task["media_type"] = "audio"
@@ -396,9 +450,9 @@ async def get_models():
         }
         if cat == "image":
             image_models.append(item)
-        elif m.get("backend") == "davinci_voice":
+        elif m.get("backend") in ("promptwise_voice", "davinci_voice"):
             voice_models.append(item)
-        elif m.get("backend") == "davinci_music":
+        elif m.get("backend") in ("promptwise_audio", "davinci_music"):
             music_models.append(item)
         elif cat == "video" and not m.get("hidden"):
             video_models.append(item)
@@ -428,7 +482,8 @@ async def get_system_status():
     """Return system readiness & stats."""
     return {
         "online": True,
-        "davinci_auth": bool(davinci_client.token),
+        "promptwise_auth": bool(promptwise_client.cookie),
+        "davinci_auth": bool(promptwise_client.cookie or davinci_client.token),
         "active_tasks_count": sum(1 for t in active_tasks.values() if t["status"] in ("pending", "processing")),
         "completed_count": sum(1 for t in active_tasks.values() if t["status"] == "succeeded"),
     }

@@ -53,7 +53,9 @@ from config import (
     IMAGE_RATIO_OPTIONS,
     calculate_credit_cost,
     VOICE_MODEL_KEY,
+    VOICE_MODEL_KEYS,
     MUSIC_MODEL_KEY,
+    MUSIC_MODEL_KEYS,
     MOTION_MODEL_KEY,
     MOTION_MODEL_KEYS,
     VOICES,
@@ -63,14 +65,7 @@ from config import (
     MUSIC_MOODS,
     MUSIC_THEMES,
 )
-from api_client import (
-    SeedanceAPIClient,
-    SeedanceV2Client,
-    GrokVideoClient,
-    MiniMaxClient,
-    QwenImageClient,
-    DaVinciClient,
-)
+from promptwise_client import PromptWiseClient
 from queue_worker import GenerationQueue, GenerationJob
 from watermark_utils import extract_frame_from_video, extract_audio_from_video, overlay_grid_video
 
@@ -85,7 +80,7 @@ router.message.middleware(user_access.AccessControlMiddleware())
 router.callback_query.middleware(user_access.AccessControlMiddleware())
 
 # Marker of the code version (visible in the menu) to confirm the latest bot.py is deployed
-BUILD_ID = "poco-v9-merged-2026-11-13"
+BUILD_ID = "poco-v10-promptwise-2026-11-20"
 
 
 class UserInputState(StatesGroup):
@@ -383,6 +378,8 @@ def get_user_prefs(user_id: int) -> Dict[str, Any]:
         user_prefs[user_id] = {
             "model_key": DEFAULT_MODEL,
             "image_model_key": DEFAULT_IMAGE_MODEL,
+            "voice_model_key": VOICE_MODEL_KEY,
+            "music_model_key": MUSIC_MODEL_KEY,
             "duration": DEFAULT_DURATION,
             "resolution": DEFAULT_RESOLUTION,
             "image_resolution": DEFAULT_IMAGE_RESOLUTION,
@@ -394,13 +391,20 @@ def get_user_prefs(user_id: int) -> Dict[str, Any]:
             "voice_mode": "tts",
             "music_lyrics_mode": "auto",
             "music_genre": "",
-            "music_duration": "",
+            "music_duration": 30,
             "music_mood": "",
             "music_theme": "",
         }
-    if user_prefs[user_id].get("model_key") not in VIDEO_MODEL_KEYS:
-        user_prefs[user_id]["model_key"] = DEFAULT_MODEL
-    return user_prefs[user_id]
+    p = user_prefs[user_id]
+    if p.get("model_key") not in VIDEO_MODEL_KEYS:
+        p["model_key"] = DEFAULT_MODEL
+    if p.get("image_model_key") not in IMAGE_MODEL_KEYS:
+        p["image_model_key"] = DEFAULT_IMAGE_MODEL
+    if p.get("voice_model_key") not in VOICE_MODEL_KEYS:
+        p["voice_model_key"] = VOICE_MODEL_KEY
+    if p.get("music_model_key") not in MUSIC_MODEL_KEYS:
+        p["music_model_key"] = MUSIC_MODEL_KEY
+    return p
 
 
 PLACEHOLDER_PROMPTS = (
@@ -469,33 +473,44 @@ def _music_spec_label(options: List[Dict[str, str]], key: str) -> str:
 
 
 def build_voice_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeyboardMarkup:
-    """Voice tab (ElevenLabs V3): mode (TTS / Voice Changer), voice picker, launch."""
-    mode = draft.get("voice_mode", "tts")
+    """Voice tab (PromptWise TTS models: ElevenLabs V4/Turbo/Flash/Multilingual + Seed Audio Speech)."""
+    cur_model = draft.get("model_key")
+    if cur_model not in VOICE_MODEL_KEYS:
+        cur_model = VOICE_MODEL_KEY
+        draft["model_key"] = cur_model
+    minfo = MODELS[cur_model]
     cur_voice = draft.get("voice_id", DEFAULT_VOICE_ID)
     rows = [*tabs_rows("voice", owner_id)]
 
-    tts_on, ch_on = mode == "tts", mode == "changer"
-    rows.append([
-        cbtn("Текст → голос", callback_data=f"vmode:tts:{owner_id}", icon_key="check" if tts_on else "book", fallback_emoji=("✓ ✍️" if tts_on else "✍️"), style="primary" if tts_on else None),
-        cbtn("Переозвучка", callback_data=f"vmode:changer:{owner_id}", icon_key="check" if ch_on else "voice", fallback_emoji=("✓ 🎤" if ch_on else "🎤"), style="primary" if ch_on else None),
-    ])
+    # Voice model picker (2 per row)
+    mrow: List[InlineKeyboardButton] = []
+    for mk in VOICE_MODEL_KEYS:
+        m = MODELS[mk]
+        active = mk == cur_model
+        lbl = f"✓ {m['short']}" if active else m["short"]
+        mrow.append(InlineKeyboardButton(text=lbl, callback_data=f"vmod:{mk}:{owner_id}", **({"style": "primary"} if active else {})))
+        if len(mrow) == 2:
+            rows.append(mrow)
+            mrow = []
+    if mrow:
+        rows.append(mrow)
 
-    row: List[InlineKeyboardButton] = []
-    for i, v in enumerate(VOICES):
-        active = v["id"] == cur_voice
-        lbl = f"✓ {v['emoji']} {v['name']}" if active else f"{v['emoji']} {v['name']}"
-        row.append(InlineKeyboardButton(text=lbl, callback_data=f"vvoice:{i}:{owner_id}", **({"style": "primary"} if active else {})))
-        if len(row) == 3:
+    # Voice picker (only for ElevenLabs models)
+    if minfo.get("provider") == "elevenlabs":
+        row: List[InlineKeyboardButton] = []
+        for i, v in enumerate(VOICES):
+            active = v["id"] == cur_voice
+            lbl = f"✓ {v['emoji']} {v['name']}" if active else f"{v['emoji']} {v['name']}"
+            row.append(InlineKeyboardButton(text=lbl, callback_data=f"vvoice:{i}:{owner_id}", **({"style": "primary"} if active else {})))
+            if len(row) == 3:
+                rows.append(row)
+                row = []
+        if row:
             rows.append(row)
-            row = []
-    if row:
-        rows.append(row)
 
-    ready = bool(draft.get("audio_bytes")) if mode == "changer" else bool(voice_text_of(draft))
-    cost = calculate_credit_cost(VOICE_MODEL_KEY, 0, "")
-    btn_label = "Озвучить" if mode == "tts" else "Переозвучить"
-    if cost > 0:
-        btn_label += f" (~{cost} кр.)"
+    ready = bool(voice_text_of(draft))
+    cost = calculate_credit_cost(cur_model, 0, "")
+    btn_label = f"Озвучить (~{cost} кр.)" if cost > 0 else "Озвучить"
     rows.append([
         cbtn(btn_label, callback_data=f"gen:{owner_id}", icon_key="voice", fallback_emoji="🎙", style="success" if ready else None),
         cbtn("Отмена", callback_data=f"can:{owner_id}", icon_key="ban", fallback_emoji="❌", style="danger"),
@@ -504,70 +519,52 @@ def build_voice_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
 
 
 def build_music_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeyboardMarkup:
-    """Music tab (Google Lyria 3 Pro): lyrics mode, custom lyrics, duration, genre/mood/theme, launch."""
+    """Music & SFX tab (PromptWise: Seed Audio Music, Cassette Music, ElevenLabs SFX, Seed Audio SFX)."""
+    cur_model = draft.get("model_key")
+    if cur_model not in MUSIC_MODEL_KEYS:
+        cur_model = MUSIC_MODEL_KEY
+        draft["model_key"] = cur_model
+    minfo = MODELS[cur_model]
     rows = [*tabs_rows("music", owner_id)]
 
-    lmode = draft.get("music_lyrics_mode", "auto")
+    # Music / SFX model picker (2 per row)
+    mrow: List[InlineKeyboardButton] = []
+    for mk in MUSIC_MODEL_KEYS:
+        m = MODELS[mk]
+        active = mk == cur_model
+        lbl = f"✓ {m['short']}" if active else m["short"]
+        mrow.append(InlineKeyboardButton(text=lbl, callback_data=f"mmod:{mk}:{owner_id}", **({"style": "primary"} if active else {})))
+        if len(mrow) == 2:
+            rows.append(mrow)
+            mrow = []
+    if mrow:
+        rows.append(mrow)
+
+    # Duration buttons from active model's supported durations
+    durs = [int(d) for d in (minfo.get("durations") or [30])]
+    try:
+        cur_dur = int(draft.get("music_duration") or durs[0])
+    except (TypeError, ValueError):
+        cur_dur = durs[0]
+    if cur_dur not in durs:
+        cur_dur = min(durs, key=lambda x: (abs(x - cur_dur), x))
+        draft["music_duration"] = cur_dur
+
+    dur_row: List[InlineKeyboardButton] = []
+    for d in durs:
+        active = d == cur_dur
+        lbl = f"✓ {d} сек" if active else f"{d} сек"
+        dur_row.append(InlineKeyboardButton(text=lbl, callback_data=f"mdur:{d}:{owner_id}", **({"style": "primary"} if active else {})))
+    if dur_row:
+        rows.append(dur_row)
+
+    ready = bool(voice_text_of(draft))
+    is_sfx = minfo.get("audio_type") == "sfx"
+    cost = calculate_credit_cost(cur_model, cur_dur, "")
+    action_txt = "Создать SFX" if is_sfx else "Создать трек"
+    btn_label = f"{action_txt} (~{cost} кр.)" if cost > 0 else action_txt
     rows.append([
-        cbtn(
-            "✓ Авто" if lmode == "auto" else "Авто",
-            callback_data=f"mlmode:auto:{owner_id}",
-            icon_key="spark",
-            fallback_emoji="✨",
-            style="primary" if lmode == "auto" else None,
-        ),
-        cbtn(
-            "✓ Без слов" if lmode == "instrumental" else "Без слов",
-            callback_data=f"mlmode:instrumental:{owner_id}",
-            icon_key="mega",
-            fallback_emoji="🎸",
-            style="primary" if lmode == "instrumental" else None,
-        ),
-        cbtn(
-            "✓ Свой текст" if lmode == "custom" else "Свой текст",
-            callback_data=f"mlmode:custom:{owner_id}",
-            icon_key="book",
-            fallback_emoji="📝",
-            style="primary" if lmode == "custom" else None,
-        ),
-    ])
-
-    if lmode == "custom":
-        has_lyrics = bool((draft.get("music_lyrics") or "").strip())
-        rows.append([
-            cbtn(
-                "Изменить текст песни" if has_lyrics else "Ввести текст песни",
-                callback_data=f"ml_edit:{owner_id}",
-                icon_key="check" if has_lyrics else "idea",
-                fallback_emoji="📝",
-                style="primary" if not has_lyrics else None,
-            )
-        ])
-
-    cur_dur = draft.get("music_duration", "")
-    dur_row = []
-    for item in MUSIC_DURATIONS:
-        active = item["key"] == cur_dur
-        lbl = f"✓ {item['label']}" if active else item["label"]
-        dur_row.append(InlineKeyboardButton(text=lbl, callback_data=f"mdur:{item['key']}:{owner_id}", **({"style": "primary"} if active else {})))
-    rows.append(dur_row)
-
-    g_lbl = _music_spec_label(MUSIC_GENRES, draft.get("music_genre", ""))
-    m_lbl = _music_spec_label(MUSIC_MOODS, draft.get("music_mood", ""))
-    t_lbl = _music_spec_label(MUSIC_THEMES, draft.get("music_theme", ""))
-    rows.append([
-        InlineKeyboardButton(text=f"Жанр: {g_lbl}", callback_data=f"mcyc:genre:{owner_id}"),
-        InlineKeyboardButton(text=f"Настр: {m_lbl}", callback_data=f"mcyc:mood:{owner_id}"),
-        InlineKeyboardButton(text=f"Тема: {t_lbl}", callback_data=f"mcyc:theme:{owner_id}"),
-    ])
-
-    has_prompt = bool(voice_text_of(draft))
-    lyrics_ok = (lmode != "custom") or bool((draft.get("music_lyrics") or "").strip())
-    ready = has_prompt and lyrics_ok
-    cost = calculate_credit_cost(MUSIC_MODEL_KEY, 0, "")
-    btn_label = f"Создать трек (~{cost} кр.)" if cost > 0 else "Создать трек"
-    rows.append([
-        cbtn(btn_label, callback_data=f"gen:{owner_id}", icon_key="mega", fallback_emoji="🎵", style="success" if ready else None),
+        cbtn(btn_label, callback_data=f"gen:{owner_id}", icon_key="mega", fallback_emoji="🔊" if is_sfx else "🎵", style="success" if ready else None),
         cbtn("Отмена", callback_data=f"can:{owner_id}", icon_key="ban", fallback_emoji="❌", style="danger"),
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -585,20 +582,24 @@ def motion_orient_of(draft: Dict[str, Any]) -> str:
 
 
 def build_motion_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeyboardMarkup:
-    """Motion Control: модель (3.0 / 2.6), разрешение, ориентация, запуск, отмена."""
+    """Motion Control (Kling 3.0 Motion Control): разрешение, ориентация, запуск, отмена."""
     cur_model = draft.get("model_key", MOTION_MODEL_KEY)
+    if cur_model not in MOTION_MODEL_KEYS:
+        cur_model = MOTION_MODEL_KEY
+        draft["model_key"] = cur_model
     cur_res = draft.get("resolution", "720p")
     cur_orient = motion_orient_of(draft)
     rows = [*tabs_rows("motion", owner_id)]
-    model_row = []
-    for mk, label in (("klingMotionControl3", "3.0"), ("klingMotionControl26", "2.6")):
-        active = mk == cur_model
-        model_row.append(InlineKeyboardButton(
-            text=("✓ " if active else "") + f"Kling {label}",
-            callback_data=f"mmodel:{mk}:{owner_id}",
-            **({"style": "primary"} if active else {}),
-        ))
-    rows.append(model_row)
+    if len(MOTION_MODEL_KEYS) > 1:
+        model_row = []
+        for mk in MOTION_MODEL_KEYS:
+            active = mk == cur_model
+            model_row.append(InlineKeyboardButton(
+                text=("✓ " if active else "") + MODELS[mk]["short"],
+                callback_data=f"mmodel:{mk}:{owner_id}",
+                **({"style": "primary"} if active else {}),
+            ))
+        rows.append(model_row)
     res_row = []
     for r in ("720p", "1080p"):
         active = r == cur_res
@@ -685,27 +686,36 @@ def align_draft_to_model(
         if owner_id is not None:
             get_user_prefs(owner_id)["duration"] = dur
 
-    res_options = list(minfo.get("resolutions") or RESOLUTION_OPTIONS)
-    res = draft.get("resolution", DEFAULT_RESOLUTION)
-    if res not in res_options:
-        res = "720p" if "720p" in res_options else res_options[0]
-        draft["resolution"] = res
-        if owner_id is not None:
-            get_user_prefs(owner_id)["resolution"] = res
+    res_options = list(minfo.get("resolutions") or [])
+    if res_options:
+        res = draft.get("resolution", DEFAULT_RESOLUTION)
+        if res not in res_options:
+            res = "720p" if "720p" in res_options else res_options[0]
+            draft["resolution"] = res
+            if owner_id is not None:
+                get_user_prefs(owner_id)["resolution"] = res
+    else:
+        draft["resolution"] = ""
 
-    allowed_ratios = list(minfo.get("ratios") or RATIO_OPTIONS)
+    raw_ratios = minfo.get("ratios")
+    allowed_ratios = list(RATIO_OPTIONS) if raw_ratios is None else list(raw_ratios)
     cur_model = draft.get("model_key", DEFAULT_MODEL)
     ratio_choices = (
         ["auto"] + allowed_ratios
-        if draft.get("ref_video") and cur_model in ("s2_5", "s2_5_flash", "s2_pro", "s2_fast", "s2_mini")
+        if allowed_ratios and draft.get("ref_video") and cur_model in (
+            "seedance_2_5", "seedance_2_5_flash", "seedance_2_0_pro", "seedance_2_0_fast", "seedance_2_0_mini"
+        )
         else allowed_ratios
     )
-    ratio = draft.get("ratio", DEFAULT_RATIO)
-    if ratio not in ratio_choices:
-        ratio = "16:9" if "16:9" in allowed_ratios else ratio_choices[0]
-        draft["ratio"] = ratio
-        if owner_id is not None and ratio != "auto":
-            get_user_prefs(owner_id)["ratio"] = ratio
+    if ratio_choices:
+        ratio = draft.get("ratio", DEFAULT_RATIO)
+        if ratio not in ratio_choices:
+            ratio = "16:9" if "16:9" in allowed_ratios else ratio_choices[0]
+            draft["ratio"] = ratio
+            if owner_id is not None and ratio != "auto":
+                get_user_prefs(owner_id)["ratio"] = ratio
+    else:
+        draft["ratio"] = ""
 
     return min_dur, max_dur, res_options, ratio_choices
 
@@ -750,7 +760,7 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     step = draft.get("step", "model")
 
     # If voice model, wizard has model step or voice quality step
-    if minfo.get("backend") == "davinci_voice":
+    if minfo.get("backend") == "promptwise_voice":
         if step != "model":
             cost = calculate_credit_cost(cur_model, 0, "")
             btn_label = f"Озвучить (~{cost} кр.)" if cost > 0 else "Озвучить"
@@ -875,50 +885,52 @@ def build_video_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> Inlin
     rows = []
 
     # Resolution Row
-    res_buttons = []
-    for r in res_options:
-        is_active = r == res
-        if r.lower() == "4k":
-            res_buttons.append(
-                cbtn(
-                    "✓ 4K" if is_active else "4K",
-                    callback_data=f"sr:{r}:{owner_id}",
-                    icon_key="uhd",
-                    fallback_emoji="✅" if is_active else "",
-                    style="primary" if is_active else None,
+    if res_options:
+        res_buttons = []
+        for r in res_options:
+            is_active = r == res
+            if r.lower() == "4k":
+                res_buttons.append(
+                    cbtn(
+                        "✓ 4K" if is_active else "4K",
+                        callback_data=f"sr:{r}:{owner_id}",
+                        icon_key="uhd",
+                        fallback_emoji="✅" if is_active else "",
+                        style="primary" if is_active else None,
+                    )
                 )
-            )
-        else:
-            label = f"✓ {r}" if is_active else r
-            btn_kwargs = {"style": "primary"} if is_active else {}
-            res_buttons.append(InlineKeyboardButton(text=label, callback_data=f"sr:{r}:{owner_id}", **btn_kwargs))
-    rows.append(res_buttons)
+            else:
+                label = f"✓ {r}" if is_active else r
+                btn_kwargs = {"style": "primary"} if is_active else {}
+                res_buttons.append(InlineKeyboardButton(text=label, callback_data=f"sr:{r}:{owner_id}", **btn_kwargs))
+        rows.append(res_buttons)
 
     # Ratio Row
-    ratio_labels = {"auto": "Авто", "16:9": "16:9", "9:16": "9:16", "1:1": "1:1"}
-    ratio_buttons = []
-    for rat in ratio_choices:
-        lbl = ratio_labels.get(rat, rat)
-        is_active = rat == ratio
-        if rat == "auto":
-            ratio_buttons.append(
-                cbtn(
-                    "✓ Авто" if is_active else "Авто",
-                    callback_data=f"sa:{rat}:{owner_id}",
-                    icon_key="replay",
-                    fallback_emoji="🔄",
-                    style="primary" if is_active else None,
+    if ratio_choices:
+        ratio_labels = {"auto": "Авто", "16:9": "16:9", "9:16": "9:16", "1:1": "1:1"}
+        ratio_buttons = []
+        for rat in ratio_choices:
+            lbl = ratio_labels.get(rat, rat)
+            is_active = rat == ratio
+            if rat == "auto":
+                ratio_buttons.append(
+                    cbtn(
+                        "✓ Авто" if is_active else "Авто",
+                        callback_data=f"sa:{rat}:{owner_id}",
+                        icon_key="replay",
+                        fallback_emoji="🔄",
+                        style="primary" if is_active else None,
+                    )
                 )
-            )
-        else:
-            btn_kwargs = {"style": "primary"} if is_active else {}
-            if is_active:
-                lbl = f"✓ {lbl}"
-            ratio_buttons.append(InlineKeyboardButton(text=lbl, callback_data=f"sa:{rat}:{owner_id}", **btn_kwargs))
-    rows.append(ratio_buttons)
+            else:
+                btn_kwargs = {"style": "primary"} if is_active else {}
+                if is_active:
+                    lbl = f"✓ {lbl}"
+                ratio_buttons.append(InlineKeyboardButton(text=lbl, callback_data=f"sa:{rat}:{owner_id}", **btn_kwargs))
+        rows.append(ratio_buttons)
 
-    # Audio toggle for models supporting audio generation
-    if minfo.get("has_audio") and minfo.get("backend") != "minimax":
+    # Audio toggle for models supporting toggleable audio generation
+    if minfo.get("has_audio") and not minfo.get("audio_locked"):
         rows.append([
             cbtn(
                 "Звук: Вкл" if audio else "Звук: Выкл",
@@ -1121,29 +1133,27 @@ def format_draft_text(draft: Dict[str, Any]) -> str:
 
 
 def format_voice_draft_text(draft: Dict[str, Any]) -> str:
-    mode = draft.get("voice_mode", "tts")
+    cur_model = draft.get("model_key")
+    if cur_model not in VOICE_MODEL_KEYS:
+        cur_model = VOICE_MODEL_KEY
+        draft["model_key"] = cur_model
+    minfo = MODELS[cur_model]
     voice = next((v for v in VOICES if v["id"] == draft.get("voice_id")), VOICES[0])
-    cost = calculate_credit_cost(VOICE_MODEL_KEY, 0, "")
+    cost = calculate_credit_cost(cur_model, 0, "")
     cost_line = f"\n{ce('card', '💳')} Стоимость: <b>~{cost} кр.</b>" if cost > 0 else ""
-    if mode == "changer":
-        has_audio = bool(draft.get("audio_bytes"))
-        body = (
-            f"{ce('check', '✅')} <b>Переозвучка:</b> аудио получено — выберите голос и нажмите «Переозвучить»"
-            if has_audio
-            else f"{ce('voice', '🎤')} <b>Переозвучка</b> — отправьте голосовое сообщение или аудиофайл в чат {ce('down', '👇')}"
+    text = voice_text_of(draft)
+    body = (
+        f"{ce('book', '✍️')} <b>Текст → голос</b>\n"
+        + (
+            f"<blockquote expandable>{html.escape(text[:800])}</blockquote>"
+            if text
+            else f"Напишите текст для озвучки сообщением в чат {ce('down', '👇')}"
         )
-    else:
-        text = voice_text_of(draft)
-        body = (
-            f"{ce('book', '✍️')} <b>Текст → голос</b>\n"
-            + (
-                f"<blockquote expandable>{html.escape(text[:800])}</blockquote>"
-                if text
-                else f"Напишите текст для озвучки сообщением в чат {ce('down', '👇')}"
-            )
-        )
+    )
+    voice_suffix = f" · {voice['emoji']} {html.escape(voice['name'])}" if minfo.get("provider") == "elevenlabs" else ""
     return (
-        f"{ce('voice', '🎙')} <b>ElevenLabs V3</b> · {voice['emoji']} {html.escape(voice['name'])}\n\n"
+        f"{ce('voice', '🎙')} <b>{html.escape(minfo['name'])}</b>{voice_suffix}\n"
+        f"<i>{html.escape(minfo.get('desc', ''))}</i>\n\n"
         f"{body}"
         f"{cost_line}\n"
         f"<code>build: {BUILD_ID}</code>"
@@ -1151,41 +1161,36 @@ def format_voice_draft_text(draft: Dict[str, Any]) -> str:
 
 
 def format_music_draft_text(draft: Dict[str, Any]) -> str:
+    cur_model = draft.get("model_key")
+    if cur_model not in MUSIC_MODEL_KEYS:
+        cur_model = MUSIC_MODEL_KEY
+        draft["model_key"] = cur_model
+    minfo = MODELS[cur_model]
+    is_sfx = minfo.get("audio_type") == "sfx"
+    durs = [int(d) for d in (minfo.get("durations") or [30])]
+    try:
+        cur_dur = int(draft.get("music_duration") or durs[0])
+    except (TypeError, ValueError):
+        cur_dur = durs[0]
+    if cur_dur not in durs:
+        cur_dur = min(durs, key=lambda x: (abs(x - cur_dur), x))
+        draft["music_duration"] = cur_dur
+
     prompt = voice_text_of(draft)
-    lmode = draft.get("music_lyrics_mode", "auto")
-    lmode_names = {
-        "auto": "Авто (вокал и слова)",
-        "instrumental": "Инструментал (без слов)",
-        "custom": "Свой текст песни",
-    }
-    dur_lbl = _music_spec_label(MUSIC_DURATIONS, draft.get("music_duration", ""))
-    genre_lbl = _music_spec_label(MUSIC_GENRES, draft.get("music_genre", ""))
-    mood_lbl = _music_spec_label(MUSIC_MOODS, draft.get("music_mood", ""))
-    theme_lbl = _music_spec_label(MUSIC_THEMES, draft.get("music_theme", ""))
-    cost = calculate_credit_cost(MUSIC_MODEL_KEY, 0, "")
+    cost = calculate_credit_cost(cur_model, cur_dur, "")
     cost_line = f"\n{ce('card', '💳')} Стоимость: <b>~{cost} кр.</b>" if cost > 0 else ""
 
     prompt_block = (
         f"<blockquote expandable>{html.escape(prompt[:700])}</blockquote>"
         if prompt
-        else f"<i>Опишите трек, стиль или настроение сообщением в чат {ce('down', '👇')}</i>"
+        else f"<i>Опишите {'звуковой эффект' if is_sfx else 'трек, стиль или настроение'} сообщением в чат {ce('down', '👇')}</i>"
     )
-    lyrics_block = ""
-    if lmode == "custom":
-        lyrics_txt = (draft.get("music_lyrics") or "").strip()
-        lyrics_block = (
-            f"\n{ce('book', '📝')} <b>Текст песни:</b>\n<blockquote expandable>{html.escape(lyrics_txt[:700])}</blockquote>"
-            if lyrics_txt
-            else f"\n{ce('warn', '⚠️')} Нажмите «Ввести текст песни» ниже и отправьте куплеты."
-        )
 
     return (
-        f"{ce('mega', '🎵')} <b>Google Lyria 3 Pro</b> · 48 kHz студийный трек\n\n"
-        f"{ce('idea', '🎹')} <b>Описание трека:</b>\n{prompt_block}\n\n"
-        f"{ce('spark', '🎤')} <b>Вокал:</b> {lmode_names.get(lmode, lmode)}\n"
-        f"{ce('load_hourglass', '⏱')} <b>Длительность:</b> {dur_lbl}  ·  "
-        f"<b>Жанр:</b> {genre_lbl}  ·  <b>Настр:</b> {mood_lbl}  ·  <b>Тема:</b> {theme_lbl}"
-        f"{lyrics_block}"
+        f"{ce('mega', '🔊' if is_sfx else '🎵')} <b>{html.escape(minfo['name'])}</b>\n"
+        f"<i>{html.escape(minfo.get('desc', ''))}</i>\n\n"
+        f"{ce('idea', '🎹')} <b>Описание:</b>\n{prompt_block}\n\n"
+        f"{ce('load_hourglass', '⏱')} <b>Длительность:</b> {cur_dur} сек"
         f"{cost_line}\n"
         f"<code>build: {BUILD_ID}</code>"
     )
@@ -1269,7 +1274,7 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
         if c_handles else ""
     )
 
-    if minfo.get("backend") == "davinci_voice":
+    if minfo.get("backend") == "promptwise_voice":
         audio_ref = "Аудио-референс прикреплен (Voice Changer)" if draft.get("audio_bytes") else ref_badge
         cost = calculate_credit_cost(cur_model, 0, "")
         cost_line = f"{ce('card', '💳')} <b>Стоимость:</b> ~{cost} кредитов\n" if cost > 0 else ""
@@ -1526,19 +1531,19 @@ async def attach_reference_video_to_draft(
     cur_model = draft.get("model_key", DEFAULT_MODEL)
     cur_info = MODELS.get(cur_model, {})
     cur_max = max(cur_info.get("durations") or [15])
-    if wants_omni and "gemini_omni_12" in MODELS:
-        cur_model = "gemini_omni_12"
-    elif cur_model in ("s2_pro", "s2_mini") or not cur_info.get("video_ref"):
+    if wants_omni and "gemini_omni_1_2_flash" in MODELS:
+        cur_model = "gemini_omni_1_2_flash"
+    elif cur_model in ("seedance_2_0_pro", "seedance_2_0_mini") or not cur_info.get("video_ref"):
         # Use Seedance 2.5 (up to 30s) when clip > 15s or as default, else keep 2.5 or fast
-        if vid_dur > 15 and "s2_5" in MODELS:
-            cur_model = "s2_5"
-        elif "s2_fast" in MODELS and cur_model not in ("s2_5", "s2_5_flash"):
-            cur_model = "s2_fast"
-        elif "s2_5" in MODELS:
-            cur_model = "s2_5"
-    elif vid_dur > cur_max and "s2_5" in MODELS:
+        if vid_dur > 15 and "seedance_2_5" in MODELS:
+            cur_model = "seedance_2_5"
+        elif "seedance_2_0_fast" in MODELS and cur_model not in ("seedance_2_5", "seedance_2_5_flash"):
+            cur_model = "seedance_2_0_fast"
+        elif "seedance_2_5" in MODELS:
+            cur_model = "seedance_2_5"
+    elif vid_dur > cur_max and "seedance_2_5" in MODELS:
         # Never silently chop a 16-30s video to 15s when a 30s Seedance 2.5 engine is available
-        cur_model = "s2_5"
+        cur_model = "seedance_2_5"
 
     draft["model_key"] = cur_model
     get_user_prefs(owner_id)["model_key"] = cur_model
@@ -1607,13 +1612,17 @@ def create_draft_for_user(
     if menu_mode == "motion":
         active_model = MOTION_MODEL_KEY
     elif menu_mode == "voice":
-        active_model = VOICE_MODEL_KEY
+        active_model = prefs.get("voice_model_key", VOICE_MODEL_KEY)
     elif menu_mode == "music":
-        active_model = MUSIC_MODEL_KEY
+        active_model = prefs.get("music_model_key", MUSIC_MODEL_KEY)
     if menu_mode == "image" and active_model not in IMAGE_MODEL_KEYS:
         active_model = DEFAULT_IMAGE_MODEL
     elif menu_mode == "video" and active_model not in VIDEO_MODEL_KEYS:
         active_model = DEFAULT_MODEL
+    elif menu_mode == "voice" and active_model not in VOICE_MODEL_KEYS:
+        active_model = VOICE_MODEL_KEY
+    elif menu_mode == "music" and active_model not in MUSIC_MODEL_KEYS:
+        active_model = MUSIC_MODEL_KEY
 
     if menu_mode == "video" and len(refs) > 1:
         cur_minfo = MODELS.get(active_model, {})
@@ -1902,23 +1911,21 @@ def _is_admin_user(message: Message) -> bool:
 
 @router.message(Command("token", "set_token"))
 async def handle_set_token(message: Message, command: CommandObject, queue: GenerationQueue):
-    """Update DaVinci x-token on the fly without restarting the bot."""
+    """Update PromptWise session cookie on the fly without restarting the bot."""
     if not _is_admin_user(message):
         await message.reply(f"{ce('ban', '🔒')} Доступ только для создателя @GermanUstinf.", parse_mode="HTML")
         return
     raw = (command.args or "").strip()
     if not raw:
         await message.reply(
-            f"{ce('vip', '🔑')} <b>Обновление токена DaVinci AI:</b>\n"
-            "Отправьте: <code>/token ваш_x_token</code>",
+            f"{ce('vip', '🔑')} <b>Обновление куки PromptWise:</b>\n"
+            "Отправьте: <code>/token ваш_session_token</code>",
             parse_mode="HTML",
         )
         return
-    parts = raw.split()
-    new_tok = parts[0].strip()
-    new_ref = parts[1].strip() if len(parts) > 1 else None
-    queue.davinci_client.set_token(new_tok, new_ref)
-    await message.reply(f"{ce('check', '✅')} <b>Токен DaVinci AI успешно обновлен и сохранен!</b>", parse_mode="HTML")
+    new_tok = raw.split()[0].strip()
+    queue.promptwise_client.set_cookie(new_tok)
+    await message.reply(f"{ce('check', '✅')} <b>Куки PromptWise успешно обновлены и сохранены!</b>", parse_mode="HTML")
 
 
 @router.message(Command("id", "whoami", ignore_case=True, ignore_mention=True))
@@ -2438,31 +2445,27 @@ async def handle_last_command(message: Message, command: CommandObject, queue: G
 
 @router.message(Command("balance", "credits", "account", "баланс", "кредиты"))
 async def handle_balance_command(message: Message, queue: GenerationQueue):
-    """View current DaVinci AI account credit balance, plan tier, and generation stats."""
+    """View current PromptWise account credit balance and plan tier."""
     status_msg = await message.reply(
-        f"{ce('load_neon', '🔄')} <b>Запрашиваю актуальный баланс кредитов...</b>",
+        f"{ce('load_neon', '🔄')} <b>Запрашиваю актуальный баланс кредитов PromptWise...</b>",
         parse_mode="HTML"
     )
     try:
-        data = await queue.davinci_client.get_account_balance()
+        data = await queue.promptwise_client.get_account_balance()
         total = data["total_credits"]
         consumable = data["consumable_credits"]
         plan = data["plan_credits"]
         tier = data["tier_name"]
         renewal = data["renewal_date"]
-        gen_count = data["generation_count"]
-        auto_refill = f"Включено {ce('check', '✅')}" if data["auto_refill"] else f"Выключено {ce('ban', '❌')}"
 
         text = (
-            f"{ce('card', '💳')} <b>Баланс Poco AI</b>\n\n"
-            f"{ce('coin', '💰')} <b>Всего кредитов:</b> <code>{total:,}</code>\n"
-            f"├ <i>Пополняемые (Consumable):</i> <code>{consumable:,}</code>\n"
-            f"└ <i>Тарифные (Plan):</i> <code>{plan:,}</code>\n\n"
-            f"{ce('vip', '👑')} <b>Тариф:</b> {tier} (Premium {ce('check_y', '✅')})\n"
-            f"{ce('load_hourglass', '📅')} <b>Продление подписки:</b> {renewal}\n"
-            f"{ce('console', '📊')} <b>Всего генераций на аккаунте:</b> {gen_count}\n"
-            f"{ce('load_gears', '⚙️')} <b>Авто-пополнение кредитов:</b> {auto_refill}\n\n"
-            f"{ce('idea', '💡')} <i>Перед каждой генерацией в меню показывается точная стоимость задачи в кредитах!</i>"
+            f"{ce('card', '💳')} <b>Баланс Poco AI (PromptWise)</b>\n\n"
+            f"{ce('coin', '💰')} <b>Доступно кредитов:</b> <code>{total:,}</code>\n"
+            f"├ <i>Кошелёк (Wallet):</i> <code>{consumable:,}</code>\n"
+            f"└ <i>Тарифный лимит (Allowance):</i> <code>{plan:,}</code>\n\n"
+            f"{ce('vip', '👑')} <b>Тариф:</b> {html.escape(str(tier))}\n"
+            f"{ce('load_hourglass', '📅')} <b>Обновление лимита:</b> {html.escape(str(renewal))}\n\n"
+            f"{ce('idea', '💡')} <i>Все 58 моделей PromptWise подключены и готовы к работе!</i>"
         )
         await status_msg.edit_text(text, parse_mode="HTML")
     except Exception as e:
@@ -2644,7 +2647,7 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
     minfo_v = MODELS.get(cur_model, MODELS[DEFAULT_MODEL])
 
     is_seedance = cur_model.startswith("s2_")
-    min_ref_clip = 2 if is_seedance else (1 if cur_model in ("gemini_omni_12", "gemini_omni_11") else 0)
+    min_ref_clip = 2 if is_seedance else (1 if cur_model in ("gemini_omni_1_2_flash", "gemini_omni_1_1_flash") else 0)
     ref_tag = " (@Video1)" if is_seedance else ""
     info_parts = [f"• {ce('console', '🎞')} Видео-референс прикреплен к задаче{ref_tag} · модель: <b>{minfo_v['name']}</b>"]
     if vid_dur > 0:
@@ -2939,10 +2942,10 @@ async def process_photo_batch(
 
         cur_model = draft.get("model_key", DEFAULT_MODEL)
         minfo = MODELS.get(cur_model, MODELS[DEFAULT_MODEL])
-        if is_omni_cmd and "gemini_omni_12" in MODELS:
+        if is_omni_cmd and "gemini_omni_1_2_flash" in MODELS:
             draft["menu_mode"] = "video"
-            draft["model_key"] = "gemini_omni_12"
-            align_draft_to_model(draft, MODELS["gemini_omni_12"], owner_id=user_id)
+            draft["model_key"] = "gemini_omni_1_2_flash"
+            align_draft_to_model(draft, MODELS["gemini_omni_1_2_flash"], owner_id=user_id)
         elif draft.get("menu_mode", "video") == "video" and len(all_refs) > 1 and not minfo.get("multi_ref"):
             cur_model = DEFAULT_MODEL
             draft["model_key"] = DEFAULT_MODEL
@@ -3005,9 +3008,9 @@ async def process_photo_batch(
         message_id=message.message_id,
         menu_mode=menu_mode,
     )
-    if is_omni_cmd and "gemini_omni_12" in MODELS:
-        draft["model_key"] = "gemini_omni_12"
-        align_draft_to_model(draft, MODELS["gemini_omni_12"], owner_id=user_id)
+    if is_omni_cmd and "gemini_omni_1_2_flash" in MODELS:
+        draft["model_key"] = "gemini_omni_1_2_flash"
+        align_draft_to_model(draft, MODELS["gemini_omni_1_2_flash"], owner_id=user_id)
     else:
         draft["model_key"] = MOTION_MODEL_KEY if is_voice_cmd else cur_model
 
@@ -3105,8 +3108,8 @@ async def handle_waiting_prompt(message: Message, bot: Bot, state: FSMContext):
             text = cmd_arg
         elif cmd in ("/video", "/gen", "/prompt", "/v", "/s2", "/omni"):
             target_mode = "video"
-            if cmd == "/omni" and "gemini_omni_12" in MODELS:
-                model_override = "gemini_omni_12"
+            if cmd == "/omni" and "gemini_omni_1_2_flash" in MODELS:
+                model_override = "gemini_omni_1_2_flash"
             text = cmd_arg
         elif cmd in ("/voice", "/tts", "/eleven", "/elevenlabs"):
             target_mode = "voice"
@@ -4920,11 +4923,11 @@ async def on_open_menu_from_button(call: CallbackQuery, state: FSMContext):
             draft["model_key"] = MOTION_MODEL_KEY
             draft["resolution"] = draft.get("resolution", "720p")
         elif target_mode == "voice":
-            draft["model_key"] = VOICE_MODEL_KEY
+            draft["model_key"] = get_user_prefs(uid).get("voice_model_key", VOICE_MODEL_KEY)
             draft.setdefault("voice_id", get_user_prefs(uid).get("voice_id", DEFAULT_VOICE_ID))
-            draft["voice_mode"] = "changer" if draft.get("audio_bytes") else draft.get("voice_mode", "tts")
         elif target_mode == "music":
-            draft["model_key"] = MUSIC_MODEL_KEY
+            draft["model_key"] = get_user_prefs(uid).get("music_model_key", MUSIC_MODEL_KEY)
+            draft.setdefault("music_duration", get_user_prefs(uid).get("music_duration", 30))
         if ref_images:
             draft["ref_images"] = list(ref_images)
             draft["image_bytes"] = ref_images[0]
@@ -4999,11 +5002,13 @@ async def on_switch_menu_tab(call: CallbackQuery):
         draft["model_key"] = draft.get("model_key") if draft.get("model_key") in MOTION_MODEL_KEYS else MOTION_MODEL_KEY
         draft.setdefault("resolution", "720p")
     elif target_mode == "voice":
-        draft["model_key"] = VOICE_MODEL_KEY
+        mk = prefs.get("voice_model_key", VOICE_MODEL_KEY)
+        draft["model_key"] = mk if mk in VOICE_MODEL_KEYS else VOICE_MODEL_KEY
         draft.setdefault("voice_id", prefs.get("voice_id", DEFAULT_VOICE_ID))
-        draft["voice_mode"] = "changer" if draft.get("audio_bytes") else (draft.get("voice_mode") or prefs.get("voice_mode", "tts"))
     elif target_mode == "music":
-        draft["model_key"] = MUSIC_MODEL_KEY
+        mk = prefs.get("music_model_key", MUSIC_MODEL_KEY)
+        draft["model_key"] = mk if mk in MUSIC_MODEL_KEYS else MUSIC_MODEL_KEY
+        draft.setdefault("music_duration", prefs.get("music_duration", 30))
     else:
         mk = prefs.get("model_key", DEFAULT_MODEL)
         draft["model_key"] = mk if mk in VIDEO_MODEL_KEYS else DEFAULT_MODEL
@@ -5011,6 +5016,45 @@ async def on_switch_menu_tab(call: CallbackQuery):
     sync_draft_references(draft)
     tab_notices = {"image": "🖼 Фото", "motion": "🕺 Motion", "voice": "🎙 Голос", "music": "🎵 Музыка"}
     await _refresh_draft_menu(call, draft, owner_id, tab_notices.get(target_mode, "🎬 Видео"))
+
+
+@router.callback_query(F.data.startswith("vmod:"))
+async def on_voice_model_pick(call: CallbackQuery):
+    _, mkey, owner = call.data.split(":")
+    owner_id = int(owner)
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = fresh_draft(owner_id)
+    if not draft or mkey not in VOICE_MODEL_KEYS:
+        await call.answer("Откройте меню заново: /voice", show_alert=True)
+        return
+    draft["model_key"] = mkey
+    get_user_prefs(owner_id)["voice_model_key"] = mkey
+    await _refresh_draft_menu(call, draft, owner_id, f"Модель: {MODELS[mkey]['short']}")
+
+
+@router.callback_query(F.data.startswith("mmod:"))
+async def on_music_model_pick(call: CallbackQuery):
+    _, mkey, owner = call.data.split(":")
+    owner_id = int(owner)
+    if not await verify_callback_owner(call, owner_id):
+        return
+    draft = fresh_draft(owner_id)
+    if not draft or mkey not in MUSIC_MODEL_KEYS:
+        await call.answer("Откройте меню заново: /music", show_alert=True)
+        return
+    draft["model_key"] = mkey
+    get_user_prefs(owner_id)["music_model_key"] = mkey
+    durs = [int(d) for d in (MODELS[mkey].get("durations") or [30])]
+    try:
+        cur_d = int(draft.get("music_duration") or durs[0])
+    except (TypeError, ValueError):
+        cur_d = durs[0]
+    if cur_d not in durs:
+        cur_d = min(durs, key=lambda x: (abs(x - cur_d), x))
+        draft["music_duration"] = cur_d
+        get_user_prefs(owner_id)["music_duration"] = cur_d
+    await _refresh_draft_menu(call, draft, owner_id, f"Модель: {MODELS[mkey]['short']}")
 
 
 @router.callback_query(F.data.startswith("vmode:"))
@@ -5089,11 +5133,17 @@ async def on_music_duration(call: CallbackQuery):
     if not draft:
         await call.answer("Откройте меню заново: /music", show_alert=True)
         return
-    valid = {d["key"] for d in MUSIC_DURATIONS}
-    draft["music_duration"] = dur_key if dur_key in valid else ""
-    get_user_prefs(owner_id)["music_duration"] = draft["music_duration"]
-    lbl = _music_spec_label(MUSIC_DURATIONS, draft["music_duration"])
-    await _refresh_draft_menu(call, draft, owner_id, f"⏱ Длительность: {lbl}")
+    mkey = draft.get("model_key")
+    minfo = MODELS.get(mkey if mkey in MUSIC_MODEL_KEYS else MUSIC_MODEL_KEY, MODELS[MUSIC_MODEL_KEY])
+    durs = [int(d) for d in (minfo.get("durations") or [30])]
+    try:
+        val = int(dur_key)
+    except ValueError:
+        val = durs[0]
+    chosen = val if val in durs else min(durs, key=lambda x: (abs(x - val), x))
+    draft["music_duration"] = chosen
+    get_user_prefs(owner_id)["music_duration"] = chosen
+    await _refresh_draft_menu(call, draft, owner_id, f"⏱ Длительность: {chosen} сек")
 
 
 @router.callback_query(F.data.startswith("mcyc:"))
@@ -5523,7 +5573,7 @@ async def on_set_model(call: CallbackQuery):
                 draft["ratio"] = draft["ref_video_ratio"]
         align_draft_to_model(draft, minfo, owner_id=owner_id)
 
-        if minfo.get("backend") == "davinci_voice":
+        if minfo.get("backend") == "promptwise_voice":
             draft["step"] = "quality"
         else:
             draft["step"] = "duration"
@@ -5835,19 +5885,12 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
                 await call.answer(f"Видео {sec} сек — нужно от 3 до 30 сек", show_alert=True)
                 return
         elif pmode == "voice":
-            vmode = peek.get("voice_mode", "tts")
-            if vmode == "changer" and not peek.get("audio_bytes"):
-                await call.answer("🎤 Сначала отправьте голосовое сообщение или аудиофайл", show_alert=True)
-                return
-            if vmode == "tts" and not voice_text_of(peek):
+            if not voice_text_of(peek):
                 await call.answer("✍️ Напишите текст для озвучки сообщением в чат", show_alert=True)
                 return
         elif pmode == "music":
             if not voice_text_of(peek):
-                await call.answer("🎵 Напишите описание трека или стиля сообщением в чат", show_alert=True)
-                return
-            if peek.get("music_lyrics_mode") == "custom" and not (peek.get("music_lyrics") or "").strip():
-                await call.answer("📝 Введите текст песни или выберите Авто / Без слов", show_alert=True)
+                await call.answer("🎵 Напишите описание трека или звукового эффекта сообщением в чат", show_alert=True)
                 return
 
     draft = user_drafts.pop(owner_id, None)
@@ -5862,9 +5905,11 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
     sync_draft_references(draft)
     menu_mode = draft.get("menu_mode", "video")
     if menu_mode == "voice":
-        model_key = VOICE_MODEL_KEY
+        mk = draft.get("model_key")
+        model_key = mk if mk in VOICE_MODEL_KEYS else VOICE_MODEL_KEY
     elif menu_mode == "music":
-        model_key = MUSIC_MODEL_KEY
+        mk = draft.get("model_key")
+        model_key = mk if mk in MUSIC_MODEL_KEYS else MUSIC_MODEL_KEY
     else:
         model_key = draft.get("model_key", DEFAULT_IMAGE_MODEL if menu_mode == "image" else DEFAULT_MODEL)
     if menu_mode == "motion":
@@ -5872,10 +5917,17 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
     model_info = MODELS.get(model_key, MODELS[DEFAULT_MODEL])
     if menu_mode == "image":
         align_image_draft_to_model(draft, model_info, owner_id=owner_id)
-    elif menu_mode == "video" and model_info.get("backend") not in ("davinci_voice", "davinci_music"):
+    elif menu_mode == "video" and model_info.get("backend") not in ("promptwise_voice", "promptwise_audio"):
         align_draft_to_model(draft, model_info, owner_id=owner_id)
     prompt = voice_text_of(draft) if menu_mode in ("voice", "music") else draft.get("prompt", "")
     duration = draft["duration"]
+    if menu_mode == "music":
+        durs = [int(d) for d in (model_info.get("durations") or [30])]
+        try:
+            md = int(draft.get("music_duration") or durs[0])
+        except (TypeError, ValueError):
+            md = durs[0]
+        duration = md if md in durs else min(durs, key=lambda x: (abs(x - md), x))
     resolution = draft["image_resolution"] if menu_mode == "image" else draft["resolution"]
     ratio = draft["image_ratio"] if menu_mode == "image" else draft["ratio"]
     audio = draft["audio"]
@@ -5957,16 +6009,22 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
     elif menu_mode == "motion":
         chips.append(f"{ce('dance', '🕺')} {resolution}")
     elif menu_mode == "voice":
-        voice_obj = next((v for v in VOICES if v["id"] == job.voice_id), VOICES[0])
-        chips.append("Переозвучка" if job.voice_mode == "changer" else "Текст → голос")
-        chips.append(f"{voice_obj['emoji']} {voice_obj['name']}")
+        if model_info.get("provider") == "elevenlabs":
+            voice_obj = next((v for v in VOICES if v["id"] == job.voice_id), VOICES[0])
+            chips.append(f"{voice_obj['emoji']} {voice_obj['name']}")
+        else:
+            chips.append("TTS")
     elif menu_mode == "music":
-        chips.append(_music_spec_label(MUSIC_DURATIONS, draft.get("music_duration", "")))
-        l_lbl = {"auto": "Авто", "instrumental": "Без слов", "custom": "Свой текст"}.get(job.music_lyrics_mode, "Авто")
-        chips.append(l_lbl)
+        chips.append(f"{duration} сек")
+        chips.append("SFX" if model_info.get("audio_type") == "sfx" else "Музыка")
     else:
         dur_label = "Авто" if duration == -1 else f"{duration} сек"
-        chips.append(f"{dur_label} · {resolution} · {ratio}")
+        parts = [dur_label]
+        if resolution:
+            parts.append(resolution)
+        if ratio:
+            parts.append(ratio)
+        chips.append(" · ".join(parts))
     if ref_images:
         chips.append(f"{ce('pin', '📎')} {len(ref_images)}")
     if used_cameos:
@@ -6002,26 +6060,16 @@ async def main():
     bot = SmartEmojiBot(token=token_to_use)
     dp = Dispatcher(storage=MemoryStorage())
 
-    api_client = SeedanceAPIClient()
-    v2_client = SeedanceV2Client()
-    grok_client = GrokVideoClient()
-    minimax_client = MiniMaxClient()
-    qwen_client = QwenImageClient()
-    davinci_client = DaVinciClient()
+    promptwise_client = PromptWiseClient()
     queue = GenerationQueue(
         bot=bot,
-        api_client=api_client,
-        v2_client=v2_client,
-        grok_client=grok_client,
-        minimax_client=minimax_client,
-        qwen_client=qwen_client,
-        davinci_client=davinci_client,
+        promptwise_client=promptwise_client,
     )
 
     dp["queue"] = queue
     dp.include_router(router)
 
-    logger.info("Starting Queue Worker...")
+    logger.info("Starting Queue Worker (PromptWise)...")
     queue.start()
 
     logger.info("Starting Telegram Bot Polling...")
@@ -6042,12 +6090,7 @@ async def main():
                 await asyncio.sleep(3)
     finally:
         await queue.stop()
-        await api_client.close()
-        await v2_client.close()
-        await grok_client.close()
-        await minimax_client.close()
-        await qwen_client.close()
-        await davinci_client.close()
+        await promptwise_client.close()
         await bot.session.close()
 
 

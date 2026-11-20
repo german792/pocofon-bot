@@ -16,6 +16,7 @@ from api_client import (
     DaVinciClient,
     translate_server_error,
 )
+from promptwise_client import PromptWiseClient
 from config import MODELS, BASE_DIR, DEFAULT_MODEL, MAX_CONCURRENT_JOBS, calculate_credit_cost
 import image_utils
 import history_manager
@@ -185,20 +186,22 @@ class GenerationQueue:
     def __init__(
         self,
         bot: Bot,
-        api_client: SeedanceAPIClient,
-        v2_client: SeedanceV2Client,
+        api_client: Optional[SeedanceAPIClient] = None,
+        v2_client: Optional[SeedanceV2Client] = None,
         grok_client: Optional[GrokVideoClient] = None,
         minimax_client: Optional[MiniMaxClient] = None,
         qwen_client: Optional[QwenImageClient] = None,
         davinci_client: Optional[DaVinciClient] = None,
+        promptwise_client: Optional[PromptWiseClient] = None,
     ):
         self.bot = bot
+        self.promptwise_client = promptwise_client or PromptWiseClient()
         self.api_client = api_client
         self.v2_client = v2_client
-        self.grok_client = grok_client or GrokVideoClient()
-        self.minimax_client = minimax_client or MiniMaxClient()
-        self.qwen_client = qwen_client or QwenImageClient()
-        self.davinci_client = davinci_client or DaVinciClient()
+        self.grok_client = grok_client
+        self.minimax_client = minimax_client
+        self.qwen_client = qwen_client
+        self.davinci_client = davinci_client or self.promptwise_client
         self.queue: asyncio.Queue[GenerationJob] = asyncio.Queue()
         self.worker_tasks: List[asyncio.Task] = []
         self.is_running = False
@@ -280,25 +283,34 @@ class GenerationQueue:
         user_line = f"{ce('astro', '👤')} {job.user_name}\n" if job.user_name else ""
 
         chips = []
-        if backend in ("davinci_image", "qwen_image"):
+        if backend in ("promptwise_image", "davinci_image", "qwen_image"):
             head = f"{ce('nova', '🖼')} <b>{model_name}</b> · создаю изображение"
-            chips.append(f"{job.resolution} · {job.ratio}")
-        elif backend == "davinci_voice":
+            res_part = f"{job.resolution} · " if job.resolution and model_info.get("resolutions") else ""
+            chips.append(f"{res_part}{job.ratio}")
+        elif backend in ("promptwise_voice", "davinci_voice"):
             head = f"{ce('voice', '🎙')} <b>{model_name}</b> · озвучиваю текст"
-        elif backend == "davinci_music":
-            head = f"{ce('mega', '🎵')} <b>{model_name}</b> · создаю трек"
-            m_specs = job.music_specs or {}
-            if m_specs.get("duration") == "120":
-                chips.append("2 мин")
-            elif m_specs.get("duration") == "180":
-                chips.append("3 мин")
-            if job.music_lyrics_mode == "instrumental":
-                chips.append("Инструментал")
-            elif job.music_lyrics_mode == "custom":
-                chips.append("Свой текст")
+        elif backend in ("promptwise_audio", "davinci_music"):
+            is_sfx = model_info.get("audio_type") == "sfx"
+            head = f"{ce('mega', '🔊' if is_sfx else '🎵')} <b>{model_name}</b> · {'создаю звуковой эффект' if is_sfx else 'создаю трек'}"
+            if job.duration and job.duration > 0:
+                chips.append(f"{job.duration} сек")
+            else:
+                m_specs = job.music_specs or {}
+                if m_specs.get("duration") == "120":
+                    chips.append("2 мин")
+                elif m_specs.get("duration") == "180":
+                    chips.append("3 мин")
+        elif backend in ("promptwise_motion", "davinci_motion"):
+            head = f"{ce('rocket', '🕺')} <b>{model_name}</b> · переношу движение"
+            chips.append(f"{job.resolution}")
         else:
             head = f"{ce('rocket', '🎬')} <b>{model_name}</b> · создаю видео"
-            chips.append(f"{dur_label} · {job.resolution} · {job.ratio}")
+            parts = [dur_label]
+            if job.resolution and model_info.get("resolutions"):
+                parts.append(job.resolution)
+            if job.ratio and model_info.get("ratios"):
+                parts.append(job.ratio)
+            chips.append(" · ".join(parts))
             if backend == "minimax":
                 chips.append(f"{ce('mega', '🔊')} музыка")
             elif model_info.get("has_audio"):
@@ -338,6 +350,8 @@ class GenerationQueue:
                 self.queue.task_done()
 
     def _get_client_for_backend(self, backend: str):
+        if backend in ("promptwise", "promptwise_image", "promptwise_motion", "promptwise_voice", "promptwise_audio"):
+            return self.promptwise_client
         if backend in ("davinci", "davinci_image", "davinci_voice", "davinci_music", "davinci_motion"):
             return self.davinci_client
         if backend == "v2":
@@ -348,7 +362,7 @@ class GenerationQueue:
             return self.minimax_client
         if backend == "qwen_image":
             return self.qwen_client
-        return self.api_client
+        return self.api_client or self.promptwise_client
 
     async def _process_job(self, job: GenerationJob):
         model_info = MODELS.get(job.model_key, MODELS[DEFAULT_MODEL])
@@ -396,8 +410,8 @@ class GenerationQueue:
             total_elapsed,
         )
 
-        # --- BRANCH 1: IMAGE GENERATION (Nano Banana, Flux 3 Image, Qwen Image) ---
-        if backend in ("davinci_image", "qwen_image"):
+        # --- BRANCH 1: IMAGE GENERATION (PromptWise Image models) ---
+        if backend in ("promptwise_image", "davinci_image", "qwen_image"):
             ts = int(asyncio.get_event_loop().time())
             temp_file = VIDEOS_DIR / f"{job.model_key}_{job.user_id}_{ts}.png"
             raw_file = VIDEOS_DIR / f"raw_{job.model_key}_{job.user_id}_{ts}.png"
@@ -534,13 +548,15 @@ class GenerationQueue:
                 )
             return
 
-        # --- BRANCH 2: AUDIO GENERATION (ElevenLabs V3 Voice or Google Lyria 3 Pro Music) ---
-        if backend in ("davinci_voice", "davinci_music"):
-            is_music = backend == "davinci_music"
-            prefix = "lyria3pro" if is_music else "elevenlabs"
-            provider_label = "Lyria 3 Pro" if is_music else "ElevenLabs"
-            done_title = "Трек готов" if is_music else "Озвучка готова"
-            done_icon = ce("mega", "🎵") if is_music else ce("voice", "🎙")
+        # --- BRANCH 2: AUDIO GENERATION (Voice TTS / Music / SFX) ---
+        if backend in ("promptwise_voice", "promptwise_audio", "davinci_voice", "davinci_music"):
+            audio_type = model_info.get("audio_type") or ("music" if backend in ("davinci_music", "promptwise_audio") else "tts")
+            is_sfx = audio_type == "sfx"
+            is_music = audio_type == "music"
+            prefix = "sfx" if is_sfx else ("music" if is_music else "voice")
+            provider_label = str(model_name)
+            done_title = "Звуковой эффект готов" if is_sfx else ("Трек готов" if is_music else "Озвучка готова")
+            done_icon = ce("mega", "🔊" if is_sfx else "🎵") if (is_music or is_sfx) else ce("voice", "🎙")
 
             ts = int(asyncio.get_event_loop().time())
             audio_file = VIDEOS_DIR / f"{prefix}_{job.user_id}_{ts}.mp3"
@@ -551,18 +567,18 @@ class GenerationQueue:
                     job,
                     pct=99,
                     elapsed=total_elapsed,
-                    stage=f"Скачиваю аудиодорожку {provider_label}..."
+                    stage=f"Скачиваю аудиодорожку ({provider_label})..."
                 )
             )
 
             try:
-                audio_bytes = await self.davinci_client.download_audio(media_url)
+                audio_bytes = await client.download_audio(media_url)
                 audio_file.write_bytes(audio_bytes)
             except Exception as dl_err:
                 logger.error(f"Audio download failed: {dl_err}", exc_info=True)
                 await self._update_status(
                     job,
-                    f"{ce('alert', '❌')} <b>Ошибка загрузки аудиофайла с сервера {provider_label}.</b>"
+                    f"{ce('alert', '❌')} <b>Ошибка загрузки аудиофайла с сервера ({html.escape(provider_label)}).</b>"
                 )
                 return
 
@@ -572,7 +588,7 @@ class GenerationQueue:
                     job,
                     pct=100,
                     elapsed=total_elapsed,
-                    stage=f"Отправляю {'трек' if is_music else 'озвучку'} в Telegram..."
+                    stage=f"Отправляю {'звук' if is_sfx else ('трек' if is_music else 'озвучку')} в Telegram..."
                 )
             )
 
@@ -591,7 +607,7 @@ class GenerationQueue:
                         chat_id=job.chat_id,
                         audio=audio_input,
                         caption=caption,
-                        title=(job.prompt[:40] or ("Lyria 3 Pro" if is_music else "ElevenLabs V3")),
+                        title=(job.prompt[:40] or provider_label),
                         performer=f"Poco AI • {provider_label}",
                         parse_mode="HTML",
                         reply_to_message_id=job.reply_to_message_id,
@@ -766,7 +782,70 @@ class GenerationQueue:
         all_refs = job.get_all_ref_images()
 
         try:
-            if backend == "davinci":
+            if backend == "promptwise":
+                if not all_refs and job.ref_video and not model_info.get("video_ref"):
+                    v_frame = await extract_frame_from_video(job.ref_video)
+                    if v_frame:
+                        all_refs = [v_frame]
+                if not job.audio_bytes and job.ref_video:
+                    v_audio = await extract_audio_from_video(job.ref_video)
+                    if v_audio:
+                        job.audio_bytes = v_audio
+
+                prepared_refs = [
+                    image_utils.prepare_user_image(b, job.ratio or "16:9") for b in all_refs if b
+                ]
+                logger.info(
+                    f"Submitting PromptWise video task ({model_info['api_id']}) with {len(prepared_refs)} ref(s) for user {job.user_id}"
+                )
+                task_id = await self.promptwise_client.create_video_task(
+                    model_info=model_info,
+                    prompt=job.prompt,
+                    duration=job.duration,
+                    resolution=job.resolution,
+                    ratio=job.ratio,
+                    generate_audio=job.generate_audio,
+                    ref_images=prepared_refs,
+                    ref_mode=job.ref_mode,
+                    ref_video=job.ref_video,
+                    audio_bytes=job.audio_bytes,
+                )
+
+            elif backend == "promptwise_motion":
+                imgs = [b for b in all_refs if b]
+                if not imgs or not job.ref_video:
+                    raise RuntimeError("Для Motion Control нужны фото персонажа и видео с движением")
+                task_id = await self.promptwise_client.create_motion_control_task(
+                    image_bytes=imgs[0],
+                    video_bytes=job.ref_video,
+                    prompt=job.prompt,
+                    resolution=job.resolution,
+                    character_orientation=job.motion_orient,
+                    model_id=model_info.get("api_id", "kling-3.0-motion-control"),
+                )
+                logger.info(f"[promptwise/motion] user={job.user_id} orient={job.motion_orient} res={job.resolution}")
+
+            elif backend == "promptwise_image":
+                prepared_refs = [
+                    image_utils.prepare_user_image(b, job.ratio or "1:1") for b in all_refs if b
+                ]
+                task_id = await self.promptwise_client.create_image_task(
+                    model_info=model_info,
+                    prompt=job.prompt,
+                    resolution=job.resolution,
+                    ratio=job.ratio,
+                    ref_images=prepared_refs,
+                )
+
+            elif backend in ("promptwise_voice", "promptwise_audio"):
+                task_id = await self.promptwise_client.create_audio_task(
+                    model_info=model_info,
+                    prompt=job.prompt,
+                    voice_id=job.voice_id or None,
+                    duration_seconds=job.duration if job.duration and job.duration > 0 else None,
+                )
+
+            elif backend == "davinci":
                 # Only extract a fallback start-frame photo for models WITHOUT native inputVideos
                 # support; otherwise sending the video's first frame as @Image1 confuses video_edit.
                 if not all_refs and job.ref_video and not model_info.get("video_ref"):
@@ -920,7 +999,14 @@ class GenerationQueue:
         poll_count = 0
 
         client = self._get_client_for_backend(backend)
-        poll_sleep = 3 if backend in ("grok", "minimax", "qwen_image", "davinci_image", "davinci_voice", "davinci_music") else 5
+        poll_sleep = (
+            3
+            if backend in (
+                "promptwise_image", "promptwise_voice", "promptwise_audio",
+                "grok", "minimax", "qwen_image", "davinci_image", "davinci_voice", "davinci_music",
+            )
+            else 5
+        )
 
         while True:
             await asyncio.sleep(poll_sleep)
@@ -943,9 +1029,9 @@ class GenerationQueue:
             logger.info(f"Task {task_id} status: {status} ({elapsed}s)")
 
             if status == "succeeded":
-                if backend in ("qwen_image", "davinci_image"):
+                if backend in ("promptwise_image", "qwen_image", "davinci_image"):
                     media_url = task_info.get("imageUrl") or task_info.get("videoUrl")
-                elif backend in ("davinci_voice", "davinci_music"):
+                elif backend in ("promptwise_voice", "promptwise_audio", "davinci_voice", "davinci_music"):
                     media_url = task_info.get("audioUrl") or task_info.get("videoUrl")
                 else:
                     media_url = task_info.get("videoUrl")
@@ -991,15 +1077,16 @@ class GenerationQueue:
                 break
 
             if poll_count == 1 or poll_count % 2 == 0:
-                if backend in ("qwen_image", "davinci_image"):
+                if backend in ("promptwise_image", "qwen_image", "davinci_image"):
                     pct = min(95, max(15, elapsed * 4))
                     stage = task_info.get("stage", f"Генерация изображения ({model_info['name']})...")
-                elif backend == "davinci_voice":
+                elif backend in ("promptwise_voice", "davinci_voice"):
                     pct = min(95, max(25, elapsed * 10))
-                    stage = task_info.get("stage", "Синтез речи ElevenLabs V3...")
-                elif backend == "davinci_music":
+                    stage = task_info.get("stage", f"Синтез речи ({model_info['name']})...")
+                elif backend in ("promptwise_audio", "davinci_music"):
                     pct = min(95, max(20, elapsed * 4))
-                    stage = task_info.get("stage", "Сочиняю трек в Lyria 3 Pro...")
+                    is_sfx = model_info.get("audio_type") == "sfx"
+                    stage = task_info.get("stage", f"{'Генерация звукового эффекта' if is_sfx else 'Генерация музыки'} ({model_info['name']})...")
                 else:
                     pct = estimate_progress(elapsed, job.duration, status, srv_progress)
                     if status == "queued":

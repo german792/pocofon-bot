@@ -64,7 +64,7 @@ def log_task_start(
     source: str = "web",
     user_id: Optional[str] = None,
     username: Optional[str] = None,
-    model_key: str = "s2_5",
+    model_key: str = "seedance_2_5",
     model_name: str = "Seedance 2.5",
     category: str = "video",
     prompt: str = "",

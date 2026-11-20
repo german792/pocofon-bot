@@ -7,7 +7,11 @@ load_dotenv(BASE_DIR / ".env")
 
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
 
-# Backend 0: DaVinci AI Studio (Seedance 2.5/2.0/Fast/Mini/1.5, Kling 4, Flux 3/Max, LTX 2.5 Pro, Gemini Omni 1.2, Nano Banana, ElevenLabs)
+# Primary Backend: PromptWise Studio (https://staging.promptwise.com)
+PROMPTWISE_BASE_URL = os.getenv("PROMPTWISE_BASE_URL", "https://staging.promptwise.com").rstrip("/")
+PROMPTWISE_COOKIE = (os.getenv("PROMPTWISE_COOKIE") or "").strip()
+
+# Legacy DaVinci env vars (kept only for backwards-compatible imports)
 DAVINCI_API_BASE_URL = os.getenv("DAVINCI_API_BASE_URL", "https://api-dev.davinci.ai").rstrip("/")
 DAVINCI_ORIGIN = os.getenv("DAVINCI_ORIGIN", "https://web-landing-444069746542.europe-west3.run.app").rstrip("/")
 DAVINCI_STORAGE_BUCKET = os.getenv("DAVINCI_STORAGE_BUCKET", "davinci-web-dev.appspot.com")
@@ -18,15 +22,18 @@ DAVINCI_REFRESH_TOKEN = (os.getenv("DAVINCI_REFRESH_TOKEN") or "").strip()
 
 # Administration & Access Control
 ADMIN_PASSWORD = (os.getenv("ADMIN_PASSWORD") or "").strip()
-ADMIN_TELEGRAM_USERNAMES = [u.strip().lstrip("@").lower() for u in os.getenv("ADMIN_TELEGRAM_USERNAMES", "GermanUstinf,germanustinf,german792,german_ustinf").split(",") if u.strip()]
-# Secret used to sign access keys. Falls back to ADMIN_PASSWORD so keys issued earlier stay valid.
+ADMIN_TELEGRAM_USERNAMES = [
+    u.strip().lstrip("@").lower()
+    for u in os.getenv("ADMIN_TELEGRAM_USERNAMES", "GermanUstinf,germanustinf,german792,german_ustinf").split(",")
+    if u.strip()
+]
 KEY_SIGNING_SECRET = (os.getenv("KEY_SIGNING_SECRET") or ADMIN_PASSWORD).strip()
 ADMIN_TELEGRAM_IDS = [int(x.strip()) for x in os.getenv("ADMIN_TELEGRAM_IDS", "").split(",") if x.strip().isdigit()]
 CREATOR_TG_USERNAME = "@GermanUstinf"
 CREATOR_TG_URL = "https://t.me/GermanUstinf"
 COMMUNITY_TG_URL = "https://t.me/+GnpMk7j_aQ8wOTA6"
 
-# Legacy/Fallback Backends
+# Legacy Fallback Env Vars (kept for api_client.py compatibility)
 API_BASE_URL = os.getenv("API_BASE_URL", "https://111.229.36.38").rstrip("/")
 API_EMAIL = os.getenv("API_EMAIL", "pocofon_bot_service@local.net")
 API_PASSWORD = os.getenv("API_PASSWORD", "")
@@ -34,792 +41,987 @@ API_V2_BASE_URL = os.getenv("API_V2_BASE_URL", "http://39.109.117.93:8092").rstr
 API_GROK_BASE_URL = os.getenv("API_GROK_BASE_URL", "http://49.233.205.130:8006").rstrip("/")
 API_MINIMAX_BASE_URL = os.getenv("API_MINIMAX_BASE_URL", "http://120.55.55.62/ecommerce-poster-trio").rstrip("/")
 
-# Available Models (Video, Voice, and Image)
+# =====================================================================
+# ALL ACTIVE MODELS FROM https://staging.promptwise.com/
+# =====================================================================
 MODELS = {
-    # --- MOTION CONTROL (вкладка Motion: фото персонажа + видео с движением) ---
-    "klingMotionControl3": {
-        "name": "Kling Motion Control 3.0",
-        "short": "🕺 3.0",
+    # --- MOTION CONTROL (вкладка Motion) ---
+    "kling_3_0_motion_control": {
+        "name": "Kling 3.0 Motion Control",
+        "short": "🕺 Kling 3.0 MC",
         "category": "motion",
-        "backend": "davinci_motion",
-        "api_id": "klingMotionControl3",
-        "desc": "Фото персонажа + видео с движением",
+        "backend": "promptwise_motion",
+        "api_id": "kling-3.0-motion-control",
+        "has_audio": False,
         "video_ref": True,
+        "durations": list(range(3, 31)),
+        "resolutions": ["720p", "1080p"],
+        "ratios": ["16:9", "9:16", "1:1"],
+        "desc": "Перенос движений с видео на персонажа с фото (3–30с, 720p/1080p)",
     },
-    "klingMotionControl26": {
-        "name": "Kling Motion Control 2.6",
-        "short": "🕺 2.6",
-        "category": "motion",
-        "backend": "davinci_motion",
-        "api_id": "klingMotionControl26",
-        "desc": "Motion Control 2.6: фото персонажа + видео с движением",
-        "video_ref": True,
-    },
-    # --- SEEDANCE MODELS (All replaced with DaVinci AI site versions) ---
-    "s2_5": {
+
+    # --- VIDEO MODELS (28 активных моделей PromptWise) ---
+    "seedance_2_5": {
         "name": "Seedance 2.5",
         "short": "✨ Seedance 2.5",
         "category": "video",
-        "backend": "davinci",
-        "api_id": "seedance25",
+        "backend": "promptwise",
+        "api_id": "seedance-2.5",
         "has_audio": True,
+        "audio_option_key": "generate_audio",
+        "audio_locked": False,
         "multi_ref": True,
-        "video_ref": True,
+        "omni_max_refs": 30,
         "ref_limit": 30,
-        "durations": list(range(1, 31)),
-        "desc": "Флагман Seedance 2.5 (до 30с, 1080p, звук и мульти-референсы)"
-    },
-    "s2_5_flash": {
-        "name": "Seedance 2.5 Flash",
-        "short": "⚡ 2.5 Flash",
-        "category": "video",
-        "backend": "davinci",
-        "api_id": "seedance25Flash",
-        "has_audio": True,
-        "multi_ref": True,
+        "supports_frames": ["start", "end"],
         "video_ref": True,
+        "audio_ref": True,
+        "durations": list(range(4, 31)),
+        "resolutions": ["480p", "720p", "1080p"],
+        "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
+        "desc": "Флагман Seedance 2.5: до 30с, 1080p, до 30 рефов, видео- и аудио-референсы",
+    },
+    "seedance_2_5_flash": {
+        "name": "Seedance 2.5 Flash",
+        "short": "⚡ Seed 2.5 Flash",
+        "category": "video",
+        "backend": "promptwise",
+        "api_id": "seedance-2.5-flash",
+        "has_audio": True,
+        "audio_option_key": "generate_audio",
+        "audio_locked": False,
+        "multi_ref": True,
+        "omni_max_refs": 10,
         "ref_limit": 10,
+        "supports_frames": ["start", "end"],
+        "video_ref": True,
+        "audio_ref": True,
         "durations": list(range(4, 31)),
         "resolutions": ["480p", "720p"],
-        "desc": "Быстрый Seedance 2.5 Flash (4–30с, 480p/720p, звук, до 10 фото и видео-референс)"
+        "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
+        "desc": "Быстрый Seedance 2.5 Flash: до 30с, 480p/720p, до 10 рефов, видео и аудио",
     },
-    "s2_pro": {
-        "name": "Seedance 2.0",
-        "short": "🎬 Seedance 2.0",
+    "seedance_2_0_pro": {
+        "name": "Seedance 2.0 Pro",
+        "short": "🎬 Seed 2.0 Pro",
         "category": "video",
-        "backend": "davinci",
-        "api_id": "seedance2",
+        "backend": "promptwise",
+        "api_id": "seedance-2.0-pro",
         "has_audio": True,
+        "audio_option_key": "generate_audio",
+        "audio_locked": False,
         "multi_ref": True,
-        "video_ref": True,
+        "omni_max_refs": 9,
         "ref_limit": 9,
-        "durations": list(range(1, 16)),
-        "desc": "Максимальное качество Seedance 2.0 со звуком и референсами (до 15с)"
+        "supports_frames": ["start", "end"],
+        "video_ref": True,
+        "audio_ref": True,
+        "durations": list(range(4, 16)),
+        "resolutions": ["480p", "720p", "1080p", "4k"],
+        "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
+        "desc": "Seedance 2.0 Pro: 4–15с, до 4K, 9 рефов, видео- и аудио-референсы",
     },
-    "s2_fast": {
+    "seedance_2_0_fast": {
         "name": "Seedance 2.0 Fast",
-        "short": "🚀 2.0 Fast",
+        "short": "🚀 Seed 2.0 Fast",
         "category": "video",
-        "backend": "davinci",
-        "api_id": "seedance2Fast",
+        "backend": "promptwise",
+        "api_id": "seedance-2.0-fast",
         "has_audio": True,
+        "audio_option_key": "generate_audio",
+        "audio_locked": False,
         "multi_ref": True,
-        "video_ref": True,
+        "omni_max_refs": 9,
         "ref_limit": 9,
+        "supports_frames": ["start", "end"],
+        "video_ref": True,
+        "audio_ref": True,
         "durations": list(range(4, 16)),
         "resolutions": ["480p", "720p"],
-        "desc": "Быстрая версия Seedance 2.0 со звуком, редактированием видео и референсами (4–15с, 480p/720p)"
+        "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
+        "desc": "Seedance 2.0 Fast: 4–15с, 480p/720p, 9 рефов, видео и аудио",
     },
-    "s2_mini": {
+    "seedance_2_0_mini": {
         "name": "Seedance 2.0 Mini",
-        "short": "⚡ 2.0 Mini",
+        "short": "⚡ Seed 2.0 Mini",
         "category": "video",
-        "backend": "davinci",
-        "api_id": "seedance2Mini",
+        "backend": "promptwise",
+        "api_id": "seedance-2.0-mini",
         "has_audio": True,
+        "audio_option_key": "generate_audio",
+        "audio_locked": False,
         "multi_ref": True,
-        "video_ref": True,
+        "omni_max_refs": 9,
         "ref_limit": 9,
-        "durations": list(range(1, 16)),
-        "desc": "Ультрабыстрая Seedance 2.0 Mini со звуком и референсами (до 15с)"
+        "supports_frames": ["start", "end"],
+        "video_ref": True,
+        "audio_ref": True,
+        "durations": list(range(4, 16)),
+        "resolutions": ["480p", "720p"],
+        "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
+        "desc": "Seedance 2.0 Mini: лёгкий рендер 4–15с, 480p/720p",
     },
-    "s1_5_pro": {
+    "seedance_1_5_pro": {
         "name": "Seedance 1.5 Pro",
-        "short": "🎞 Seedance 1.5",
+        "short": "🎞 Seed 1.5 Pro",
         "category": "video",
-        "backend": "davinci",
-        "api_id": "seedance",
+        "backend": "promptwise",
+        "api_id": "seedance-1.5-pro",
         "has_audio": True,
+        "audio_option_key": "generate_audio",
+        "audio_locked": False,
         "multi_ref": False,
+        "omni_max_refs": 0,
         "ref_limit": 1,
-        "durations": list(range(1, 13)),
-        "desc": "Классическая модель Seedance 1.5 Pro со звуком (до 12с)"
+        "supports_frames": ["start"],
+        "video_ref": False,
+        "audio_ref": False,
+        "durations": [4, 8, 12],
+        "resolutions": ["480p", "720p", "1080p"],
+        "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
+        "desc": "Seedance 1.5 Pro: 4/8/12с, до 1080p, старт-кадр и звук",
     },
-
-    # --- NEW VIDEO & AUDIO MODELS ---
-    "kling_4": {
+    "kling_4_0": {
         "name": "Kling 4.0",
         "short": "🎥 Kling 4.0",
         "category": "video",
-        "backend": "davinci",
-        "api_id": "kling4",
-        "has_audio": False,
+        "backend": "promptwise",
+        "api_id": "kling-4.0",
+        "has_audio": True,
+        "audio_option_key": "sound",
+        "audio_locked": True,
         "multi_ref": True,
-        "video_ref": True,
+        "omni_max_refs": 10,
         "ref_limit": 10,
-        "durations": list(range(1, 31)),
-        "desc": "Новейший Kling 4.0 (до 30с, 1080p, до 10 фото-референсов)"
-    },
-    "kling_4_flash": {
-        "name": "Kling 4.0 Flash",
-        "short": "⚡ Kling 4 Flash",
-        "category": "video",
-        "backend": "davinci",
-        "api_id": "kling4Flash",
-        "has_audio": True,
-        "multi_ref": True,
+        "supports_frames": ["start", "end"],
         "video_ref": True,
-        "ref_limit": 10,
-        "durations": list(range(1, 21)),
-        "desc": "Быстрый Kling 4.0 Flash со звуком и референсами (до 20с)"
+        "audio_ref": False,
+        "durations": list(range(3, 31)),
+        "resolutions": ["720p", "1080p"],
+        "ratios": ["16:9", "9:16", "1:1", "21:9"],
+        "desc": "Kling 4.0: до 30с, 720p/1080p, стерео-звук, до 10 рефов и видео-реф",
     },
-    "flux_3": {
-        "name": "Flux 3 Video",
-        "short": "🌊 Flux 3",
+    "kling_3_0_std": {
+        "name": "Kling 3.0 Std",
+        "short": "🎬 Kling 3 Std",
         "category": "video",
-        "backend": "davinci",
-        "api_id": "flux3",
+        "backend": "promptwise",
+        "api_id": "kling-3.0-std",
         "has_audio": True,
+        "audio_option_key": "sound",
+        "audio_locked": False,
         "multi_ref": False,
-        "ref_limit": 1,
-        "durations": list(range(1, 21)),
-        "desc": "Видео-модель Flux 3 (до 20с, высокая детализация + звук + референс)"
-    },
-    "flux_3_max": {
-        "name": "Flux 3 Max",
-        "short": "🔥 Flux 3 Max",
-        "category": "video",
-        "backend": "davinci",
-        "api_id": "flux3Max",
-        "has_audio": True,
-        "multi_ref": False,
-        "ref_limit": 1,
-        "durations": list(range(1, 21)),
-        "desc": "Топовая видео-модель Flux 3 Max со звуком и референсом (до 20с)"
-    },
-    "ltx_25_pro": {
-        "name": "LTX 2.5 Pro",
-        "short": "🎞 LTX 2.5 Pro",
-        "category": "video",
-        "backend": "davinci",
-        "api_id": "ltx25Pro",
-        "has_audio": True,
-        "multi_ref": False,
-        "ref_limit": 1,
-        "durations": list(range(1, 11)),
-        "desc": "Кинематографичная модель LTX 2.5 Pro со звуком и референсом (до 10с)"
-    },
-    "ltx_25_fast": {
-        "name": "LTX 2.5 Fast",
-        "short": "⚡ LTX 2.5 Fast",
-        "category": "video",
-        "backend": "davinci",
-        "api_id": "ltx25Fast",
-        "has_audio": True,
-        "multi_ref": False,
-        "ref_limit": 1,
-        "durations": list(range(1, 11)),
-        "desc": "Сверхбыстрая кинематографичная модель LTX 2.5 Fast со звуком (до 10с, от 1с)"
-    },
-    "gemini_omni_12": {
-        "name": "Gemini OmniFlash 1.2",
-        "short": "💎 Gemini Omni 1.2",
-        "category": "video",
-        "backend": "davinci",
-        "api_id": "geminiOmniFlash12",
-        "has_audio": False,
-        "multi_ref": True,
-        "video_ref": True,
-        "ref_limit": 10,
+        "omni_max_refs": 0,
+        "ref_limit": 2,
+        "supports_frames": ["start", "end"],
+        "video_ref": False,
+        "audio_ref": False,
         "durations": list(range(3, 16)),
-        "resolutions": ["360p", "720p", "1080p", "4k"],
-        "ratios": ["16:9", "9:16"],
-        "desc": "Google Gemini Omni Flash 1.2 (3–15с, 4K, видео- и фото-референсы)"
+        "resolutions": ["720p"],
+        "ratios": ["16:9", "9:16", "1:1"],
+        "desc": "Kling 3.0 Standard: 3–15с, 720p, старт/финиш кадр и звук",
     },
-    "gemini_omni_11": {
-        "name": "Gemini OmniFlash 1.1",
-        "short": "⚡ Gemini Omni 1.1",
+    "kling_3_0_pro": {
+        "name": "Kling 3.0 Pro",
+        "short": "🎥 Kling 3 Pro",
         "category": "video",
-        "backend": "davinci",
-        "api_id": "geminiOmniFlash11",
-        "has_audio": False,
+        "backend": "promptwise",
+        "api_id": "kling-3.0-pro",
+        "has_audio": True,
+        "audio_option_key": "sound",
+        "audio_locked": False,
+        "multi_ref": False,
+        "omni_max_refs": 0,
+        "ref_limit": 2,
+        "supports_frames": ["start", "end"],
+        "video_ref": False,
+        "audio_ref": False,
+        "durations": list(range(3, 16)),
+        "resolutions": ["1080p"],
+        "ratios": ["16:9", "9:16", "1:1"],
+        "desc": "Kling 3.0 Pro: 3–15с, 1080p, старт/финиш кадр и звук",
+    },
+    "kling_3_0_4k": {
+        "name": "Kling 3.0 4K",
+        "short": "🔥 Kling 3 4K",
+        "category": "video",
+        "backend": "promptwise",
+        "api_id": "kling-3.0-4k",
+        "has_audio": True,
+        "audio_option_key": "sound",
+        "audio_locked": False,
+        "multi_ref": False,
+        "omni_max_refs": 0,
+        "ref_limit": 2,
+        "supports_frames": ["start", "end"],
+        "video_ref": False,
+        "audio_ref": False,
+        "durations": list(range(3, 16)),
+        "resolutions": ["4k"],
+        "ratios": ["16:9", "9:16", "1:1"],
+        "desc": "Kling 3.0 4K: 3–15с в Ultra HD 4K со звуком",
+    },
+    "kling_3_0_turbo_std": {
+        "name": "Kling 3.0 Turbo",
+        "short": "⚡ Kling 3T",
+        "category": "video",
+        "backend": "promptwise",
+        "api_id": "kling-3.0-turbo-std",
+        "has_audio": True,
+        "audio_option_key": "sound",
+        "audio_locked": True,
+        "multi_ref": False,
+        "omni_max_refs": 0,
+        "ref_limit": 1,
+        "supports_frames": ["start"],
+        "video_ref": False,
+        "audio_ref": False,
+        "durations": list(range(3, 16)),
+        "resolutions": ["720p"],
+        "ratios": ["16:9", "9:16", "1:1"],
+        "desc": "Kling 3.0 Turbo Standard: быстрый рендер 3–15с, 720p",
+    },
+    "kling_3_0_turbo_pro": {
+        "name": "Kling 3.0 Turbo Pro",
+        "short": "⚡ Kling 3TP",
+        "category": "video",
+        "backend": "promptwise",
+        "api_id": "kling-3.0-turbo-pro",
+        "has_audio": True,
+        "audio_option_key": "sound",
+        "audio_locked": True,
+        "multi_ref": False,
+        "omni_max_refs": 0,
+        "ref_limit": 1,
+        "supports_frames": ["start"],
+        "video_ref": False,
+        "audio_ref": False,
+        "durations": list(range(3, 16)),
+        "resolutions": ["1080p"],
+        "ratios": ["16:9", "9:16", "1:1"],
+        "desc": "Kling 3.0 Turbo Pro: быстрый рендер 3–15с, 1080p",
+    },
+    "kling_v3_omni_std": {
+        "name": "Kling 3.0 Omni Std",
+        "short": "💎 Kling Omni",
+        "category": "video",
+        "backend": "promptwise",
+        "api_id": "kling-v3-omni-std",
+        "has_audio": True,
+        "audio_option_key": "sound",
+        "audio_locked": False,
         "multi_ref": True,
+        "omni_max_refs": 7,
+        "ref_limit": 7,
+        "supports_frames": ["start", "end"],
         "video_ref": True,
-        "ref_limit": 10,
-        "durations": list(range(1, 16)),
-        "resolutions": ["360p", "720p", "1080p", "4k"],
-        "ratios": ["16:9", "9:16"],
-        "desc": "Google Gemini Omni Flash 1.1 (1–15с, 4K, видео- и фото-референсы)"
+        "audio_ref": False,
+        "durations": list(range(3, 16)),
+        "resolutions": ["720p"],
+        "ratios": ["16:9", "9:16", "1:1"],
+        "desc": "Kling 3.0 Omni 720p: 3–15с, до 7 рефов и видео-реф",
+    },
+    "kling_v3_omni_pro": {
+        "name": "Kling 3.0 Omni Pro",
+        "short": "💎 K-Omni Pro",
+        "category": "video",
+        "backend": "promptwise",
+        "api_id": "kling-v3-omni-pro",
+        "has_audio": True,
+        "audio_option_key": "sound",
+        "audio_locked": False,
+        "multi_ref": True,
+        "omni_max_refs": 7,
+        "ref_limit": 7,
+        "supports_frames": ["start", "end"],
+        "video_ref": True,
+        "audio_ref": False,
+        "durations": list(range(3, 16)),
+        "resolutions": ["1080p"],
+        "ratios": ["16:9", "9:16", "1:1"],
+        "desc": "Kling 3.0 Omni 1080p: 3–15с, до 7 рефов и видео-реф",
+    },
+    "kling_v3_omni_4k": {
+        "name": "Kling 3.0 Omni 4K",
+        "short": "🔥 K-Omni 4K",
+        "category": "video",
+        "backend": "promptwise",
+        "api_id": "kling-v3-omni-4k",
+        "has_audio": True,
+        "audio_option_key": "sound",
+        "audio_locked": False,
+        "multi_ref": True,
+        "omni_max_refs": 7,
+        "ref_limit": 7,
+        "supports_frames": ["start", "end"],
+        "video_ref": True,
+        "audio_ref": False,
+        "durations": list(range(3, 16)),
+        "resolutions": ["4k"],
+        "ratios": ["16:9", "9:16", "1:1"],
+        "desc": "Kling 3.0 Omni 4K: 3–15с, Ultra HD 4K, до 7 рефов и видео-реф",
     },
     "veo_3_1": {
-        "name": "Google Veo 3.1",
+        "name": "Veo 3.1 Quality",
         "short": "🎬 Veo 3.1",
         "category": "video",
-        "backend": "davinci",
-        "api_id": "veo31",
+        "backend": "promptwise",
+        "api_id": "veo-3.1",
         "has_audio": True,
-        "multi_ref": True,
+        "audio_option_key": "generate_audio",
+        "audio_locked": True,
+        "multi_ref": False,
+        "omni_max_refs": 0,
+        "ref_limit": 2,
+        "supports_frames": ["start", "end"],
         "video_ref": False,
-        "ref_limit": 3,
+        "audio_ref": False,
         "durations": [4, 6, 8],
         "resolutions": ["720p", "1080p", "4k"],
         "ratios": ["16:9", "9:16"],
-        "desc": "Google Veo 3.1 (4/6/8с, до 4K, звук и до 3 фото-референсов)"
+        "desc": "Google Veo 3.1 Quality: 4/6/8с, 720p/1080p/4K со звуком",
     },
     "veo_3_1_fast": {
-        "name": "Google Veo 3.1 Fast",
-        "short": "⚡ Veo 3.1 Fast",
+        "name": "Veo 3.1 Fast",
+        "short": "⚡ Veo 3.1F",
         "category": "video",
-        "backend": "davinci",
-        "api_id": "veo31fast",
+        "backend": "promptwise",
+        "api_id": "veo-3.1-fast",
         "has_audio": True,
+        "audio_option_key": "generate_audio",
+        "audio_locked": True,
         "multi_ref": False,
+        "omni_max_refs": 0,
+        "ref_limit": 2,
+        "supports_frames": ["start", "end"],
         "video_ref": False,
-        "ref_limit": 1,
+        "audio_ref": False,
+        "durations": [4, 6, 8],
+        "resolutions": ["720p", "1080p", "4k"],
+        "ratios": ["16:9", "9:16"],
+        "desc": "Google Veo 3.1 Fast: 4/6/8с, 720p/1080p/4K со звуком",
+    },
+    "veo_3_1_lite": {
+        "name": "Veo 3.1 Lite",
+        "short": "🌿 Veo 3.1L",
+        "category": "video",
+        "backend": "promptwise",
+        "api_id": "veo-3.1-lite",
+        "has_audio": True,
+        "audio_option_key": "generate_audio",
+        "audio_locked": True,
+        "multi_ref": False,
+        "omni_max_refs": 0,
+        "ref_limit": 2,
+        "supports_frames": ["start", "end"],
+        "video_ref": False,
+        "audio_ref": False,
         "durations": [4, 6, 8],
         "resolutions": ["720p", "1080p"],
         "ratios": ["16:9", "9:16"],
-        "desc": "Google Veo 3.1 Fast (4/6/8с, быстрый рендер до 1080p + звук и старт-кадр)"
+        "desc": "Google Veo 3.1 Lite: лёгкий и быстрый 4/6/8с, 720p/1080p",
     },
-    "luma_dream_machine": {
-        "name": "Luma Dream Machine",
-        "short": "🌟 Luma Dream Machine",
+    "wan_3_0": {
+        "name": "Wan 3.0",
+        "short": "✨ Wan 3.0",
         "category": "video",
-        "backend": "davinci",
-        "api_id": "luma-dream-machine",
+        "backend": "promptwise",
+        "api_id": "wan-3.0",
         "has_audio": True,
+        "audio_option_key": "generate_audio",
+        "audio_locked": False,
         "multi_ref": True,
-        "video_ref": True,
-        "ref_limit": 5,
-        "durations": list(range(1, 16)),
-        "desc": "Luma Dream Machine: кино-реализм нового уровня Luma AI (до 15с, от 1с)"
-    },
-    "luma_ray_32": {
-        "name": "Luma Ray v3.2",
-        "short": "⚡ Luma Ray 3.2",
-        "category": "video",
-        "backend": "davinci",
-        "api_id": "luma-ray-3-2",
-        "has_audio": True,
-        "multi_ref": True,
-        "video_ref": True,
-        "ref_limit": 5,
-        "durations": list(range(1, 16)),
-        "desc": "Luma Ray v3.2: следующее поколение AI видео Luma Ray со звуком (до 15с, от 1с)"
+        "omni_max_refs": 10,
+        "ref_limit": 10,
+        "supports_frames": ["start", "end"],
+        "video_ref": False,
+        "audio_ref": False,
+        "durations": list(range(2, 31)),
+        "resolutions": ["480p", "720p", "1080p"],
+        "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4"],
+        "desc": "Wan 3.0: 2–30с, 480p/720p/1080p, до 10 рефов и звук",
     },
     "minimax_h3": {
         "name": "MiniMax H3",
         "short": "⚡ MiniMax H3",
         "category": "video",
-        "backend": "davinci",
-        "api_id": "minimaxH3",
-        "has_audio": False,
+        "backend": "promptwise",
+        "api_id": "minimax-h3",
+        "has_audio": True,
+        "audio_option_key": "generate_audio",
+        "audio_locked": True,
         "multi_ref": True,
+        "omni_max_refs": 5,
+        "ref_limit": 5,
+        "supports_frames": ["start", "end"],
         "video_ref": True,
-        "ref_limit": 9,
-        "durations": list(range(1, 16)),
-        "desc": "Флагман MiniMax H3 (до 15с, 2K/768p, мульти-референсы до 9 фото, от 1с!)"
+        "audio_ref": True,
+        "durations": list(range(4, 16)),
+        "resolutions": ["768p", "2k"],
+        "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
+        "desc": "MiniMax H3: 4–15с, 768p/2K, нативное стерео-аудио, видео и аудио рефы",
     },
-    "minimax_hailuo": {
-        "name": "MiniMax Hailuo 2.3",
+    "hailuo_pro": {
+        "name": "Hailuo 2.3 Pro",
         "short": "🌊 Hailuo 2.3",
         "category": "video",
-        "backend": "davinci",
-        "api_id": "minimax-hailuo-2-3",
+        "backend": "promptwise",
+        "api_id": "hailuo-pro",
         "has_audio": False,
+        "audio_option_key": None,
+        "audio_locked": False,
         "multi_ref": False,
-        "video_ref": False,
+        "omni_max_refs": 0,
         "ref_limit": 1,
-        "durations": [5, 6, 10],
-        "desc": "MiniMax Hailuo 2.3 (до 10с, 1080p, реалистичная физика движений)"
-    },
-    "pixverse_v6": {
-        "name": "PixVerse V6",
-        "short": "🎬 PixVerse V6",
-        "category": "video",
-        "backend": "davinci",
-        "api_id": "pixversev6",
-        "has_audio": True,
-        "multi_ref": False,
+        "supports_frames": ["start"],
         "video_ref": False,
-        "ref_limit": 1,
-        "durations": [5, 8, 10, 15],
-        "desc": "PixVerse V6 (кинематографичный рендер до 15с, звук, спецэффекты)"
+        "audio_ref": False,
+        "durations": [6],
+        "resolutions": ["1080p"],
+        "ratios": [],
+        "desc": "Hailuo 2.3 Pro: кинематографичное видео 6с в 1080p",
     },
-    "wan_2_6": {
-        "name": "Wan 2.6",
-        "short": "✨ Wan 2.6",
-        "category": "video",
-        "backend": "davinci",
-        "api_id": "wan26",
-        "has_audio": True,
-        "multi_ref": True,
-        "video_ref": True,
-        "ref_limit": 10,
-        "durations": list(range(1, 31)),
-        "desc": "Alibaba Wan 2.6 (кинематографичная физика, мульти-референсы до 10 фото, звук, от 1с)"
-    },
-    "wan_3_prime": {
-        "name": "Wan 3.0 Prime",
-        "short": "✨ Wan 3 Prime",
-        "category": "video",
-        "backend": "davinci",
-        "api_id": "wan30Prime",
-        "has_audio": True,
-        "multi_ref": True,
-        "video_ref": True,
-        "ref_limit": 10,
-        "durations": list(range(1, 31)),
-        "desc": "Alibaba Wan 3.0 Prime (до 30с, мульти-референсы до 10 фото, звук, от 1с)"
-    },
-    "runway_alpha": {
-        "name": "Runway Alpha 2.0",
-        "short": "🎬 Runway Alpha 2.0",
-        "category": "video",
-        "backend": "davinci",
-        "api_id": "runway-aleph",
-        "has_audio": True,
-        "multi_ref": True,
-        "video_ref": True,
-        "ref_limit": 5,
-        "durations": list(range(1, 21)),
-        "desc": "Runway Alpha 2.0 (Aleph): кинематографичный рендер Runway с сайта DaVinci (от 1с)"
-    },
-    "pika_2_2": {
-        "name": "Pika 2.2",
-        "short": "⚡ Pika 2.2",
-        "category": "video",
-        "backend": "davinci",
-        "api_id": "pika22",
-        "has_audio": False,
-        "multi_ref": False,
-        "video_ref": False,
-        "ref_limit": 1,
-        "durations": [5, 10],
-        "desc": "Pika 2.2 (быстрое видео до 10с, 1080p, визуальные эффекты)"
-    },
-    "elevenlabs": {
-        "name": "ElevenLabs V3",
-        "short": "🎙 ElevenLabs",
-        "hidden": True,  # скрыт из сетки Видео /model; вынесен во вкладку «Голос»
-        "category": "video",  # остаётся "video" ради web.py/истории; в боте голос вынесен во вкладку «Голос»
-        "backend": "davinci_voice",
-        "api_id": "eleven-v3",
-        "has_audio": True,
-        "multi_ref": True,
-        "ref_limit": 5,
-        "desc": "ElevenLabs V3: текст в речь (TTS) и переозвучка голоса"
-    },
-    "lyria_3_pro": {
-        "name": "Google Lyria 3 Pro",
-        "short": "🎵 Lyria 3 Pro",
-        "hidden": True,  # скрыт из сетки Видео /model; вынесен во вкладку «Музыка»
-        "category": "music",
-        "backend": "davinci_music",
-        "api_id": "googleLyria3Pro",
-        "has_audio": True,
-        "multi_ref": False,
-        "ref_limit": 0,
-        "durations": [120, 180],
-        "desc": "Google Lyria 3 Pro: студийные песни и музыка (2–3 мин, вокал или инструментал)"
-    },
-
-    # --- EXISTING GROK & MINIMAX VIDEO MODELS ---
-    "grok": {
-        "name": "Grok Imagine",
-        "short": "🌌 Grok Imagine",
-        "category": "video",
-        "backend": "davinci",
-        "api_id": "grok",
-        "has_audio": True,
-        "multi_ref": True,
-        "video_ref": True,
-        "ref_limit": 5,
-        "durations": list(range(1, 16)),
-        "desc": "xAI Grok Imagine: сверхбыстрая генерация видео со звуком с сайта DaVinci (от 1с)"
-    },
-    "grok_15": {
+    "grok_video": {
         "name": "Grok Imagine 1.5",
-        "short": "🔮 Grok 1.5",
+        "short": "🌌 Grok 1.5",
         "category": "video",
-        "backend": "grok",
-        "channel": "console",
-        "has_audio": False,
-        "multi_ref": False,
-        "ref_limit": 1,
-        "durations": [5, 8, 10],
-        "desc": "xAI Grok Video 1.5 (Console канал)"
-    },
-    "minimax_hero": {
-        "name": "MiniMax H3 (Hero)",
-        "short": "🎬 MiniMax Hero",
-        "category": "video",
-        "backend": "minimax",
-        "style": "minimalist-hero",
+        "backend": "promptwise",
+        "api_id": "grok-video",
         "has_audio": True,
-        "multi_ref": False,
-        "ref_limit": 1,
-        "durations": [15],
-        "desc": "MiniMax H3: 15-сек коммерческое видео со звуком"
+        "audio_option_key": "generate_audio",
+        "audio_locked": True,
+        "multi_ref": True,
+        "omni_max_refs": 7,
+        "ref_limit": 7,
+        "supports_frames": ["start"],
+        "video_ref": False,
+        "audio_ref": False,
+        "durations": list(range(1, 16)),
+        "resolutions": ["480p", "720p"],
+        "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3"],
+        "desc": "xAI Grok Imagine 1.5: 1–15с, 480p/720p, звук и до 7 рефов",
     },
-    "minimax_cinema": {
-        "name": "MiniMax H3 (Cinema)",
-        "short": "🎥 MiniMax Cinema",
+    "flux_3_video": {
+        "name": "Flux 3 Video",
+        "short": "🌊 Flux 3",
         "category": "video",
-        "backend": "minimax",
-        "style": "cinematic-lifestyle",
+        "backend": "promptwise",
+        "api_id": "flux-3-video",
         "has_audio": True,
+        "audio_option_key": "generate_audio",
+        "audio_locked": False,
         "multi_ref": False,
-        "ref_limit": 1,
-        "durations": [15],
-        "desc": "MiniMax H3: Кинематографичный лайфстайл со звуком"
+        "omni_max_refs": 0,
+        "ref_limit": 2,
+        "supports_frames": ["start", "end"],
+        "video_ref": False,
+        "audio_ref": False,
+        "durations": list(range(5, 21)),
+        "resolutions": ["720p", "1080p"],
+        "ratios": ["auto", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "2:1"],
+        "desc": "Flux 3 Video: 5–20с, 720p/1080p, звук и старт/финиш кадр",
     },
-    "minimax_macro": {
-        "name": "MiniMax H3 (Macro)",
-        "short": "🔍 MiniMax Macro",
+    "flux_3_max": {
+        "name": "Flux 3 Max",
+        "short": "🔥 Flux 3 Max",
         "category": "video",
-        "backend": "minimax",
-        "style": "macro-detail",
+        "backend": "promptwise",
+        "api_id": "flux-3-max",
         "has_audio": True,
+        "audio_option_key": "generate_audio",
+        "audio_locked": False,
         "multi_ref": False,
-        "ref_limit": 1,
-        "durations": [15],
-        "desc": "MiniMax H3: Макросъемка текстур и деталей со звуком"
+        "omni_max_refs": 0,
+        "ref_limit": 2,
+        "supports_frames": ["start", "end"],
+        "video_ref": False,
+        "audio_ref": False,
+        "durations": list(range(5, 21)),
+        "resolutions": ["720p", "1080p"],
+        "ratios": ["auto", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "2:1"],
+        "desc": "Flux 3 Max: максимальная детализация 5–20с, 720p/1080p",
+    },
+    "ltx_2_3": {
+        "name": "LTX 2.3",
+        "short": "🎞 LTX 2.3",
+        "category": "video",
+        "backend": "promptwise",
+        "api_id": "ltx-2.3",
+        "has_audio": True,
+        "audio_option_key": "generate_audio",
+        "audio_locked": False,
+        "multi_ref": False,
+        "omni_max_refs": 0,
+        "ref_limit": 2,
+        "supports_frames": ["start", "end"],
+        "video_ref": False,
+        "audio_ref": False,
+        "durations": [4, 6, 8, 10],
+        "resolutions": ["720p", "1080p"],
+        "ratios": ["16:9", "9:16", "1:1"],
+        "desc": "LTX 2.3: 4/6/8/10с, 720p/1080p со звуком",
+    },
+    "gemini_omni_1_2_flash": {
+        "name": "Gemini Omni 1.2",
+        "short": "💎 Omni 1.2",
+        "category": "video",
+        "backend": "promptwise",
+        "api_id": "gemini-omni-1.2-flash",
+        "has_audio": True,
+        "audio_option_key": "generate_audio",
+        "audio_locked": True,
+        "multi_ref": True,
+        "omni_max_refs": 10,
+        "ref_limit": 10,
+        "supports_frames": ["start", "end"],
+        "video_ref": True,
+        "audio_ref": False,
+        "durations": list(range(3, 16)),
+        "resolutions": ["720p", "1080p", "4k"],
+        "ratios": ["16:9", "9:16"],
+        "desc": "Gemini Omni Flash 1.2: 3–15с, до 4K, 10 рефов и видео-реф",
+    },
+    "gemini_omni_1_1_flash": {
+        "name": "Gemini Omni 1.1",
+        "short": "⚡ Omni 1.1",
+        "category": "video",
+        "backend": "promptwise",
+        "api_id": "gemini-omni-1.1-flash",
+        "has_audio": True,
+        "audio_option_key": "generate_audio",
+        "audio_locked": True,
+        "multi_ref": True,
+        "omni_max_refs": 10,
+        "ref_limit": 10,
+        "supports_frames": [],
+        "video_ref": True,
+        "audio_ref": False,
+        "durations": list(range(3, 11)),
+        "resolutions": ["720p"],
+        "ratios": ["16:9", "9:16"],
+        "desc": "Gemini Omni Flash 1.1: 3–10с, 720p, до 10 рефов и видео-реф",
+    },
+    "gemini_omni_flash": {
+        "name": "Gemini Omni Flash",
+        "short": "✨ Omni Flash",
+        "category": "video",
+        "backend": "promptwise",
+        "api_id": "gemini-omni-flash",
+        "has_audio": True,
+        "audio_option_key": "generate_audio",
+        "audio_locked": True,
+        "multi_ref": True,
+        "omni_max_refs": 10,
+        "ref_limit": 10,
+        "supports_frames": [],
+        "video_ref": True,
+        "audio_ref": False,
+        "durations": list(range(3, 11)),
+        "resolutions": ["720p"],
+        "ratios": ["16:9", "9:16"],
+        "desc": "Gemini Omni Flash Preview: 3–10с, 720p, до 10 рефов",
     },
 
-    # --- IMAGE GENERATION MODELS (Dedicated Image Menu) ---
-    "nano_banana_2_1": {
-        "name": "Nano Banana 2.1",
-        "short": "🍌 Nano Banana 2.1",
-        "category": "image",
-        "backend": "davinci_image",
-        "api_id": "NANO_BANANA_2_1",
-        "multi_ref": True,
-        "ref_limit": 14,
-        "desc": "Новейшая фото-модель Nano Banana 2.1 (до 4K и до 14 референсов)"
-    },
+    # --- IMAGE MODELS (19 активных моделей PromptWise) ---
     "nano_banana_pro": {
         "name": "Nano Banana Pro",
-        "short": "🍌 Nano Banana Pro",
+        "short": "🍌 Banana Pro",
         "category": "image",
-        "backend": "davinci_image",
-        "api_id": "NANO_BANANA_2",
+        "backend": "promptwise_image",
+        "api_id": "nano-banana-pro",
+        "res_axis": "imageSize",
+        "resolutions": ["1K", "2K", "4K"],
+        "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4", "21:9"],
         "multi_ref": True,
-        "ref_limit": 12,
-        "desc": "Профессиональная фото-модель Nano Banana Pro (до 12 референсов)"
+        "ref_limit": 8,
+        "desc": "Google Nano Banana Pro: фото до 4K, до 8 референсов",
     },
-    "nano_banana": {
-        "name": "Nano Banana",
-        "short": "🍌 Nano Banana",
+    "nano_banana_2": {
+        "name": "Nano Banana 2",
+        "short": "🍌 Banana 2",
         "category": "image",
-        "backend": "davinci_image",
-        "api_id": "NANO_BANANA",
+        "backend": "promptwise_image",
+        "api_id": "nano-banana-2",
+        "res_axis": "imageSize",
+        "resolutions": ["1K", "2K", "4K"],
+        "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4", "21:9"],
         "multi_ref": True,
-        "ref_limit": 4,
-        "desc": "Быстрая генерация и редактирование фото Nano Banana (до 4 референсов)"
+        "ref_limit": 8,
+        "desc": "Google Nano Banana 2: до 4K, до 8 референсов",
     },
-    "flux_3_img": {
-        "name": "Flux 3 Image",
-        "short": "🎨 Flux 3 Image",
+    "nano_banana_2_lite": {
+        "name": "Nano Banana 2 Lite",
+        "short": "🍌 Banana Lite",
         "category": "image",
-        "backend": "davinci_image",
-        "api_id": "FLUX_3",
+        "backend": "promptwise_image",
+        "api_id": "nano-banana-2-lite",
+        "res_axis": "imageSize",
+        "resolutions": ["1K"],
+        "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4", "21:9"],
+        "multi_ref": True,
+        "ref_limit": 8,
+        "desc": "Google Nano Banana 2 Lite: сверхбыстрая генерация 1K",
+    },
+    "gpt_image_2_6_flare": {
+        "name": "GPT Image 2.6 Flare",
+        "short": "✨ GPT 2.6F",
+        "category": "image",
+        "backend": "promptwise_image",
+        "api_id": "gpt-image-2.6-flare",
+        "res_axis": "resolution",
+        "resolutions": ["1K", "2K", "4K"],
+        "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4", "21:9"],
+        "default_opts": {"quality": "high", "complexity": "high", "background": "auto"},
+        "multi_ref": True,
+        "ref_limit": 16,
+        "desc": "GPT Image 2.6 Flare: до 4K, до 16 референсов",
+    },
+    "gpt_image_2_6_sunburst": {
+        "name": "GPT Image 2.6 Sunburst",
+        "short": "☀️ GPT 2.6S",
+        "category": "image",
+        "backend": "promptwise_image",
+        "api_id": "gpt-image-2.6-sunburst",
+        "res_axis": "resolution",
+        "resolutions": ["1K", "2K", "4K"],
+        "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4", "21:9"],
+        "default_opts": {"quality": "high", "complexity": "high", "background": "auto"},
+        "multi_ref": True,
+        "ref_limit": 16,
+        "desc": "GPT Image 2.6 Sunburst: до 4K, до 16 референсов",
+    },
+    "gpt_image_2_5_flare": {
+        "name": "GPT Image 2.5 Flare",
+        "short": "✨ GPT 2.5F",
+        "category": "image",
+        "backend": "promptwise_image",
+        "api_id": "gpt-image-2.5-flare",
+        "res_axis": "resolution",
+        "resolutions": ["1K", "2K", "4K"],
+        "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4", "21:9"],
+        "default_opts": {"quality": "high"},
+        "multi_ref": True,
+        "ref_limit": 16,
+        "desc": "GPT Image 2.5 Flare: до 4K, до 16 референсов",
+    },
+    "gpt_image_2_5_sunburst": {
+        "name": "GPT Image 2.5 Sunburst",
+        "short": "☀️ GPT 2.5S",
+        "category": "image",
+        "backend": "promptwise_image",
+        "api_id": "gpt-image-2.5-sunburst",
+        "res_axis": "resolution",
+        "resolutions": ["1K", "2K", "4K"],
+        "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4", "21:9"],
+        "default_opts": {"quality": "high"},
+        "multi_ref": True,
+        "ref_limit": 16,
+        "desc": "GPT Image 2.5 Sunburst: до 4K, до 16 референсов",
+    },
+    "gpt_image_2": {
+        "name": "GPT Image 2.0",
+        "short": "🎨 GPT 2.0",
+        "category": "image",
+        "backend": "promptwise_image",
+        "api_id": "gpt-image-2",
+        "res_axis": "resolution",
+        "resolutions": ["1K", "2K", "4K"],
+        "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4", "21:9"],
+        "default_opts": {"quality": "high"},
+        "multi_ref": True,
+        "ref_limit": 8,
+        "desc": "GPT Image 2.0: до 4K, до 8 референсов",
+    },
+    "gpt_image_1_5": {
+        "name": "GPT Image 1.5",
+        "short": "🖼 GPT 1.5",
+        "category": "image",
+        "backend": "promptwise_image",
+        "api_id": "gpt-image-1.5",
+        "res_axis": None,
+        "resolutions": ["1K"],
+        "ratios": ["1:1", "2:3", "3:2"],
+        "default_opts": {"quality": "high"},
+        "multi_ref": True,
+        "ref_limit": 8,
+        "desc": "GPT Image 1.5: быстрая генерация, до 8 референсов",
+    },
+    "kling_image_4_0": {
+        "name": "Kling Image 4.0",
+        "short": "🔥 Kling Img 4",
+        "category": "image",
+        "backend": "promptwise_image",
+        "api_id": "kling-image-4.0",
+        "res_axis": "resolution",
+        "resolutions": ["2K", "4K"],
+        "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
         "multi_ref": True,
         "ref_limit": 10,
-        "resolutions": ["1K", "2K", "4K"],
-        "desc": "Фотореалистичная генерация изображений Flux 3 (до 4K, 10 референсов)"
-    },
-    "flux_3_klein": {
-        "name": "Flux 3 Klein",
-        "short": "✨ Flux 3 Klein",
-        "category": "image",
-        "backend": "davinci_image",
-        "api_id": "FLUX_3_KLEIN",
-        "multi_ref": True,
-        "ref_limit": 10,
-        "resolutions": ["1K", "2K", "4K"],
-        "desc": "Быстрая художественная модель Flux 3 Klein с поддержкой референсов"
-    },
-    "flux_2": {
-        "name": "Flux 2",
-        "short": "🎨 Flux 2",
-        "category": "image",
-        "backend": "davinci_image",
-        "api_id": "FLUX_2",
-        "multi_ref": True,
-        "ref_limit": 4,
-        "resolutions": ["0.5K", "1K", "2K"],
-        "desc": "Black Forest Labs Flux 2 (точный контроль, 0.5K–2K, до 4 референсов)"
-    },
-    "flux_2_turbo": {
-        "name": "Flux 2 Turbo",
-        "short": "⚡ Flux 2 Turbo",
-        "category": "image",
-        "backend": "davinci_image",
-        "api_id": "FLUX_2_TURBO",
-        "multi_ref": True,
-        "ref_limit": 4,
-        "resolutions": ["0.5K", "1K", "2K"],
-        "desc": "Ускоренный Flux 2 Turbo (0.5K–2K, до 4 референсов)"
+        "desc": "Kling Image 4.0: 2K/4K, до 10 референсов",
     },
     "seedream_5_5": {
         "name": "Seedream 5.5",
         "short": "🌊 Seedream 5.5",
         "category": "image",
-        "backend": "davinci_image",
-        "api_id": "SEEDREAM_5_5",
+        "backend": "promptwise_image",
+        "api_id": "seedream-5.5",
+        "res_axis": "image_size",
+        "resolutions": ["1K", "1.5K", "2K"],
+        "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+        "default_opts": {"background": "auto"},
         "multi_ref": True,
         "ref_limit": 10,
-        "resolutions": ["1K", "2K"],
-        "desc": "Новейшая фото-модель ByteDance Seedream 5.5 (1K–2K, до 10 референсов)"
+        "desc": "ByteDance Seedream 5.5: 1K/1.5K/2K, до 10 референсов",
     },
     "seedream_5_pro": {
         "name": "Seedream 5.0 Pro",
-        "short": "💎 Seedream 5.0 Pro",
+        "short": "💎 Seedream 5P",
         "category": "image",
-        "backend": "davinci_image",
-        "api_id": "SEEDREAM_5_PRO",
+        "backend": "promptwise_image",
+        "api_id": "seedream-5-pro",
+        "res_axis": "image_size",
+        "resolutions": ["1K", "2K"],
+        "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
         "multi_ref": True,
         "ref_limit": 10,
-        "resolutions": ["1K", "2K"],
-        "desc": "ByteDance Seedream 5.0 Pro (премиум детализация и точное редактирование, до 10 референсов)"
-    },
-    "seedream_5_flash": {
-        "name": "Seedream 5.0 Flash",
-        "short": "⚡ Seedream 5.0 Flash",
-        "category": "image",
-        "backend": "davinci_image",
-        "api_id": "SEEDREAM_5_FLASH",
-        "multi_ref": True,
-        "ref_limit": 10,
-        "resolutions": ["1K", "2K"],
-        "desc": "Быстрая фото-модель ByteDance Seedream 5.0 Flash (1K–2K, до 10 референсов)"
+        "desc": "Seedream 5.0 Pro: 1K/2K, до 10 референсов",
     },
     "seedream_5_lite": {
         "name": "Seedream 5.0 Lite",
-        "short": "🌿 Seedream 5.0 Lite",
+        "short": "🌿 Seedream 5L",
         "category": "image",
-        "backend": "davinci_image",
-        "api_id": "SEEDREAM_5_LITE",
+        "backend": "promptwise_image",
+        "api_id": "seedream-5-lite",
+        "res_axis": "image_size",
+        "resolutions": ["2K", "3K", "4K"],
+        "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
         "multi_ref": True,
         "ref_limit": 10,
-        "resolutions": ["2K", "4K"],
-        "desc": "Лёгкая модель ByteDance Seedream 5.0 Lite (2K–4K, до 10 референсов)"
+        "desc": "Seedream 5.0 Lite: 2K/3K/4K, до 10 референсов",
     },
-    "seedream_45": {
+    "seedream_4_5": {
         "name": "Seedream 4.5",
         "short": "✨ Seedream 4.5",
         "category": "image",
-        "backend": "davinci_image",
-        "api_id": "SEEDREAM_45",
+        "backend": "promptwise_image",
+        "api_id": "seedream-4.5",
+        "res_axis": "image_size",
+        "resolutions": ["2K", "4K"],
+        "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
         "multi_ref": True,
         "ref_limit": 10,
-        "resolutions": ["2K", "4K"],
-        "desc": "ByteDance Seedream 4.5 (улучшенная эстетика, 2K–4K, до 10 референсов)"
+        "desc": "Seedream 4.5: 2K/4K, до 10 референсов",
     },
-    "seedream_4": {
+    "seedream": {
         "name": "Seedream 4.0",
         "short": "🎨 Seedream 4.0",
         "category": "image",
-        "backend": "davinci_image",
-        "api_id": "SEEDREAM",
-        "multi_ref": True,
-        "ref_limit": 10,
+        "backend": "promptwise_image",
+        "api_id": "seedream",
+        "res_axis": "image_size",
         "resolutions": ["1K", "2K", "4K"],
-        "desc": "Классическая ByteDance Seedream 4.0 (1K–4K, до 10 референсов)"
+        "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+        "multi_ref": True,
+        "ref_limit": 8,
+        "desc": "Seedream 4.0: 1K/2K/4K, до 8 референсов",
     },
-    "qwen_image_3": {
-        "name": "Qwen Image 3.0",
-        "short": "🖼 Qwen Image 3.0",
+    "flux_2_pro": {
+        "name": "Flux.2 Pro",
+        "short": "🎨 Flux.2 Pro",
         "category": "image",
-        "backend": "davinci_image",
-        "api_id": "QWEN_IMAGE_3",
+        "backend": "promptwise_image",
+        "api_id": "flux-2-pro",
+        "res_axis": "resolution",
+        "resolutions": ["1K", "2K"],
+        "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+        "multi_ref": True,
+        "ref_limit": 8,
+        "desc": "Flux.2 Pro: фотореализм 1K/2K, до 8 референсов",
+    },
+    "ideogram_v4_5": {
+        "name": "Ideogram 4.5",
+        "short": "🪧 Ideogram 4.5",
+        "category": "image",
+        "backend": "promptwise_image",
+        "api_id": "ideogram-v4.5",
+        "res_axis": "resolution",
+        "resolutions": ["1K", "2K"],
+        "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"],
+        "default_opts": {"quality": "medium"},
+        "multi_ref": True,
+        "ref_limit": 5,
+        "desc": "Ideogram 4.5: идеальная типографика и постеры 1K/2K",
+    },
+    "grok_image": {
+        "name": "Grok Image",
+        "short": "🌌 Grok Image",
+        "category": "image",
+        "backend": "promptwise_image",
+        "api_id": "grok-image",
+        "res_axis": "resolution",
+        "resolutions": ["1K", "2K"],
+        "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+        "default_opts": {"quality": "quality", "outputFormat": "jpeg"},
         "multi_ref": True,
         "ref_limit": 3,
-        "resolutions": ["1K", "2K"],
-        "desc": "Qwen Image 3.0 (точная генерация текста и сцен по референсам)"
+        "desc": "xAI Grok Image: 1K/2K, до 3 референсов",
     },
-    "gpt_image_2_6_sunburst": {
-        "name": "GPT Image 2.6 Sunburst",
-        "short": "☀️ GPT 2.6 Sunburst",
+    "realism_pro": {
+        "name": "Realism Pro",
+        "short": "📷 Realism Pro",
         "category": "image",
-        "backend": "davinci_image",
-        "api_id": "GPT_IMAGE_2_6_SUNBURST",
-        "multi_ref": True,
-        "ref_limit": 10,
-        "resolutions": ["1K", "2K"],
-        "desc": "Новейшая модель OpenAI GPT Image 2.6 Sunburst с референсами (1 кредит)"
-    },
-    "gpt_image_2_6_flare": {
-        "name": "GPT Image 2.6 Flare",
-        "short": "✨ GPT 2.6 Flare",
-        "category": "image",
-        "backend": "davinci_image",
-        "api_id": "GPT_IMAGE_2_6_FLARE",
-        "multi_ref": True,
-        "ref_limit": 10,
-        "resolutions": ["1K", "2K"],
-        "desc": "Новейшая модель OpenAI GPT Image 2.6 Flare с референсами (1 кредит)"
-    },
-    "qwen_image": {
-        "name": "Qwen 3.0 Pro (Постер)",
-        "short": "🪧 Qwen Постер",
-        "category": "image",
-        "backend": "qwen_image",
-        "api_id": "qwen-image-3.0-pro",
+        "backend": "promptwise_image",
+        "api_id": "realism-pro",
+        "res_axis": "resolution",
+        "resolutions": ["720p", "1080p"],
+        "ratios": ["4:3", "16:9", "9:16", "3:4", "1:1", "2:3", "3:2"],
         "multi_ref": False,
-        "ref_limit": 1,
-        "desc": "Qwen Image 3.0 Pro: генерация коммерческих постеров по фото/тексту"
+        "ref_limit": 0,
+        "desc": "Realism Pro: гиперреалистичные фото 720p/1080p",
+    },
+
+    # --- VOICE MODELS (6 активных моделей во вкладке «Голос») ---
+    "eleven_v4": {
+        "name": "ElevenLabs V4",
+        "short": "🎙 Eleven V4",
+        "hidden": True,
+        "category": "voice",
+        "backend": "promptwise_voice",
+        "api_id": "eleven-v4",
+        "provider": "elevenlabs",
+        "audio_type": "tts",
+        "fixed_speed": True,
+        "has_audio": True,
+        "desc": "ElevenLabs V4: выразительная озвучка с аудио-тегами",
+    },
+    "eleven_v4_turbo": {
+        "name": "ElevenLabs V4 Turbo",
+        "short": "⚡ Eleven V4T",
+        "hidden": True,
+        "category": "voice",
+        "backend": "promptwise_voice",
+        "api_id": "eleven-v4-turbo",
+        "provider": "elevenlabs",
+        "audio_type": "tts",
+        "fixed_speed": True,
+        "has_audio": True,
+        "desc": "ElevenLabs V4 Turbo: быстрая озвучка V4",
+    },
+    "eleven_turbo_v2_5": {
+        "name": "ElevenLabs Turbo V2.5",
+        "short": "⚡ Turbo V2.5",
+        "hidden": True,
+        "category": "voice",
+        "backend": "promptwise_voice",
+        "api_id": "eleven-turbo-v2-5",
+        "provider": "elevenlabs",
+        "audio_type": "tts",
+        "fixed_speed": False,
+        "has_audio": True,
+        "desc": "ElevenLabs Turbo V2.5: быстрая потоковая озвучка",
+    },
+    "eleven_multilingual_v2": {
+        "name": "ElevenLabs Multilingual V2",
+        "short": "🌐 Multi V2",
+        "hidden": True,
+        "category": "voice",
+        "backend": "promptwise_voice",
+        "api_id": "eleven-multilingual-v2",
+        "provider": "elevenlabs",
+        "audio_type": "tts",
+        "fixed_speed": False,
+        "has_audio": True,
+        "desc": "ElevenLabs Multilingual V2: мультиязычная речь",
+    },
+    "eleven_flash_v2_5": {
+        "name": "ElevenLabs Flash",
+        "short": "⚡ Flash V2.5",
+        "hidden": True,
+        "category": "voice",
+        "backend": "promptwise_voice",
+        "api_id": "eleven-flash-v2-5",
+        "provider": "elevenlabs",
+        "audio_type": "tts",
+        "fixed_speed": False,
+        "has_audio": True,
+        "desc": "ElevenLabs Flash V2.5: самая быстрая озвучка",
+    },
+    "seed_audio_speech": {
+        "name": "Seed Audio 1.0 Speech",
+        "short": "🗣 Seed Speech",
+        "hidden": True,
+        "category": "voice",
+        "backend": "promptwise_voice",
+        "api_id": "seed-audio-1.0-speech",
+        "provider": "bytedance-voice",
+        "audio_type": "tts",
+        "fixed_speed": True,
+        "has_audio": True,
+        "desc": "ByteDance Seed Audio 1.0: озвучка и диалоги по тексту",
+    },
+
+    # --- MUSIC & SFX MODELS (4 активные модели во вкладке «Музыка») ---
+    "seed_audio_music": {
+        "name": "Seed Audio 1.0 Music",
+        "short": "🎵 Seed Music",
+        "hidden": True,
+        "category": "music",
+        "backend": "promptwise_audio",
+        "api_id": "seed-audio-1.0-music",
+        "provider": "bytedance-voice",
+        "audio_type": "music",
+        "durations": [15, 30, 60, 90, 120],
+        "has_audio": True,
+        "desc": "ByteDance Seed Audio 1.0 Music: треки по описанию (до 2 мин)",
+    },
+    "cassette_music": {
+        "name": "CassetteAI Music",
+        "short": "📼 CassetteAI",
+        "hidden": True,
+        "category": "music",
+        "backend": "promptwise_audio",
+        "api_id": "cassette-music",
+        "provider": "fal-cassetteai",
+        "audio_type": "music",
+        "durations": [15, 30, 45, 60],
+        "has_audio": True,
+        "desc": "CassetteAI Music: генерация музыки (10–60с)",
+    },
+    "eleven_sfx": {
+        "name": "ElevenLabs SFX",
+        "short": "🔊 Eleven SFX",
+        "hidden": True,
+        "category": "music",
+        "backend": "promptwise_audio",
+        "api_id": "eleven-sfx",
+        "provider": "elevenlabs",
+        "audio_type": "sfx",
+        "durations": [5, 10, 15, 30],
+        "has_audio": True,
+        "desc": "ElevenLabs Sound Effects: звуковые эффекты (1–30с)",
+    },
+    "seed_audio_sfx": {
+        "name": "Seed Audio 1.0 SFX",
+        "short": "🌊 Seed SFX",
+        "hidden": True,
+        "category": "music",
+        "backend": "promptwise_audio",
+        "api_id": "seed-audio-1.0-sfx",
+        "provider": "bytedance-voice",
+        "audio_type": "sfx",
+        "durations": [5, 10, 30, 60],
+        "has_audio": True,
+        "desc": "ByteDance Seed Audio 1.0 SFX: звуковые эффекты и эмбиент (до 2 мин)",
     },
 }
+
 
 def calculate_credit_cost(model_key: str, duration: int = 5, resolution: str = "720p", generate_audio: bool = True) -> int:
-    """Calculate estimated DaVinci AI credit cost for a generation based on model and parameters."""
-    model_info = MODELS.get(model_key, MODELS.get(DEFAULT_MODEL, {}))
-    backend = model_info.get("backend")
-    api_id = model_info.get("api_id")
-    dur = max(4, duration) if duration > 0 else 5
-    if model_info.get("backend") == "davinci_motion":
-        return 0  # цена пока не задана: в интерфейсе кредиты не показываем
-
-    # 1. Video models on DaVinci backend
-    if backend == "davinci":
-        if api_id == "seedance25":
-            if dur <= 5:
-                return 507
-            elif dur <= 6:
-                return 270
-            elif dur <= 8:
-                return 360
-            elif dur <= 10:
-                return 1013
-            elif dur <= 15:
-                return 1519
-            elif dur <= 20:
-                return 2025
-            return 3038  # 30s
-        elif api_id == "seedance25Flash":
-            rate = 29 if str(resolution).lower() == "480p" else 62
-            return int(dur * rate)
-        elif api_id in ("seedance2", "seedance2Fast", "seedance2Mini"):
-            return int(dur * 20)
-        elif api_id == "seedance":
-            return int(dur * 25)
-        elif api_id == "kling4":
-            return int(dur * 17)
-        elif api_id == "kling4Flash":
-            return int(dur * 15)
-        elif api_id == "flux3":
-            return int(dur * 30)
-        elif api_id == "flux3Max":
-            return int(dur * 36)
-        elif api_id in ("ltx25Pro", "ltx25Fast"):
-            return int(dur * 6)
-        elif api_id in ("geminiOmniFlash12", "geminiOmniFlash11"):
-            return int(dur * 28)
-        elif api_id == "veo31":
-            return int(dur * (70 if generate_audio else 35))
-        elif api_id == "veo31fast":
-            return int(dur * (38 if generate_audio else 25))
-        elif api_id in ("luma-dream-machine", "luma-ray-3-2"):
-            return int(dur * 22)
-        elif api_id == "minimaxH3":
-            return int(dur * 17)
-        elif api_id == "minimax-hailuo-2-3":
-            return int(dur * 10)
-        elif api_id == "pixversev6":
-            return int(dur * 19)
-        elif api_id == "wan30Prime":
-            return int(dur * 11)
-        elif api_id == "wan26":
-            return int(dur * 11)
-        elif api_id == "grok":
-            return int(dur * 14)
-        elif api_id in ("runway-aleph", "runwayAlpha"):
-            return int(dur * 20)
-        elif api_id == "pika22":
-            return int(dur * 5)
-        return int(dur * 25)
-
-    # 2. Image models on DaVinci backend
-    if backend == "davinci_image":
-        res_upper = str(resolution or "1K").upper()
-        if api_id == "NANO_BANANA_2_1":
-            return 38
-        elif api_id == "NANO_BANANA_2":
-            return 25
-        elif api_id == "NANO_BANANA":
-            return 10
-        elif api_id in ("FLUX_3", "FLUX_3_KLEIN"):
-            return 15
-        elif api_id == "FLUX_2":
-            return 3 if res_upper == "0.5K" else (48 if res_upper == "2K" else 12)
-        elif api_id == "FLUX_2_TURBO":
-            return 2 if res_upper == "0.5K" else (36 if res_upper == "2K" else 9)
-        elif api_id in ("SEEDREAM_5_5", "SEEDREAM_5_PRO"):
-            return 40 if res_upper == "2K" else 20
-        elif api_id == "SEEDREAM_5_FLASH":
-            return 48 if res_upper == "2K" else 12
-        elif api_id == "SEEDREAM_45":
-            return 13
-        elif api_id in ("SEEDREAM", "SEEDREAM_5_LITE"):
-            return 15
-        elif api_id == "QWEN_IMAGE_3":
-            return 10
-        elif api_id in ("GPT_IMAGE_2_6_SUNBURST", "GPT_IMAGE_2_6_FLARE"):
-            return 1
-        return 15
-
-    # 3. Voice & Music models on DaVinci backend
-    if backend == "davinci_voice":
-        return 10
-    if backend == "davinci_music":
-        return 5
-
-    # 4. External models (Grok, MiniMax, Qwen Image Pro, legacy fallbacks)
+    """Return estimated credit cost for UI display (actual billing is handled server-side by PromptWise)."""
     return 0
 
-COMPACT_MODEL_LABELS = {
-    "s2_5": "✨ Seed 2.5",
-    "s2_5_flash": "⚡ Seed 2.5F",
-    "s2_pro": "🎬 Seed 2.0",
-    "s2_fast": "🚀 2.0 Fast",
-    "s2_mini": "⚡ 2.0 Mini",
-    "s1_5_pro": "🎞 Seed 1.5",
-    "kling_4": "🎥 Kling 4.0",
-    "kling_4_flash": "⚡ Kling 4F",
-    "flux_3": "🌊 Flux 3",
-    "flux_3_max": "🔥 Flux 3 Max",
-    "ltx_25_pro": "🎞 LTX 2.5P",
-    "ltx_25_fast": "⚡ LTX 2.5F",
-    "gemini_omni_12": "💎 Omni 1.2",
-    "gemini_omni_11": "⚡ Omni 1.1",
-    "veo_3_1": "🎬 Veo 3.1",
-    "veo_3_1_fast": "⚡ Veo 3.1F",
-    "luma_dream_machine": "🌟 Luma DM",
-    "luma_ray_32": "⚡ Luma 3.2",
-    "minimax_h3": "⚡ MiniMax H3",
-    "minimax_hailuo": "🌊 Hailuo 2.3",
-    "pixverse_v6": "🎬 PixVerse 6",
-    "wan_2_6": "✨ Wan 2.6",
-    "wan_3_prime": "✨ Wan 3P",
-    "runway_alpha": "🎬 Runway 2.0",
-    "pika_2_2": "⚡ Pika 2.2",
-    "grok": "🌌 Grok",
-    "grok_15": "🔮 Grok 1.5",
-    "minimax_hero": "🎬 MM Hero",
-    "minimax_cinema": "🎥 MM Cine",
-    "minimax_macro": "🔍 MM Macro",
-    "nano_banana_2_1": "🍌 Banana 2.1",
-    "nano_banana_pro": "🍌 Banana Pro",
-    "nano_banana": "🍌 Banana",
-    "flux_3_img": "🎨 Flux 3",
-    "flux_3_klein": "✨ Flux Klein",
-    "flux_2": "🎨 Flux 2",
-    "flux_2_turbo": "⚡ Flux 2T",
-    "seedream_5_5": "🌊 Seedream 5.5",
-    "seedream_5_pro": "💎 Seedream 5P",
-    "seedream_5_flash": "⚡ Seedream 5F",
-    "seedream_5_lite": "🌿 Seedream 5L",
-    "seedream_45": "✨ Seedream 4.5",
-    "seedream_4": "🎨 Seedream 4.0",
-    "qwen_image_3": "🖼 Qwen 3.0",
-    "gpt_image_2_6_sunburst": "☀️ GPT Sun",
-    "gpt_image_2_6_flare": "✨ GPT Flare",
-    "qwen_image": "🪧 Постер",
-    "elevenlabs": "🎙 ElevenLabs",
-    "lyria_3_pro": "🎵 Lyria 3 Pro",
-}
+
+COMPACT_MODEL_LABELS = {k: v["short"] for k, v in MODELS.items()}
 
 
 def get_model_grid_label(model_key: str) -> str:
@@ -832,53 +1034,47 @@ def get_model_grid_label(model_key: str) -> str:
 
 VIDEO_MODEL_KEYS = [
     k for k, v in MODELS.items()
-    if v.get("category", "video") == "video" and not v.get("hidden")
+    if v.get("category") == "video" and not v.get("hidden")
 ]
-IMAGE_MODEL_KEYS = [k for k, v in MODELS.items() if v.get("category") == "image"]
+IMAGE_MODEL_KEYS = [
+    k for k, v in MODELS.items()
+    if v.get("category") == "image" and not v.get("hidden")
+]
+VOICE_MODEL_KEYS = [k for k, v in MODELS.items() if v.get("category") == "voice"]
+MUSIC_MODEL_KEYS = [k for k, v in MODELS.items() if v.get("category") == "music"]
 
-# --- Voice tab (ElevenLabs V3) ---
-VOICE_MODEL_KEY = "elevenlabs"
-MOTION_MODEL_KEY = "klingMotionControl3"
-MOTION_MODEL_KEYS = ["klingMotionControl3", "klingMotionControl26"]
-# Голоса для вкладки «Голос». id — ElevenLabs voice_id. Первый — тот, что бот использовал раньше.
-# Если сайт не принимает какой-то id, просто удали строку — остальные продолжат работать.
+VOICE_MODEL_KEY = "eleven_v4"
+MUSIC_MODEL_KEY = "seed_audio_music"
+MOTION_MODEL_KEY = "kling_3_0_motion_control"
+MOTION_MODEL_KEYS = ["kling_3_0_motion_control"]
+
+# Live ElevenLabs voice IDs from staging.promptwise.com/api/generate-audio?action=voices
 VOICES = [
-    {"id": "UGTtbzgh3HObxRjWaSpr", "name": "Основной", "emoji": "🎙"},
-    {"id": "21m00Tcm4TlvDq8ikWAM", "name": "Rachel", "emoji": "👩"},
-    {"id": "EXAVITQu4vr4xnSehpDI", "name": "Bella", "emoji": "👧"},
-    {"id": "pNInz6obpgDQGcFmaJgB", "name": "Adam", "emoji": "👨"},
-    {"id": "TxGEqnHWrfWFTfGW9XjX", "name": "Josh", "emoji": "🧑"},
-    {"id": "ErXwobaYiN019PkySvjV", "name": "Antoni", "emoji": "🎩"},
+    {"id": "LxN8dyndjhJGesWKq1RH", "name": "Savannah", "emoji": "👩"},
+    {"id": "3CDfug1pbx1pBSfHIkPR", "name": "Amelia", "emoji": "🎙"},
+    {"id": "FUfBrNit0NNZAwb58KWH", "name": "Angela", "emoji": "👧"},
+    {"id": "vmVmHDKBkkCgbLVIOJRb", "name": "Charlie", "emoji": "👨"},
+    {"id": "nIHefZ8GOsC19mjvAhSN", "name": "Shaan", "emoji": "🧑"},
+    {"id": "bKrvJaCHEqucAEpSzACi", "name": "Brian", "emoji": "🎩"},
+    {"id": "851ejYcv2BoNPjrkw93G", "name": "Tony", "emoji": "⚡"},
+    {"id": "nbcvT3C2tyOd2OsRAtUf", "name": "Maya", "emoji": "🌟"},
+    {"id": "MClEFoImJXBTgLwdLI5n", "name": "Ivy", "emoji": "💎"},
 ]
 DEFAULT_VOICE_ID = VOICES[0]["id"]
 
-# --- Music tab (Google Lyria 3 Pro via POST /music/process) ---
-MUSIC_MODEL_KEY = "lyria_3_pro"
-MUSIC_GENRES = [
-    {"key": "", "label": "Авто"},
-    {"key": "pop", "label": "Pop"},
-    {"key": "hip-hop / rap", "label": "Hip-Hop"},
-]
+# Kept for backwards compatibility with any imports
+MUSIC_GENRES = [{"key": "", "label": "Авто"}]
 MUSIC_DURATIONS = [
-    {"key": "", "label": "Авто"},
-    {"key": "120", "label": "2 мин"},
-    {"key": "180", "label": "3 мин"},
+    {"key": "15", "label": "15с"},
+    {"key": "30", "label": "30с"},
+    {"key": "60", "label": "60с"},
+    {"key": "120", "label": "120с"},
 ]
-MUSIC_MOODS = [
-    {"key": "", "label": "Авто"},
-    {"key": "happy ", "label": "Happy"},
-    {"key": "uplifting", "label": "Uplifting"},
-    {"key": "funny", "label": "Funny"},
-]
-MUSIC_THEMES = [
-    {"key": "", "label": "Авто"},
-    {"key": "love", "label": "Love"},
-    {"key": "film&cinema", "label": "Cinema"},
-    {"key": "motivation", "label": "Motivation"},
-]
+MUSIC_MOODS = [{"key": "", "label": "Авто"}]
+MUSIC_THEMES = [{"key": "", "label": "Авто"}]
 
-DEFAULT_MODEL = "s2_5"
-DEFAULT_IMAGE_MODEL = "nano_banana_2_1"
+DEFAULT_MODEL = "seedance_2_5"
+DEFAULT_IMAGE_MODEL = "nano_banana_pro"
 DEFAULT_DURATION = 5
 DEFAULT_RESOLUTION = "720p"
 DEFAULT_IMAGE_RESOLUTION = "1K"
@@ -889,7 +1085,7 @@ DEFAULT_AUDIO = True
 MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "10"))
 
 DURATION_OPTIONS = list(range(1, 31))
-RESOLUTION_OPTIONS = ["480p", "720p", "1080p"]
+RESOLUTION_OPTIONS = ["480p", "720p", "1080p", "4k"]
 IMAGE_RESOLUTION_OPTIONS = ["1K", "2K", "4K"]
 RATIO_OPTIONS = ["16:9", "9:16", "1:1"]
 IMAGE_RATIO_OPTIONS = ["1:1", "16:9", "9:16", "4:3", "3:4"]
