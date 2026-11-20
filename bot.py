@@ -27,6 +27,7 @@ import image_utils
 import access_manager
 import cameo_manager
 import user_access
+import daily_limits
 import watermark_utils
 from emoji_theme import SmartEmojiBot, ce, cbtn
 import config
@@ -1220,11 +1221,16 @@ def format_motion_draft_text(draft: Dict[str, Any]) -> str:
         if orient == "image"
         else f"{ce('console', '🎞')} Поза и кадр — как в видео, персонаж — с фото\n"
     )
+    owner_uid = int(draft.get("owner_id") or 0)
+    limit_line = ""
+    if owner_uid:
+        vq = daily_limits.get_video_quota(owner_uid)
+        limit_line = f"\n{ce('console', '📊')} Лимит сегодня: <b>осталось {vq['remaining']}/{vq['limit']}</b> (<code>/limit</code>)"
     return (
         f"{ce('dance', '🕺')} <b>{html.escape(model_name)}</b> · {res}\n\n"
         f"{step1}\n{step2}\n{dur}{orient_line}"
         "<i>Персонаж повторит движения из видео.</i>"
-        f"{warn}"
+        f"{limit_line}{warn}"
     )
 
 
@@ -1295,6 +1301,12 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
     dur = snap_duration_to_model(int(draft.get("duration", DEFAULT_DURATION)), model_durs)
     draft["duration"] = dur
 
+    owner_uid = int(draft.get("owner_id") or 0)
+    limit_line = ""
+    if owner_uid:
+        vq = daily_limits.get_video_quota(owner_uid)
+        limit_line = f"{ce('console', '📊')} <b>Лимит видео сегодня:</b> осталось <b>{vq['remaining']}/{vq['limit']}</b> (<code>/limit</code>)\n"
+
     if step == "model":
         return (
             f"{ce('rocket', '🎬')} <b>Шаг 1 из 3: Выберите модель для видео</b>\n\n"
@@ -1303,7 +1315,8 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
             f"{ce('pin', '📌')} <b>Референсы:</b> {ref_badge}\n"
             f"{cameo_line}"
             f"{video_line}"
-            f"{audio_ref_line}\n"
+            f"{audio_ref_line}"
+            f"{limit_line}\n"
             f"{ce('down', '👇')} <i>Выберите нейросеть для генерации ниже:</i>\n"
             f"<code>build: {BUILD_ID}</code>"
         )
@@ -1362,6 +1375,7 @@ def format_video_draft_text(draft: Dict[str, Any]) -> str:
         f"{ce('uhd', '📐')} <b>Разрешение и формат:</b> {res} | {ratio_display}\n"
         f"{ce('gem', '💧')} <b>Ватермарка:</b> {html.escape(wm_info['short'])}{wm_badge_note}\n"
         f"{audio_line}"
+        f"{limit_line}"
         f"{cost_line}\n"
         f"{ce('down', '👇')} <i>Выберите настройки качества и нажмите «Сгенерировать видео»:</i>\n"
         f"<code>build: {BUILD_ID}</code>"
@@ -2441,6 +2455,33 @@ async def handle_last_command(message: Message, command: CommandObject, queue: G
             await status_msg.edit_text(f"{ce('warn', '⚠️')} На сайте пока нет завершенных генераций.", parse_mode="HTML")
     except Exception as e:
         await status_msg.edit_text(f"{ce('alert', '❌')} <b>Ошибка получения файла с сайта:</b> {html.escape(str(e))}", parse_mode="HTML")
+
+
+@router.message(Command("limit", "limits", "quota", "лимит", "лимиты", "квота", "остаток", ignore_case=True, ignore_mention=True))
+async def handle_limit_command(message: Message):
+    """Show participant's remaining daily video generation limit (30 videos/day)."""
+    uid = message.from_user.id
+    q = daily_limits.get_video_quota(uid)
+    is_adm = user_access.is_admin(message.from_user)
+    bar_filled = min(10, int(round(10 * q["used"] / max(1, q["limit"]))))
+    bar = "▰" * bar_filled + "▱" * (10 - bar_filled)
+    if is_adm:
+        status_block = (
+            f"{ce('vip', '👑')} <b>Статус:</b> Безлимит (администратор)\n"
+            f"{ce('rocket', '🎬')} <b>Создано видео сегодня:</b> <code>{q['used']}</code>\n"
+        )
+    else:
+        status_block = (
+            f"{ce('rocket', '🎬')} <b>Осталось сегодня:</b> <b>{q['remaining']} из {q['limit']} видео</b>\n"
+            f"{bar}  <code>{q['used']}/{q['limit']}</code>\n"
+        )
+    await message.reply(
+        f"{ce('console', '📊')} <b>Ваш дневной лимит видео</b>\n\n"
+        f"{status_block}\n"
+        f"{ce('load_hourglass', '🕒')} <b>Обновление лимита:</b> в 00:00 МСК (через {q['reset_in_text']})\n"
+        f"{ce('idea', '💡')} <i>Если генерация завершится ошибкой, попытка автоматически возвращается в лимит.</i>",
+        parse_mode="HTML",
+    )
 
 
 @router.message(Command("balance", "credits", "account", "баланс", "кредиты"))
@@ -5893,6 +5934,22 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
                 await call.answer("🎵 Напишите описание трека или звукового эффекта сообщением в чат", show_alert=True)
                 return
 
+    quota_info: Optional[Dict[str, Any]] = None
+    if peek:
+        pmode = peek.get("menu_mode", "video")
+        if pmode in ("video", "motion"):
+            allowed_v, quota_info = daily_limits.try_consume_video(
+                call.from_user.id,
+                is_admin=user_access.is_admin(call.from_user),
+            )
+            if not allowed_v:
+                await call.answer(
+                    f"⛔ Дневной лимит исчерпан ({quota_info['used']}/{quota_info['limit']} видео). "
+                    f"Обновится в 00:00 МСК (через {quota_info['reset_in_text']}).",
+                    show_alert=True,
+                )
+                return
+
     draft = user_drafts.pop(owner_id, None)
     if not draft:
         await call.answer("Параметры устарели. Отправьте новый запрос /video, /image, /voice или /music.", show_alert=True)
@@ -6037,6 +6094,8 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
         chips.append(f"{ce('gem', '💧')} {wm_chip}")
     if cost > 0:
         chips.append(f"{ce('card', '💳')} ~{cost} кр.")
+    if quota_info and not user_access.is_admin(call.from_user):
+        chips.append(f"{ce('console', '📊')} осталось {quota_info['remaining']}/{quota_info['limit']}")
     quote = f"\n<blockquote expandable>{html.escape(prompt[:500])}</blockquote>" if prompt else ""
 
     try:

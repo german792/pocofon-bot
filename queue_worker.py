@@ -20,6 +20,7 @@ from promptwise_client import PromptWiseClient
 from config import MODELS, BASE_DIR, DEFAULT_MODEL, MAX_CONCURRENT_JOBS, calculate_credit_cost
 import image_utils
 import history_manager
+import daily_limits
 from emoji_theme import ce, cbtn, loader_emoji
 from watermark_utils import (
     apply_watermark,
@@ -243,6 +244,8 @@ class GenerationQueue:
         try:
             await self._process_job(job)
         except Exception as e:
+            if MODELS.get(job.model_key, {}).get("category", "video") == "video":
+                daily_limits.refund_video(job.user_id)
             logger.error(f"Error processing job for user {job.user_id}: {e}", exc_info=True)
             await self._update_status(
                 job,
@@ -393,6 +396,8 @@ class GenerationQueue:
         media_url, error_raw, total_elapsed, backend = await self._execute_task(job, model_info)
 
         if not media_url:
+            if model_info.get("category", "video") == "video":
+                daily_limits.refund_video(job.user_id)
             history_manager.fail_task(job.job_id, error_raw, total_elapsed)
             error_friendly = translate_server_error(error_raw)
             await self._update_status(
