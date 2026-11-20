@@ -79,7 +79,8 @@
     "hapaleon_dolban",
     "keshaofc",
     "vlc2222",
-    "kotost_vtt"
+    "kotost_vtt",
+    "mmsera2"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -713,6 +714,14 @@
       "name": "Котость_в тт другой",
       "added_at": 1795200711.3405962,
       "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "mmsera2": {
+      "user_id": null,
+      "username": "MMSera2",
+      "name": "@MMSera2",
+      "added_at": 1795201901.5012815,
+      "added_by": "@GermanUstinf",
       "role": "user"
     }
   }
