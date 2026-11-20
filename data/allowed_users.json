@@ -78,7 +78,8 @@
     "bumahski133",
     "hapaleon_dolban",
     "keshaofc",
-    "vlc2222"
+    "vlc2222",
+    "kotost_vtt"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -703,6 +704,14 @@
       "username": "vlc2222",
       "name": "𝐝𝐨𝐟𝐢𝐧𝐢𝐧",
       "added_at": 1795194824.7340086,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "kotost_vtt": {
+      "user_id": 8240079379,
+      "username": "Kotost_vtt",
+      "name": "Котость_в тт другой",
+      "added_at": 1795200711.3405962,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
