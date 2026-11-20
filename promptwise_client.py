@@ -219,9 +219,12 @@ class PromptWiseClient:
             raise RuntimeError(f"Ошибка подтверждения загрузки {kind} ({r3.status_code}): {self._extract_error(r3)}")
 
         comp = r3.json()
-        file_id = str(comp.get("fileId") or comp.get("id") or asset_id)
-        url = self._abs_url(str(comp.get("url") or ""))
-        return {"file_id": file_id, "url": url}
+        raw_file_id = comp.get("fileId")
+        raw_url = str(comp.get("url") or "")
+        result: Dict[str, str] = {"url": raw_url}
+        if raw_file_id:
+            result["file_id"] = str(raw_file_id)
+        return result
 
     async def create_video_task(
         self,
@@ -404,8 +407,8 @@ class PromptWiseClient:
                 "prompt": (prompt or "").strip(),
                 "options": {"resolution": res},
                 "motion_control": {
-                    "character_image": {"file_id": char_up["file_id"]},
-                    "motion_video": {"file_id": vid_up["file_id"]},
+                    "character_image": {"file_id": char_up["file_id"]} if char_up.get("file_id") else {"url": char_up["url"]},
+                    "motion_video": {"file_id": vid_up["file_id"]} if vid_up.get("file_id") else {"url": vid_up["url"]},
                     "character_orientation": orient,
                 },
             },
@@ -462,7 +465,7 @@ class PromptWiseClient:
                     )
                 )
             urls = [u["url"] for u in uploaded]
-            refs = [{"fileId": u["file_id"], "url": u["url"]} for u in uploaded]
+            refs = [{"fileId": u["file_id"], "url": u["url"]} if u.get("file_id") else {"url": u["url"]} for u in uploaded]
             payload["image_urls"] = urls
             payload["image_url"] = urls[0]
             payload["image_refs"] = refs
