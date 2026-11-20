@@ -36,28 +36,34 @@ DAVINCI_REFRESH_FILE = BASE_DIR / ".davinci_refresh_token"
 
 
 def translate_server_error(raw_err: str) -> str:
-    """Translate Chinese backend error messages to friendly Russian and escape HTML."""
+    """Translate backend error messages to friendly Russian, strip provider tags, and escape HTML."""
     if not raw_err:
         return "Неизвестная ошибка сервера."
+    import re
     raw_str = str(raw_err)
-    if "503 Service Temporarily Unavailable" in raw_str or "502 Bad Gateway" in raw_str or "504 Gateway" in raw_str:
-        return "Сервер этой модели временно перегружен (503). Выберите другую модель (например, Seedance 2.0 или Grok)!"
+    # Strip any [provider] tags or provider API prefixes
+    raw_str = re.sub(r"\[[^\]]+\]\s*", "", raw_str)
+    raw_str = re.sub(r"\b[a-zA-Z0-9_-]+-direct\s+API\s+error:\s*", "", raw_str, flags=re.I)
+    raw_str = re.sub(r"\b(?:PromptWise|DaVinci|bytedance-direct|bytedance|fal\.ai|replicate|wavespeed)\b", "", raw_str, flags=re.I).strip()
+    low = raw_str.lower()
+    if "temporarily unavailable" in low or "503 service temporarily unavailable" in low or "502 bad gateway" in low or "504 gateway" in low:
+        return "Сервер этой модели временно перегружен. Пожалуйста, повторите запрос через несколько секунд или выберите другую модель!"
     if "服务暂时不可用" in raw_str:
-        return "Сервис Seedance временно перегружен на стороне сайта. Попробуйте выбрать Grok Imagine или другую модель!"
+        return "Сервер модели временно перегружен. Попробуйте выбрать другую модель!"
     if "宽高比不支持" in raw_str:
         return "Соотношение сторон картинки не поддерживается. Используйте стандартные пропорции (16:9, 9:16 или 1:1)."
     if "最多跑 2 个任务" in raw_str or "同时最多" in raw_str:
         return "Сервер генерации сейчас занят предыдущими задачами. Подождите 1-2 минуты."
     if "边长需在" in raw_str:
         return "Размер изображения должен быть от 300 до 6000 пикселей."
-    if "操作太频繁" in raw_str:
-        return "Слишком много запросов к серверу, подождите немного."
+    if "操作太频繁" in raw_str or "too many requests" in low:
+        return "Слишком много запросов к серверу, подождите немного и повторите."
     if "上游账号额度等待恢复" in raw_str or "配额" in raw_str:
-        return "Лимит запросов к каналу Grok временно исчерпан. Попробуйте модель Seedance 2.0 или повторите через пару минут."
+        return "Лимит запросов к этому каналу временно исчерпан. Попробуйте другую модель или повторите через пару минут."
     if "当前账号池不支持该模型" in raw_str:
-        return "Канал Grok временно недоступен в пуле аккаунтов. Выберите другую модель."
-    if any(k in raw_str.lower() for k in ("sensitive", "moderation", "policy", "nsfw")) or any(k in raw_str for k in ("敏感", "违规", "审核")):
-        return "Запрос отклонен цензурой/модерацией нейросети. Попробуйте смягчить описание."
+        return "Этот канал временно недоступен. Выберите другую модель."
+    if any(k in low for k in ("content guidelines", "sensitive", "moderation", "policy", "nsfw", "safety")) or any(k in raw_str for k in ("敏感", "违规", "审核")):
+        return "Запрос отклонён цензурой/модерацией нейросети. Попробуйте изменить промпт или референс."
     return html.escape(raw_str[:400])
 
 

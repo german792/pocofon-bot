@@ -999,6 +999,8 @@ class GenerationQueue:
         start_time = asyncio.get_event_loop().time()
         consecutive_poll_errors = 0
         poll_count = 0
+        pw_retried_same = False
+        pw_retried_fallback = False
 
         client = self._get_client_for_backend(backend)
         poll_sleep = (
@@ -1040,6 +1042,65 @@ class GenerationQueue:
                 break
             elif status == "failed":
                 err_str = str(task_info.get("error", "Неизвестная ошибка"))
+                if backend == "promptwise" and any(
+                    k in err_str.lower()
+                    for k in ("temporarily unavailable", "service unavailable", "overloaded", "502", "503", "504", "timed out")
+                ):
+                    prepared_refs = [
+                        image_utils.prepare_user_image(b, job.ratio or "16:9") for b in all_refs if b
+                    ]
+                    if not pw_retried_same:
+                        pw_retried_same = True
+                        logger.warning(f"Transient error on {model_info['api_id']} ({err_str}), retrying once...")
+                        await asyncio.sleep(2)
+                        try:
+                            task_id = await self.promptwise_client.create_video_task(
+                                model_info=model_info,
+                                prompt=job.prompt,
+                                duration=job.duration,
+                                resolution=job.resolution,
+                                ratio=job.ratio,
+                                generate_audio=job.generate_audio,
+                                ref_images=prepared_refs,
+                                ref_mode=job.ref_mode,
+                                ref_video=job.ref_video,
+                                audio_bytes=job.audio_bytes,
+                            )
+                            continue
+                        except Exception as retry_err:
+                            logger.warning(f"Same-model retry failed: {retry_err}")
+
+                    if not pw_retried_fallback:
+                        pw_retried_fallback = True
+                        fb_map = {
+                            "seedance_2_5_flash": "seedance_2_5",
+                            "seedance_2_5": "seedance_2_5_flash" if job.duration > 15 else "seedance_2_0_fast",
+                            "seedance_2_0_pro": "seedance_2_0_fast",
+                            "kling_4_0": "kling_3_0_pro",
+                            "veo_3_1": "veo_3_1_fast",
+                        }
+                        fb_key = fb_map.get(job.model_key)
+                        if fb_key and fb_key in MODELS:
+                            fb_info = MODELS[fb_key]
+                            logger.warning(f"Falling back from {job.model_key} to {fb_key} after transient error...")
+                            try:
+                                task_id = await self.promptwise_client.create_video_task(
+                                    model_info=fb_info,
+                                    prompt=job.prompt,
+                                    duration=job.duration,
+                                    resolution=job.resolution,
+                                    ratio=job.ratio,
+                                    generate_audio=job.generate_audio,
+                                    ref_images=prepared_refs,
+                                    ref_mode=job.ref_mode,
+                                    ref_video=job.ref_video,
+                                    audio_bytes=job.audio_bytes,
+                                )
+                                model_info = fb_info
+                                continue
+                            except Exception as fb_err:
+                                logger.warning(f"Fallback to {fb_key} failed: {fb_err}")
+
                 if backend == "grok" and any(k in err_str for k in ("额度", "配额", "账号池", "Лимит запросов", "недоступен")):
                     img_bytes = image_utils.prepare_user_image(job.image_bytes, job.ratio) if job.image_bytes else None
                     if not grok_retried_alt_channel:

@@ -727,11 +727,14 @@ class PromptWiseClient:
                 "audioUrl": full_url,
             }
         if raw_status in ("FAILED", "ERROR", "CANCELLED", "CANCELED", "REJECTED"):
+            raw_err = str(info.get("error") or info.get("reason") or "Запрос отклонён сервером")
+            clean_err = re.sub(r"^\s*\[[^\]]+\]\s*", "", raw_err)
+            clean_err = re.sub(r"\b[a-zA-Z0-9_-]+-direct\s+API\s+error:\s*", "", clean_err, flags=re.I).strip()
             return {
                 "id": generation_id,
                 "status": "failed",
                 "stage": "Ошибка",
-                "error": str(info.get("error") or info.get("reason") or "Запрос отклонён сервером"),
+                "error": clean_err or "Запрос отклонён сервером",
             }
         return {
             "id": generation_id,
