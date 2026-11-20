@@ -340,6 +340,19 @@ class PromptWiseClient:
                     purpose="generation-reference",
                 )
 
+        has_start_or_end = bool(input_obj.get("start_frame") or input_obj.get("end_frame"))
+        has_omni_vid = bool((input_obj.get("references") or {}).get("videos"))
+        if api_id in ("seedance-2.5", "seedance-2.5-flash") and (has_start_or_end or has_omni_vid):
+            options["aspectRatio"] = "adaptive"
+        elif has_start_or_end and api_id in (
+            "kling-4.0",
+            "kling-3.0-std", "kling-3.0-pro", "kling-3.0-4k",
+            "kling-3.0-turbo-std", "kling-3.0-turbo-pro",
+            "kling-v3-omni-std", "kling-v3-omni-pro", "kling-v3-omni-4k",
+            "minimax-h3", "hailuo-pro", "grok-video",
+        ):
+            options.pop("aspectRatio", None)
+
         payload = {
             "context": {"source": "studio"},
             "input": input_obj,
