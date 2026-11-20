@@ -243,7 +243,7 @@ class PromptWiseClient:
         model_durs = [int(d) for d in (model_info.get("durations") or [5])]
         dur = duration if duration in model_durs else min(model_durs, key=lambda x: (abs(x - duration), x))
 
-        options: Dict[str, Any] = {"duration": str(dur)}
+        options: Dict[str, Any] = {"duration": int(dur)}
 
         res_vals = list(model_info.get("resolutions") or [])
         if res_vals:
