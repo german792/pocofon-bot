@@ -195,7 +195,7 @@ class PromptWiseClient:
             put_headers["Content-Type"] = mime_type
 
         if not presigned_url or not asset_id:
-            raise RuntimeError("Сервер PromptWise не вернул presignedUrl/assetId для загрузки медиа")
+            raise RuntimeError("Сервер не вернул presignedUrl/assetId для загрузки медиа")
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=15.0, read=90.0)) as put_client:
             r2 = await put_client.put(presigned_url, content=data, headers=put_headers)
@@ -347,11 +347,11 @@ class PromptWiseClient:
         logger.info(f"[promptwise/video] model={api_id} options={options} omni={use_omni} imgs={len(imgs)} vid={bool(ref_video)}")
         resp = await self.client.post(route, headers=self._headers(), json=payload)
         if resp.status_code not in (200, 201):
-            raise RuntimeError(f"Ошибка PromptWise Video ({resp.status_code}): {self._extract_error(resp)}")
+            raise RuntimeError(f"Ошибка генерации видео ({resp.status_code}): {self._extract_error(resp)}")
 
         gen_id = str(resp.json().get("generationId") or "")
         if not gen_id:
-            raise RuntimeError("Сервер PromptWise не вернул generationId видео-задачи")
+            raise RuntimeError("Сервер не вернул generationId видео-задачи")
         return gen_id
 
     async def create_motion_control_task(
@@ -403,7 +403,7 @@ class PromptWiseClient:
             raise RuntimeError(f"Ошибка Motion Control ({resp.status_code}): {self._extract_error(resp)}")
         gen_id = str(resp.json().get("generationId") or "")
         if not gen_id:
-            raise RuntimeError("Сервер PromptWise не вернул generationId для Motion Control")
+            raise RuntimeError("Сервер не вернул generationId для Motion Control")
         return gen_id
 
     async def create_image_task(
@@ -458,13 +458,13 @@ class PromptWiseClient:
         logger.info(f"[promptwise/image] model={api_id} ratio={payload['aspect_ratio']} res_axis={res_axis} refs={len(imgs)}")
         resp = await self.client.post(f"{self.base_url}/api/generate-image", headers=self._headers(), json=payload)
         if resp.status_code not in (200, 201):
-            raise RuntimeError(f"Ошибка PromptWise Image ({resp.status_code}): {self._extract_error(resp)}")
+            raise RuntimeError(f"Ошибка генерации фото ({resp.status_code}): {self._extract_error(resp)}")
 
         data = resp.json()
         gens = data.get("generations") or []
         gen_id = str((gens[0].get("generationId") if gens and isinstance(gens[0], dict) else None) or data.get("generationId") or "")
         if not gen_id:
-            raise RuntimeError("Сервер PromptWise не вернул generationId фото-задачи")
+            raise RuntimeError("Сервер не вернул generationId фото-задачи")
         return gen_id
 
     async def create_audio_task(
@@ -500,11 +500,11 @@ class PromptWiseClient:
         logger.info(f"[promptwise/audio] type={audio_type} model={api_id} dur={payload.get('duration_seconds')}")
         resp = await self.client.post(f"{self.base_url}/api/generate-audio", headers=self._headers(), json=payload)
         if resp.status_code not in (200, 201):
-            raise RuntimeError(f"Ошибка PromptWise Audio ({resp.status_code}): {self._extract_error(resp)}")
+            raise RuntimeError(f"Ошибка генерации аудио ({resp.status_code}): {self._extract_error(resp)}")
 
         gen_id = str(resp.json().get("generationId") or "")
         if not gen_id:
-            raise RuntimeError("Сервер PromptWise не вернул generationId аудио-задачи")
+            raise RuntimeError("Сервер не вернул generationId аудио-задачи")
         return gen_id
 
     async def get_task(self, generation_id: str) -> Dict[str, Any]:
@@ -559,7 +559,7 @@ class PromptWiseClient:
         return {
             "id": generation_id,
             "status": "processing",
-            "stage": f"Обработка в PromptWise ({raw_status})...",
+            "stage": f"Обработка на сервере ({raw_status})...",
         }
 
     async def get_account_balance(self) -> Dict[str, Any]:

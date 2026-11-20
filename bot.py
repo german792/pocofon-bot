@@ -1918,14 +1918,14 @@ async def handle_set_token(message: Message, command: CommandObject, queue: Gene
     raw = (command.args or "").strip()
     if not raw:
         await message.reply(
-            f"{ce('vip', '🔑')} <b>Обновление куки PromptWise:</b>\n"
-            "Отправьте: <code>/token ваш_session_token</code>",
+            f"{ce('vip', '🔑')} <b>Обновление токена сессии:</b>\n"
+            "Отправьте: <code>/token ваш_токен</code>",
             parse_mode="HTML",
         )
         return
     new_tok = raw.split()[0].strip()
     queue.promptwise_client.set_cookie(new_tok)
-    await message.reply(f"{ce('check', '✅')} <b>Куки PromptWise успешно обновлены и сохранены!</b>", parse_mode="HTML")
+    await message.reply(f"{ce('check', '✅')} <b>Токен сессии успешно обновлен и сохранен!</b>", parse_mode="HTML")
 
 
 @router.message(Command("id", "whoami", ignore_case=True, ignore_mention=True))
@@ -1969,7 +1969,7 @@ async def handle_admin_auth_command(message: Message, command: CommandObject):
             f"{ce('spark', '✨')} Теперь вам доступны команды:\n"
             f"• <code>/genkey [заметка]</code> — генерация ключа доступа\n"
             f"• <code>/keys</code> — просмотр активных ключей\n"
-            f"• <code>/token [x-token]</code> — обновление токена DaVinci",
+            f"• <code>/token [токен]</code> — обновление токена сессии",
             parse_mode="HTML",
         )
     else:
@@ -2447,7 +2447,7 @@ async def handle_last_command(message: Message, command: CommandObject, queue: G
 async def handle_balance_command(message: Message, queue: GenerationQueue):
     """View current PromptWise account credit balance and plan tier."""
     status_msg = await message.reply(
-        f"{ce('load_neon', '🔄')} <b>Запрашиваю актуальный баланс кредитов PromptWise...</b>",
+        f"{ce('load_neon', '🔄')} <b>Запрашиваю актуальный баланс кредитов...</b>",
         parse_mode="HTML"
     )
     try:
@@ -2459,13 +2459,13 @@ async def handle_balance_command(message: Message, queue: GenerationQueue):
         renewal = data["renewal_date"]
 
         text = (
-            f"{ce('card', '💳')} <b>Баланс Poco AI (PromptWise)</b>\n\n"
+            f"{ce('card', '💳')} <b>Баланс Poco AI</b>\n\n"
             f"{ce('coin', '💰')} <b>Доступно кредитов:</b> <code>{total:,}</code>\n"
             f"├ <i>Кошелёк (Wallet):</i> <code>{consumable:,}</code>\n"
             f"└ <i>Тарифный лимит (Allowance):</i> <code>{plan:,}</code>\n\n"
             f"{ce('vip', '👑')} <b>Тариф:</b> {html.escape(str(tier))}\n"
             f"{ce('load_hourglass', '📅')} <b>Обновление лимита:</b> {html.escape(str(renewal))}\n\n"
-            f"{ce('idea', '💡')} <i>Все 58 моделей PromptWise подключены и готовы к работе!</i>"
+            f"{ce('idea', '💡')} <i>Все 58 моделей подключены и готовы к работе!</i>"
         )
         await status_msg.edit_text(text, parse_mode="HTML")
     except Exception as e:
