@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from config import BASE_DIR, PROMPTWISE_BASE_URL, PROMPTWISE_COOKIE
+import image_utils
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ def _probe_video_duration_and_size(video_bytes: bytes) -> Dict[str, Any]:
             [
                 "ffprobe",
                 "-v", "error",
-                "-show_entries", "stream=width,height,codec_type",
+                "-show_entries", "stream=width,height,codec_type,duration",
                 "-show_entries", "format=duration",
                 "-of", "json",
                 str(vp),
@@ -42,21 +43,158 @@ def _probe_video_duration_and_size(video_bytes: bytes) -> Dict[str, Any]:
         data = json.loads(res.stdout.decode("utf-8", "ignore") or "{}")
         out: Dict[str, Any] = {}
         dur = (data.get("format") or {}).get("duration")
-        if dur is not None:
-            try:
-                out["durationSeconds"] = round(float(dur), 2)
-            except Exception:
-                pass
         for st in data.get("streams") or []:
             if st.get("codec_type") == "video":
                 if st.get("width"):
                     out["width"] = int(st["width"])
                 if st.get("height"):
                     out["height"] = int(st["height"])
+                if dur is None and st.get("duration") is not None:
+                    dur = st.get("duration")
                 break
+        if dur is not None:
+            try:
+                out["durationSeconds"] = round(float(dur), 2)
+            except Exception:
+                pass
         return out
     except Exception:
         return {}
+    finally:
+        for p in tmp_dir.glob("*"):
+            p.unlink(missing_ok=True)
+        tmp_dir.rmdir()
+
+
+def _normalize_and_probe_video(
+    video_bytes: bytes,
+    min_dur: float = 2.0,
+    max_dur: float = 30.0,
+) -> tuple[bytes, Dict[str, Any]]:
+    """Ensure reference video is valid MP4 with pixel count in [407696, 8295044] and duration in [min_dur, max_dur]."""
+    meta = _probe_video_duration_and_size(video_bytes)
+    w = int(meta.get("width") or 0)
+    h = int(meta.get("height") or 0)
+    dur = float(meta.get("durationSeconds") or 0.0)
+    pixels = w * h
+
+    needs_reencode = (
+        w <= 0
+        or h <= 0
+        or dur < min_dur
+        or dur > max_dur
+        or pixels < 420_000
+        or pixels > 8_000_000
+    )
+    if not needs_reencode:
+        return video_bytes, meta
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="pw_vidnorm_"))
+    try:
+        in_p = tmp_dir / "in_vid.bin"
+        out_p = tmp_dir / "out_vid.mp4"
+        in_p.write_bytes(video_bytes)
+
+        # Compute target even dimensions with pixel count safely inside [518400, 2073600]
+        if w > 0 and h > 0:
+            if pixels < 420_000:
+                scale = (550_000 / float(pixels)) ** 0.5
+                tw = max(640, int(round(w * scale / 2.0)) * 2)
+                th = max(640, int(round(h * scale / 2.0)) * 2)
+            elif pixels > 8_000_000:
+                scale = (2_073_600 / float(pixels)) ** 0.5
+                tw = max(640, int(round(w * scale / 2.0)) * 2)
+                th = max(640, int(round(h * scale / 2.0)) * 2)
+            else:
+                tw = (w // 2) * 2
+                th = (h // 2) * 2
+        else:
+            tw, th = 1280, 720
+
+        vf_parts = [f"scale={tw}:{th}", "setsar=1"]
+        if 0 < dur < min_dur:
+            pad_sec = round(min_dur - dur + 0.25, 2)
+            vf_parts.append(f"tpad=stop_mode=clone:stop_duration={pad_sec}")
+
+        cmd = [
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-i", str(in_p),
+            "-t", f"{max_dur:.2f}",
+            "-vf", ",".join(vf_parts),
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "128k",
+            "-movflags", "+faststart",
+            str(out_p),
+        ]
+        subprocess.run(cmd, capture_output=True, timeout=60, check=False)
+        if out_p.exists() and out_p.stat().st_size > 0:
+            norm_bytes = out_p.read_bytes()
+            norm_meta = _probe_video_duration_and_size(norm_bytes)
+            if norm_meta.get("durationSeconds"):
+                norm_meta["durationSeconds"] = round(
+                    max(min_dur, min(max_dur, float(norm_meta["durationSeconds"]))), 2
+                )
+            else:
+                norm_meta = {"width": tw, "height": th, "durationSeconds": round(max(min_dur, min(max_dur, dur or 5.0)), 2)}
+            return norm_bytes, norm_meta
+    except Exception as exc:
+        logger.warning(f"Video normalization fallback: {exc}")
+    finally:
+        for p in tmp_dir.glob("*"):
+            p.unlink(missing_ok=True)
+        tmp_dir.rmdir()
+
+    fallback_meta = {
+        "width": w or 1280,
+        "height": h or 720,
+        "durationSeconds": round(max(min_dur, min(max_dur, dur or 5.0)), 2),
+    }
+    return video_bytes, fallback_meta
+
+
+def _normalize_and_probe_audio(
+    audio_bytes: bytes,
+    min_dur: float = 2.0,
+    max_dur: float = 30.0,
+) -> tuple[bytes, float]:
+    """Convert any input audio (OGG voice, M4A, WAV, MP3) to valid MP3 in [min_dur, max_dur] and return (mp3_bytes, durationSeconds)."""
+    tmp_dir = Path(tempfile.mkdtemp(prefix="pw_audnorm_"))
+    try:
+        in_p = tmp_dir / "in_aud.bin"
+        out_p = tmp_dir / "out_aud.mp3"
+        in_p.write_bytes(audio_bytes)
+
+        # Convert to 44.1kHz stereo MP3, pad to at least min_dur, and cap at max_dur
+        cmd = [
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-i", str(in_p),
+            "-af", f"apad=whole_dur={min_dur:.2f}",
+            "-t", f"{max_dur:.2f}",
+            "-vn", "-ar", "44100", "-ac", "2",
+            "-c:a", "libmp3lame", "-b:a", "128k",
+            str(out_p),
+        ]
+        subprocess.run(cmd, capture_output=True, timeout=30, check=False)
+        target_p = out_p if (out_p.exists() and out_p.stat().st_size > 0) else in_p
+
+        pr = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(target_p),
+            ],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        raw_d = pr.stdout.decode("utf-8", "ignore").strip()
+        dur = float(raw_d) if raw_d else 5.0
+        dur = round(max(min_dur, min(max_dur, dur)), 2)
+        return target_p.read_bytes(), dur
+    except Exception as exc:
+        logger.warning(f"Audio normalization fallback: {exc}")
+        return audio_bytes, 5.0
     finally:
         for p in tmp_dir.glob("*"):
             p.unlink(missing_ok=True)
@@ -220,7 +358,7 @@ class PromptWiseClient:
 
         comp = r3.json()
         raw_file_id = comp.get("fileId")
-        raw_url = str(comp.get("url") or "")
+        raw_url = self._abs_url(str(comp.get("url") or ""))
         result: Dict[str, str] = {"url": raw_url}
         if raw_file_id:
             result["file_id"] = str(raw_file_id)
@@ -269,6 +407,11 @@ class PromptWiseClient:
         supports_frames = model_info.get("supports_frames") or []
         imgs = [b for b in (ref_images or []) if b]
 
+        # Audio references on PromptWise require at least one visual reference (image or video)
+        if audio_bytes and has_omni_audio and not imgs and not (ref_video and has_omni_video):
+            ar_seed = options.get("aspectRatio") if options.get("aspectRatio") in ("16:9", "9:16", "1:1") else "16:9"
+            imgs = [image_utils.generate_text_seed_image(ar_seed)]
+
         use_omni = False
         if omni_max_refs > 0:
             if (ref_video and has_omni_video) or (audio_bytes and has_omni_audio):
@@ -282,12 +425,23 @@ class PromptWiseClient:
             "prompt": (prompt or "").strip() or "Cinematic realistic scene with smooth motion",
             "options": options,
         }
+        context_obj: Dict[str, Any] = {"source": "studio"}
+
+        max_ref_dur = 30.0 if max(model_durs) >= 30 else 15.0
+        min_vid_dur = 3.0 if api_id.startswith("kling") else 2.0
 
         if use_omni:
             refs_obj: Dict[str, Any] = {}
-            if imgs:
+            max_imgs_allowed = omni_max_refs
+            if ref_video and has_omni_video:
+                if api_id.startswith("gemini-omni"):
+                    max_imgs_allowed = 0
+                elif api_id.startswith("kling-v3-omni"):
+                    max_imgs_allowed = min(max_imgs_allowed, 4)
+
+            if imgs and max_imgs_allowed > 0:
                 uploaded_imgs = []
-                for idx, ib in enumerate(imgs[:omni_max_refs]):
+                for idx, ib in enumerate(imgs[:max_imgs_allowed]):
                     mime, ext = _detect_image_mime_and_ext(ib)
                     uploaded_imgs.append(
                         await self.upload_asset(
@@ -295,15 +449,17 @@ class PromptWiseClient:
                             kind="image",
                             mime_type=mime,
                             file_name=f"ref_{idx}{ext}",
-                            purpose="temporary-omni-reference",
+                            purpose="generation-reference",
                         )
                     )
                 if uploaded_imgs:
                     refs_obj["images"] = uploaded_imgs
             if ref_video and has_omni_video:
-                vmeta = await asyncio.to_thread(_probe_video_duration_and_size, ref_video)
+                norm_vid, vmeta = await asyncio.to_thread(
+                    _normalize_and_probe_video, ref_video, min_vid_dur, max_ref_dur
+                )
                 up_vid = await self.upload_asset(
-                    ref_video,
+                    norm_vid,
                     kind="video",
                     mime_type="video/mp4",
                     file_name="ref_video.mp4",
@@ -314,14 +470,19 @@ class PromptWiseClient:
                 )
                 refs_obj["videos"] = [up_vid]
             if audio_bytes and has_omni_audio:
+                norm_aud, aud_dur = await asyncio.to_thread(
+                    _normalize_and_probe_audio, audio_bytes, 2.0, max_ref_dur
+                )
                 up_aud = await self.upload_asset(
-                    audio_bytes,
+                    norm_aud,
                     kind="audio",
                     mime_type="audio/mpeg",
                     file_name="ref_audio.mp3",
                     purpose="temporary-omni-reference",
+                    duration_seconds=aud_dur,
                 )
                 refs_obj["audio"] = [up_aud]
+                context_obj["omni_audio_durations"] = [aud_dur]
             if refs_obj:
                 input_obj["references"] = refs_obj
         elif imgs and "start" in supports_frames:
@@ -357,7 +518,7 @@ class PromptWiseClient:
             options.pop("aspectRatio", None)
 
         payload = {
-            "context": {"source": "studio"},
+            "context": context_obj,
             "input": input_obj,
         }
         logger.info(f"[promptwise/video] model={api_id} options={options} omni={use_omni} imgs={len(imgs)} vid={bool(ref_video)}")
@@ -388,9 +549,9 @@ class PromptWiseClient:
             file_name=f"character{ext}",
             purpose="kling-motion-control-reference",
         )
-        vmeta = await asyncio.to_thread(_probe_video_duration_and_size, video_bytes)
+        norm_vid, vmeta = await asyncio.to_thread(_normalize_and_probe_video, video_bytes, 3.0, 30.0)
         vid_up = await self.upload_asset(
-            video_bytes,
+            norm_vid,
             kind="video",
             mime_type="video/mp4",
             file_name="motion.mp4",

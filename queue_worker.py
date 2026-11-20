@@ -657,13 +657,14 @@ class GenerationQueue:
 
             logger.info("Applying watermark and audio to video...")
             temp_audio_ref: Optional[Path] = None
-            if job.audio_bytes:
-                # For video-reference jobs, keep the generated video's own synchronized audio if
-                # present; fall back to extracted reference audio only when the output is silent.
+            audio_for_mux = job.audio_bytes
+            if not audio_for_mux and job.ref_video and not await _video_has_audio(raw_file):
+                audio_for_mux = await extract_audio_from_video(job.ref_video)
+            if audio_for_mux:
                 use_ref_audio = not (job.ref_video and await _video_has_audio(raw_file))
                 if use_ref_audio:
                     temp_audio_ref = VIDEOS_DIR / f"ref_audio_{job.user_id}_{ts}.mp3"
-                    temp_audio_ref.write_bytes(job.audio_bytes)
+                    temp_audio_ref.write_bytes(audio_for_mux)
 
             try:
                 wm_ok = await apply_watermark(
@@ -792,10 +793,6 @@ class GenerationQueue:
                     v_frame = await extract_frame_from_video(job.ref_video)
                     if v_frame:
                         all_refs = [v_frame]
-                if not job.audio_bytes and job.ref_video:
-                    v_audio = await extract_audio_from_video(job.ref_video)
-                    if v_audio:
-                        job.audio_bytes = v_audio
 
                 prepared_refs = [
                     image_utils.prepare_user_image(b, job.ratio or "16:9") for b in all_refs if b

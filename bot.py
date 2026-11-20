@@ -1535,12 +1535,11 @@ async def attach_reference_video_to_draft(
     draft["ref_video"] = video_bytes
     draft["orig_ref_video"] = video_bytes
     draft["ref_video_grid_size"] = 0
+    draft["ref_video_has_audio"] = bool(video_audio)
     if vid_dur > 0:
         draft["ref_video_sec"] = vid_dur
     if vid_ratio:
         draft["ref_video_ratio"] = vid_ratio
-    if video_audio and not draft.get("audio_bytes"):
-        draft["audio_bytes"] = video_audio
 
     cur_model = draft.get("model_key", DEFAULT_MODEL)
     cur_info = MODELS.get(cur_model, {})
@@ -1825,6 +1824,32 @@ async def extract_audio_bytes(message: Message, bot: Bot) -> Optional[bytes]:
 media_group_cache: Dict[str, List[bytes]] = {}
 recent_chat_media: Dict[int, Tuple[Optional[str], bytes]] = {}
 recent_user_photos: Dict[Tuple[int, int], List[Tuple[float, int, bytes]]] = {}
+recent_user_videos: Dict[Tuple[int, int], Tuple[float, bytes]] = {}
+recent_user_audios: Dict[Tuple[int, int], Tuple[float, bytes]] = {}
+
+
+def remember_video(chat_id: int, user_id: int, video_bytes: bytes) -> None:
+    if video_bytes:
+        recent_user_videos[(chat_id, user_id)] = (time.time(), video_bytes)
+
+
+def get_recent_video_for_user(chat_id: int, user_id: int, max_age_sec: float = 120.0) -> Optional[bytes]:
+    entry = recent_user_videos.get((chat_id, user_id))
+    if entry and (time.time() - entry[0] <= max_age_sec):
+        return entry[1]
+    return None
+
+
+def remember_audio(chat_id: int, user_id: int, audio_bytes: bytes) -> None:
+    if audio_bytes:
+        recent_user_audios[(chat_id, user_id)] = (time.time(), audio_bytes)
+
+
+def get_recent_audio_for_user(chat_id: int, user_id: int, max_age_sec: float = 120.0) -> Optional[bytes]:
+    entry = recent_user_audios.get((chat_id, user_id))
+    if entry and (time.time() - entry[0] <= max_age_sec):
+        return entry[1]
+    return None
 
 
 def remember_photo(chat_id: int, user_id: int, message_id: int, media_group_id: Optional[str], img_bytes: bytes):
@@ -2602,18 +2627,6 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
         r"^/(video|gen|prompt|v|s2|omni)(@\w+)?\s*", "", caption, flags=re.I
     )
     wants_omni = caption.lower().startswith("/omni")
-    if is_group:
-        bot_info = await bot.me()
-        clean_prompt = clean_prompt.replace(f"@{bot_info.username}", "").strip()
-        addressed = (
-            caption.lower().startswith(("/video", "/gen", "/prompt", "/v", "/s2", "/omni", "/grid", "/сетка", "/mesh"))
-            or f"@{bot_info.username}".lower() in caption.lower()
-            or fresh_draft(user_id) is not None
-        )
-        if not addressed:
-            return
-    clean_prompt = clean_prompt.strip()
-
     try:
         video_bytes = await extract_video_bytes(message, bot)
     except ValueError:
@@ -2621,10 +2634,28 @@ async def handle_video_reference(message: Message, bot: Bot, state: FSMContext):
         return
     except Exception as e:
         logger.error(f"Failed to download reference video: {e}", exc_info=True)
-        await message.reply("⚠️ Не удалось скачать видео. Попробуйте ещё раз.")
         return
     if not video_bytes:
         return
+    remember_video(message.chat.id, user_id, video_bytes)
+
+    if is_group:
+        bot_info = await bot.me()
+        clean_prompt = clean_prompt.replace(f"@{bot_info.username}", "").strip()
+        is_reply_to_bot = bool(
+            message.reply_to_message
+            and getattr(message.reply_to_message, "from_user", None)
+            and message.reply_to_message.from_user.is_bot
+        )
+        addressed = (
+            caption.lower().startswith(("/video", "/gen", "/prompt", "/v", "/s2", "/omni", "/grid", "/сетка", "/mesh"))
+            or f"@{bot_info.username}".lower() in caption.lower()
+            or is_reply_to_bot
+            or fresh_draft(user_id) is not None
+        )
+        if not addressed:
+            return
+    clean_prompt = clean_prompt.strip()
 
     # Support `/grid` or `/сетка` in video caption directly
     grid_cap_clean = caption
@@ -3061,61 +3092,62 @@ async def process_photo_batch(
 
 @router.message(F.voice | F.audio)
 async def handle_voice_or_audio(message: Message, bot: Bot, state: FSMContext):
-    """Support attaching voice/audio reference for ANY video model or ElevenLabs."""
+    """Support attaching voice/audio reference for video generation."""
     is_group = message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP)
     raw_caption = (message.caption or "").strip()
-    clean_caption = re.sub(r"^/(?:video|gen|prompt|v|s2|voice|tts|eleven|elevenlabs|music|lyria)(?:@[A-Za-z0-9_]+)?\s*", "", raw_caption, flags=re.IGNORECASE).strip()
-    caption_text = clean_caption or raw_caption
+    clean_caption = re.sub(r"^/(?:video|gen|prompt|v|s2|omni|voice|tts|eleven|elevenlabs|music|lyria)(?:@[A-Za-z0-9_]+)?\s*", "", raw_caption, flags=re.IGNORECASE).strip()
+    caption_text = clean_caption
     raw_low = raw_caption.lower()
-    is_eleven = (
-        raw_low.startswith(("/voice", "/tts", "/eleven", "/elevenlabs"))
-        or "eleven" in caption_text.lower()
-        or "озвуч" in caption_text.lower()
-    )
-
-    if is_group and not is_eleven and not (caption_text and "видео" in caption_text.lower()):
-        if message.from_user.id not in user_drafts:
-            return
+    user_id = message.from_user.id
 
     audio_bytes = await extract_audio_bytes(message, bot)
     if not audio_bytes:
         return
+    remember_audio(message.chat.id, user_id, audio_bytes)
 
-    user_id = message.from_user.id
+    if is_group:
+        bot_info = await bot.me()
+        bot_un = f"@{bot_info.username}".lower()
+        is_reply_to_bot = bool(
+            message.reply_to_message
+            and getattr(message.reply_to_message, "from_user", None)
+            and message.reply_to_message.from_user.is_bot
+        )
+        addressed = (
+            raw_low.startswith(("/video", "/gen", "/prompt", "/v", "/s2", "/omni", "/voice", "/tts", "/eleven", "/elevenlabs"))
+            or bot_un in raw_low
+            or is_reply_to_bot
+            or fresh_draft(user_id) is not None
+        )
+        if not addressed:
+            return
+
     draft = fresh_draft(user_id)
-
-    if draft and draft.get("menu_mode") == "voice":
-        # Voice tab: the recording is the source for revoicing
-        draft["audio_bytes"] = audio_bytes
-        draft["voice_mode"] = "changer"
-        get_user_prefs(user_id)["voice_mode"] = "changer"
-    elif draft and draft.get("menu_mode", "video") == "video" and not is_eleven:
-        # Attach audio reference to the user's active video draft!
+    if draft and draft.get("menu_mode", "video") == "video":
         draft["audio_bytes"] = audio_bytes
         if caption_text:
             draft["prompt"] = caption_text
-    elif is_eleven:
-        # "озвуч"/eleven/command in caption → open the Voice tab in revoice mode
-        draft = create_draft_for_user(
-            user_id=user_id,
-            prompt=caption_text,
-            user_name=get_user_display_name(message.from_user),
-            message_id=message.message_id,
-            menu_mode="voice",
-            audio_bytes=audio_bytes,
-        )
-        draft["voice_mode"] = "changer"
-        get_user_prefs(user_id)["voice_mode"] = "changer"
     else:
+        photos = get_recent_photos_for_user(message.chat.id, user_id, max_age_sec=120.0)
+        recent_vid = get_recent_video_for_user(message.chat.id, user_id, max_age_sec=120.0)
         prompt = caption_text or "Сгенерируй видео под прикрепленный звук"
         draft = create_draft_for_user(
             user_id=user_id,
             prompt=prompt,
+            image_bytes=photos[0] if photos else None,
+            ref_images=photos if photos else [],
             user_name=get_user_display_name(message.from_user),
             message_id=message.message_id,
             menu_mode="video",
             audio_bytes=audio_bytes,
+            ref_video=recent_vid,
         )
+
+    cur_m = draft.get("model_key", DEFAULT_MODEL)
+    if not MODELS.get(cur_m, {}).get("audio_ref"):
+        draft["model_key"] = DEFAULT_MODEL
+        get_user_prefs(user_id)["model_key"] = DEFAULT_MODEL
+    align_draft_to_model(draft, MODELS.get(draft["model_key"], MODELS[DEFAULT_MODEL]), owner_id=user_id)
 
     sync_draft_references(draft)
     await show_or_update_menu(message, bot, draft, user_id)
@@ -3294,6 +3326,7 @@ async def handle_video_command(message: Message, command: CommandObject, bot: Bo
     ref_images = state_refs if state_refs else found_refs
 
     reply_video: Optional[bytes] = None
+    reply_audio: Optional[bytes] = None
     if message.reply_to_message and _is_video_message(message.reply_to_message):
         try:
             reply_video = await extract_video_bytes(message.reply_to_message, bot)
@@ -3302,12 +3335,28 @@ async def handle_video_command(message: Message, command: CommandObject, bot: Bo
             return
         except Exception as e:
             logger.error(f"Failed to download replied video: {e}", exc_info=True)
+    elif message.reply_to_message:
+        try:
+            reply_audio = await extract_audio_bytes(message.reply_to_message, bot)
+        except Exception as e:
+            logger.error(f"Failed to download replied audio: {e}", exc_info=True)
+
+    if not reply_video:
+        reply_video = get_recent_video_for_user(message.chat.id, user_id, max_age_sec=120.0)
+    if not reply_audio:
+        reply_audio = get_recent_audio_for_user(message.chat.id, user_id, max_age_sec=120.0)
 
     if not prompt_args and message.reply_to_message:
         prompt_args = (message.reply_to_message.caption or message.reply_to_message.text or "").strip()
 
     if not prompt_args and reply_video:
-        prompt_args = "Измени видео, сохранив движение и композицию"
+        prompt_args = (
+            "Замени персонажа на видео на персонажа с фото, сохранив движения и композицию"
+            if ref_images
+            else "Измени видео, сохранив движение и композицию"
+        )
+    if not prompt_args and reply_audio:
+        prompt_args = "Сгенерируй видео под прикрепленный звук"
     if not prompt_args and ref_images:
         prompt_args = "Анимировать фото, плавное реалистичное кинематографичное движение"
 
@@ -3322,6 +3371,7 @@ async def handle_video_command(message: Message, command: CommandObject, bot: Bo
         user_name=user_name,
         message_id=message.message_id,
         menu_mode="video",
+        audio_bytes=reply_audio,
     )
     if reply_video:
         await attach_reference_video_to_draft(
@@ -3330,6 +3380,12 @@ async def handle_video_command(message: Message, command: CommandObject, bot: Bo
             user_id,
             source_msg=message.reply_to_message,
         )
+    elif reply_audio:
+        cur_m = draft.get("model_key", DEFAULT_MODEL)
+        if not MODELS.get(cur_m, {}).get("audio_ref"):
+            draft["model_key"] = DEFAULT_MODEL
+            get_user_prefs(user_id)["model_key"] = DEFAULT_MODEL
+        align_draft_to_model(draft, MODELS.get(draft["model_key"], MODELS[DEFAULT_MODEL]), owner_id=user_id)
     await show_or_update_menu(message, bot, draft, user_id)
 
 
@@ -5955,9 +6011,11 @@ async def on_start_generate(call: CallbackQuery, queue: GenerationQueue):
         await call.answer("Параметры устарели. Отправьте новый запрос /video, /image, /voice или /music.", show_alert=True)
         return
 
-    # Clear recent user photos so next request starts completely fresh
+    # Clear recent user media so next request starts completely fresh
     u_key = (call.message.chat.id, owner_id)
     recent_user_photos.pop(u_key, None)
+    recent_user_videos.pop(u_key, None)
+    recent_user_audios.pop(u_key, None)
 
     sync_draft_references(draft)
     menu_mode = draft.get("menu_mode", "video")
