@@ -16,7 +16,8 @@ from api_client import (
     DaVinciClient,
     translate_server_error,
 )
-from promptwise_client import PromptWiseClient
+from loremotion_client import LoreMotionClient
+from gencpu_client import GenCPUClient
 from config import MODELS, BASE_DIR, DEFAULT_MODEL, MAX_CONCURRENT_JOBS, calculate_credit_cost
 import image_utils
 import history_manager
@@ -193,16 +194,18 @@ class GenerationQueue:
         minimax_client: Optional[MiniMaxClient] = None,
         qwen_client: Optional[QwenImageClient] = None,
         davinci_client: Optional[DaVinciClient] = None,
-        promptwise_client: Optional[PromptWiseClient] = None,
+        loremotion_client: Optional[LoreMotionClient] = None,
+        gencpu_client: Optional[GenCPUClient] = None,
     ):
         self.bot = bot
-        self.promptwise_client = promptwise_client or PromptWiseClient()
+        self.loremotion_client = loremotion_client or LoreMotionClient()
+        self.gencpu_client = gencpu_client or GenCPUClient()
         self.api_client = api_client
         self.v2_client = v2_client
         self.grok_client = grok_client
         self.minimax_client = minimax_client
         self.qwen_client = qwen_client
-        self.davinci_client = davinci_client or self.promptwise_client
+        self.davinci_client = davinci_client or self.loremotion_client
         self.queue: asyncio.Queue[GenerationJob] = asyncio.Queue()
         self.worker_tasks: List[asyncio.Task] = []
         self.is_running = False
@@ -353,8 +356,10 @@ class GenerationQueue:
                 self.queue.task_done()
 
     def _get_client_for_backend(self, backend: str):
-        if backend in ("promptwise", "promptwise_image", "promptwise_motion", "promptwise_voice", "promptwise_audio"):
-            return self.promptwise_client
+        if backend in ("loremotion", "loremotion_image"):
+            return self.loremotion_client
+        if backend in ("gencpu", "gencpu_image"):
+            return self.gencpu_client
         if backend in ("davinci", "davinci_image", "davinci_voice", "davinci_music", "davinci_motion"):
             return self.davinci_client
         if backend == "v2":
@@ -365,7 +370,7 @@ class GenerationQueue:
             return self.minimax_client
         if backend == "qwen_image":
             return self.qwen_client
-        return self.api_client or self.promptwise_client
+        return self.api_client or self.loremotion_client
 
     async def _process_job(self, job: GenerationJob):
         model_info = MODELS.get(job.model_key, MODELS[DEFAULT_MODEL])
@@ -415,8 +420,8 @@ class GenerationQueue:
             total_elapsed,
         )
 
-        # --- BRANCH 1: IMAGE GENERATION (PromptWise Image models) ---
-        if backend in ("promptwise_image", "davinci_image", "qwen_image"):
+        # --- BRANCH 1: IMAGE GENERATION ---
+        if backend in ("promptwise_image", "davinci_image", "qwen_image", "loremotion_image", "gencpu_image"):
             ts = int(asyncio.get_event_loop().time())
             temp_file = VIDEOS_DIR / f"{job.model_key}_{job.user_id}_{ts}.png"
             raw_file = VIDEOS_DIR / f"raw_{job.model_key}_{job.user_id}_{ts}.png"
@@ -651,9 +656,26 @@ class GenerationQueue:
         try:
             logger.info(f"Downloading video from {direct_link}...")
             video_bytes = await client.download_video(media_url)
+            if str(media_url).startswith("file://"):
+                try:
+                    Path(str(media_url)[7:]).unlink(missing_ok=True)
+                except Exception:
+                    pass
             raw_file = VIDEOS_DIR / f"raw_{job.model_key}_{job.user_id}_{ts}.mp4"
             raw_file.write_bytes(video_bytes)
             logger.info(f"Saved raw video to {raw_file} ({len(video_bytes)} bytes)")
+
+            strip_gemini = bool(model_info.get("strip_gemini_watermark") or backend == "google_vids")
+            if strip_gemini:
+                await self._update_status(
+                    job,
+                    self._format_progress_message(
+                        job,
+                        pct=99,
+                        elapsed=total_elapsed,
+                        stage="Убираю знак Gemini и накладываю водянку..."
+                    )
+                )
 
             logger.info("Applying watermark and audio to video...")
             temp_audio_ref: Optional[Path] = None
@@ -676,6 +698,7 @@ class GenerationQueue:
                     watermark_id=job.watermark_id or None,
                     user_id=job.user_id,
                     show_username=job.show_watermark_username,
+                    strip_gemini_watermark=strip_gemini,
                 )
             finally:
                 if temp_audio_ref and temp_audio_ref.exists():
@@ -788,6 +811,72 @@ class GenerationQueue:
         all_refs = job.get_all_ref_images()
 
         try:
+            if backend in ("loremotion", "loremotion_image"):
+                prepared_refs = [
+                    image_utils.prepare_user_image(b, job.ratio or ("1:1" if backend == "loremotion_image" else "16:9"))
+                    for b in all_refs if b
+                ]
+                task_id = await self.loremotion_client.create_render_task(
+                    model_info=model_info,
+                    prompt=job.prompt,
+                    duration=job.duration if job.duration > 0 else 5,
+                    resolution=job.resolution,
+                    ratio=job.ratio,
+                    ref_images=prepared_refs,
+                    ref_mode=job.ref_mode,
+                )
+
+            elif backend in ("gencpu", "gencpu_image"):
+                prepared_refs = [
+                    image_utils.prepare_user_image(b, job.ratio or ("1:1" if backend == "gencpu_image" else "16:9"))
+                    for b in all_refs if b
+                ]
+                task_id = await self.gencpu_client.create_batch_task(
+                    model_info=model_info,
+                    prompt=job.prompt,
+                    duration=job.duration if job.duration > 0 else 8,
+                    resolution=job.resolution,
+                    ratio=job.ratio,
+                    ref_images=prepared_refs,
+                )
+
+            elif backend == "google_vids":
+                prepared_refs = [
+                    image_utils.prepare_user_image(b, job.ratio or "16:9") for b in all_refs if b
+                ]
+                start_ts = asyncio.get_event_loop().time()
+                last_ui_ts = 0.0
+
+                async def _gvids_progress(pct: int, stage: str):
+                    nonlocal last_ui_ts
+                    now = asyncio.get_event_loop().time()
+                    if now - last_ui_ts < 2.0 and pct < 90:
+                        return
+                    last_ui_ts = now
+                    await self._update_status(
+                        job,
+                        self._format_progress_message(
+                            job,
+                            pct=pct,
+                            elapsed=int(now - start_ts),
+                            stage=stage,
+                        ),
+                    )
+
+                clip_path = await self.google_vids_client.generate_video(
+                    prompt=job.prompt,
+                    duration=job.duration if job.duration > 0 else 8,
+                    resolution=job.resolution,
+                    ratio=job.ratio,
+                    generate_audio=job.generate_audio,
+                    ref_images=prepared_refs,
+                    ref_mode=job.ref_mode,
+                    ref_video=job.ref_video,
+                    on_progress=_gvids_progress,
+                )
+                total_elapsed = max(1, int(asyncio.get_event_loop().time() - start_ts))
+                return f"file://{clip_path}", "", total_elapsed, "google_vids"
+
             if backend == "promptwise":
                 if not all_refs and job.ref_video and not model_info.get("video_ref"):
                     v_frame = await extract_frame_from_video(job.ref_video)

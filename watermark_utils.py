@@ -593,6 +593,89 @@ def _badge_combo_tail(
     return f"[{base_label}][wm]overlay={pos_expr}{short_opt}[outv]"
 
 
+def calculate_gemini_delogo_rect(
+    video_w: int,
+    video_h: int,
+    corner: str = "bottom_right",
+) -> Tuple[int, int, int, int]:
+    """Compute a safe FFmpeg delogo rectangle (x, y, w, h) covering the visible Gemini badge."""
+    vw = max(64, int(video_w or 1280))
+    vh = max(64, int(video_h or 720))
+
+    raw_override = (os.getenv("GEMINI_DELOGO_RECT") or "").strip()
+    if raw_override:
+        parts = [p.strip() for p in raw_override.split(",")]
+        if len(parts) == 4 and all(p.isdigit() for p in parts):
+            ox, oy, ow, oh = (int(p) for p in parts)
+            ox = max(1, min(ox, vw - 10))
+            oy = max(1, min(oy, vh - 10))
+            ow = max(8, min(ow, vw - ox - 1))
+            oh = max(8, min(oh, vh - oy - 1))
+            return ox, oy, ow, oh
+
+    # Gemini / Veo / Google Vids visible badge sits in the corner (~12% width x ~7.5% height)
+    dw = max(72, min(int(vw * 0.14), 260))
+    dh = max(28, min(int(vh * 0.085), 110))
+    margin_x = max(8, int(vw * 0.012))
+    margin_y = max(8, int(vh * 0.014))
+
+    dw = min(dw, max(16, vw - margin_x - 4))
+    dh = min(dh, max(16, vh - margin_y - 4))
+
+    c = (corner or "bottom_right").strip().lower()
+    if c == "bottom_left":
+        dx = margin_x
+        dy = vh - dh - margin_y
+    elif c == "top_right":
+        dx = vw - dw - margin_x
+        dy = margin_y
+    elif c == "top_left":
+        dx = margin_x
+        dy = margin_y
+    else:
+        dx = vw - dw - margin_x
+        dy = vh - dh - margin_y
+
+    dx = max(1, min(dx, vw - dw - 1))
+    dy = max(1, min(dy, vh - dh - 1))
+    return dx, dy, dw, dh
+
+
+async def remove_gemini_watermark(
+    input_path: Path,
+    output_path: Path,
+    corner: str = "bottom_right",
+) -> bool:
+    """Remove the visible Gemini corner badge from a video clip via FFmpeg delogo."""
+    if not input_path.exists() or input_path.stat().st_size == 0:
+        return False
+    vw, vh = await get_media_dimensions(input_path)
+    dx, dy, dw, dh = calculate_gemini_delogo_rect(vw, vh, corner=corner)
+    vf = f"scale=trunc(iw/2)*2:trunc(ih/2)*2,delogo=x={dx}:y={dy}:w={dw}:h={dh}"
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(input_path),
+        "-vf", vf,
+        "-map", "0:v:0",
+        "-map", "0:a?",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-preset", "veryfast",
+        "-crf", "20",
+        "-c:a", "copy",
+        str(output_path),
+    ]
+    try:
+        rc, err = await _run_ffmpeg_command(cmd, timeout=180.0)
+        if rc == 0 and output_path.exists() and output_path.stat().st_size > 0:
+            logger.info(f"Removed visible Gemini watermark ({dx},{dy},{dw}x{dh}) -> {output_path}")
+            return True
+        logger.warning(f"Gemini watermark removal failed (rc={rc}): {err[-300:]}")
+    except Exception as e:
+        logger.warning(f"Gemini watermark removal error: {e}")
+    return False
+
+
 async def apply_watermark(
     input_path: Path,
     output_path: Path,
@@ -602,6 +685,8 @@ async def apply_watermark(
     watermark_id: Optional[str] = None,
     user_id: Optional[int] = None,
     show_username: Optional[bool] = None,
+    strip_gemini_watermark: bool = False,
+    gemini_corner: str = "bottom_right",
 ) -> bool:
     """Overlays the animated watermark + optional username badge onto a video,
     cycling corners every time the watermark disappears (every 5.0s).
@@ -631,7 +716,12 @@ async def apply_watermark(
         cycle_expr_x = f"if(mod(floor(t/{c_sec}),2), 24, W-w-24)"
         cycle_expr_y = f"if(between(mod(floor(t/{c_sec}),4), 1, 2), H-h-24, 24)"
 
-    base_prep = "[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2[base];"
+    if strip_gemini_watermark:
+        gx, gy, gw, gh = calculate_gemini_delogo_rect(vw, vh, corner=gemini_corner)
+        base_prep = f"[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2,delogo=x={gx}:y={gy}:w={gw}:h={gh}[base];"
+    else:
+        base_prep = "[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2[base];"
+    ffmpeg_timeout = max(120.0, float(target_duration or 15) * 6.0)
     non_webm_prep = (
         f"[1:v]crop=132:52:28:84,chromakey=0x05ba06:0.22:0.06,scale={wm_w}:-1,format=yuva420p[wm];"
         if is_sora and not is_webm
@@ -708,7 +798,7 @@ async def apply_watermark(
                 ])
 
             try:
-                rc, err = await _run_ffmpeg_command(cmd_primary, timeout=120.0)
+                rc, err = await _run_ffmpeg_command(cmd_primary, timeout=ffmpeg_timeout)
                 if rc == 0 and output_path.exists() and output_path.stat().st_size > 0:
                     logger.info(f"Successfully applied watermark with user badge ({username if badge_path else None}) and audio to {output_path}")
                     return True
@@ -765,7 +855,7 @@ async def apply_watermark(
                     str(output_path)
                 ])
 
-            rc, err = await _run_ffmpeg_command(cmd_fb, timeout=120.0)
+            rc, err = await _run_ffmpeg_command(cmd_fb, timeout=ffmpeg_timeout)
             return rc == 0 and output_path.exists() and output_path.stat().st_size > 0
 
         else:
@@ -801,7 +891,7 @@ async def apply_watermark(
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "22",
                     "-c:a", "copy", *dur_args, str(output_path),
                 ])
-            rc, err = await _run_ffmpeg_command(cmd, timeout=120.0)
+            rc, err = await _run_ffmpeg_command(cmd, timeout=ffmpeg_timeout)
             return rc == 0 and output_path.exists() and output_path.stat().st_size > 0
 
     finally:

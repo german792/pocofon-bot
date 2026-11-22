@@ -35,6 +35,7 @@ import history_manager
 
 from config import (
     BOT_TOKEN,
+    GOOGLE_VIDS_FOR_OMNI,
     MODELS,
     VIDEO_MODEL_KEYS,
     IMAGE_MODEL_KEYS,
@@ -66,7 +67,8 @@ from config import (
     MUSIC_MOODS,
     MUSIC_THEMES,
 )
-from promptwise_client import PromptWiseClient
+from loremotion_client import LoreMotionClient
+from gencpu_client import GenCPUClient
 from queue_worker import GenerationQueue, GenerationJob
 from watermark_utils import extract_frame_from_video, extract_audio_from_video, overlay_grid_video
 
@@ -81,7 +83,7 @@ router.message.middleware(user_access.AccessControlMiddleware())
 router.callback_query.middleware(user_access.AccessControlMiddleware())
 
 # Marker of the code version (visible in the menu) to confirm the latest bot.py is deployed
-BUILD_ID = "poco-v10-promptwise-2026-11-20"
+BUILD_ID = "poco-v11-free-2026-11-23"
 
 
 class UserInputState(StatesGroup):
@@ -433,17 +435,22 @@ def _tab_btn(key: str, label: str, icon_key: str, fb: str, active: str, owner_id
 
 
 def tabs_rows(active: str, owner_id: int) -> List[List[InlineKeyboardButton]]:
-    """Two clean rows of top mode tabs: Video/Photo/Motion + Voice/Music."""
+    """Top mode tabs: only show categories that have active models."""
     row1 = [
         _tab_btn("video", "Видео", "rocket", "🎬", active, owner_id),
         _tab_btn("image", "Фото", "wand", "🖼", active, owner_id),
-        _tab_btn("motion", "Motion", "dance", "🕺", active, owner_id),
     ]
-    row2 = [
-        _tab_btn("voice", "Голос", "voice", "🎙", active, owner_id),
-        _tab_btn("music", "Музыка", "mega", "🎵", active, owner_id),
-    ]
-    return [row1, row2]
+    if MOTION_MODEL_KEYS:
+        row1.append(_tab_btn("motion", "Motion", "dance", "🕺", active, owner_id))
+    rows = [row1]
+    row2: List[InlineKeyboardButton] = []
+    if VOICE_MODEL_KEYS:
+        row2.append(_tab_btn("voice", "Голос", "voice", "🎙", active, owner_id))
+    if MUSIC_MODEL_KEYS:
+        row2.append(_tab_btn("music", "Музыка", "mega", "🎵", active, owner_id))
+    if row2:
+        rows.append(row2)
+    return rows
 
 
 def tabs_row(active: str, owner_id: int) -> List[InlineKeyboardButton]:
@@ -1963,8 +1970,11 @@ async def handle_set_token(message: Message, command: CommandObject, queue: Gene
         )
         return
     new_tok = raw.split()[0].strip()
-    queue.promptwise_client.set_cookie(new_tok)
-    await message.reply(f"{ce('check', '✅')} <b>Токен сессии успешно обновлен и сохранен!</b>", parse_mode="HTML")
+    if new_tok.startswith("wtok_"):
+        queue.gencpu_client.token = new_tok
+    else:
+        queue.loremotion_client.token = new_tok
+    await message.reply(f"{ce('check', '✅')} <b>Токен сессии успешно обновлен!</b>", parse_mode="HTML")
 
 
 @router.message(Command("id", "whoami", ignore_case=True, ignore_mention=True))
@@ -2511,35 +2521,13 @@ async def handle_limit_command(message: Message):
 
 @router.message(Command("balance", "credits", "account", "баланс", "кредиты"))
 async def handle_balance_command(message: Message, queue: GenerationQueue):
-    """View current PromptWise account credit balance and plan tier."""
-    status_msg = await message.reply(
-        f"{ce('load_neon', '🔄')} <b>Запрашиваю актуальный баланс кредитов...</b>",
-        parse_mode="HTML"
+    """View active free models status and daily limit."""
+    await message.reply(
+        f"{ce('card', '💳')} <b>Бесплатный режим</b>\n\n"
+        f"{ce('idea', '💡')} <i>Все {len(VIDEO_MODEL_KEYS)} видео-моделей и {len(IMAGE_MODEL_KEYS)} фото-модели доступны бесплатно. "
+        f"Проверить остаток на день: /limit</i>",
+        parse_mode="HTML",
     )
-    try:
-        data = await queue.promptwise_client.get_account_balance()
-        total = data["total_credits"]
-        consumable = data["consumable_credits"]
-        plan = data["plan_credits"]
-        tier = data["tier_name"]
-        renewal = data["renewal_date"]
-
-        text = (
-            f"{ce('card', '💳')} <b>Баланс Poco AI</b>\n\n"
-            f"{ce('coin', '💰')} <b>Доступно кредитов:</b> <code>{total:,}</code>\n"
-            f"├ <i>Кошелёк (Wallet):</i> <code>{consumable:,}</code>\n"
-            f"└ <i>Тарифный лимит (Allowance):</i> <code>{plan:,}</code>\n\n"
-            f"{ce('vip', '👑')} <b>Тариф:</b> {html.escape(str(tier))}\n"
-            f"{ce('load_hourglass', '📅')} <b>Обновление лимита:</b> {html.escape(str(renewal))}\n\n"
-            f"{ce('idea', '💡')} <i>Все 58 моделей подключены и готовы к работе!</i>"
-        )
-        await status_msg.edit_text(text, parse_mode="HTML")
-    except Exception as e:
-        logger.error(f"Failed to fetch balance: {e}", exc_info=True)
-        await status_msg.edit_text(
-            f"{ce('alert', '❌')} <b>Не удалось получить баланс кредитов:</b>\n{html.escape(str(e))}",
-            parse_mode="HTML"
-        )
 
 
 # --- Photos & Documents Handling (Universal Reference Support) ---
@@ -3179,10 +3167,15 @@ async def handle_waiting_prompt(message: Message, bot: Bot, state: FSMContext):
         elif cmd in ("/image", "/poster", "/img", "/pic", "/photo", "/banana", "/qwen"):
             target_mode = "image"
             text = cmd_arg
-        elif cmd in ("/video", "/gen", "/prompt", "/v", "/s2", "/omni"):
+        elif cmd in ("/video", "/gen", "/prompt", "/v", "/s2", "/omni", "/vids"):
             target_mode = "video"
-            if cmd == "/omni" and "gemini_omni_1_2_flash" in MODELS:
-                model_override = "gemini_omni_1_2_flash"
+            if cmd == "/vids" and "google_vids_omni" in MODELS:
+                model_override = "google_vids_omni"
+            elif cmd == "/omni":
+                if GOOGLE_VIDS_FOR_OMNI and "google_vids_omni" in MODELS:
+                    model_override = "google_vids_omni"
+                elif "gemini_omni_1_2_flash" in MODELS:
+                    model_override = "gemini_omni_1_2_flash"
             text = cmd_arg
         elif cmd in ("/voice", "/tts", "/eleven", "/elevenlabs"):
             target_mode = "voice"
@@ -6177,16 +6170,18 @@ async def main():
     bot = SmartEmojiBot(token=token_to_use)
     dp = Dispatcher(storage=MemoryStorage())
 
-    promptwise_client = PromptWiseClient()
+    loremotion_client = LoreMotionClient()
+    gencpu_client = GenCPUClient()
     queue = GenerationQueue(
         bot=bot,
-        promptwise_client=promptwise_client,
+        loremotion_client=loremotion_client,
+        gencpu_client=gencpu_client,
     )
 
     dp["queue"] = queue
     dp.include_router(router)
 
-    logger.info("Starting Queue Worker (PromptWise)...")
+    logger.info("Starting Queue Worker (Free Models)...")
     queue.start()
 
     logger.info("Starting Telegram Bot Polling...")
@@ -6207,7 +6202,6 @@ async def main():
                 await asyncio.sleep(3)
     finally:
         await queue.stop()
-        await promptwise_client.close()
         await bot.session.close()
 
 
