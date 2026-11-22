@@ -877,7 +877,7 @@ class GenerationQueue:
                 total_elapsed = max(1, int(asyncio.get_event_loop().time() - start_ts))
                 return f"file://{clip_path}", "", total_elapsed, "google_vids"
 
-            if backend == "promptwise":
+            elif backend == "promptwise":
                 if not all_refs and job.ref_video and not model_info.get("video_ref"):
                     v_frame = await extract_frame_from_video(job.ref_video)
                     if v_frame:

@@ -177,13 +177,13 @@ class LoreMotionClient:
 
         async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
             resp = await client.post(
-                f"{self.base_url}/api/renders",
+                f"{self.base_url}/api/jobs",
                 headers=self._headers({"Content-Type": "application/json"}),
                 json=payload,
             )
             if resp.status_code == 401 and await self._refresh_access_token():
                 resp = await client.post(
-                    f"{self.base_url}/api/renders",
+                    f"{self.base_url}/api/jobs",
                     headers=self._headers({"Content-Type": "application/json"}),
                     json=payload,
                 )
@@ -204,21 +204,17 @@ class LoreMotionClient:
             return job_id
 
     async def get_task(self, job_id: str) -> Dict[str, Any]:
-        """Poll GET /api/renders/{job_id} and normalize status."""
+        """Poll GET /api/jobs/{job_id} and normalize status."""
         async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
             resp = await client.get(
-                f"{self.base_url}/api/renders/{job_id}",
+                f"{self.base_url}/api/jobs/{job_id}",
                 headers=self._headers(),
             )
-            if resp.status_code == 404:
-                list_resp = await client.get(f"{self.base_url}/api/renders", headers=self._headers())
-                if list_resp.status_code == 200:
-                    items = list_resp.json()
-                    if isinstance(items, dict):
-                        items = items.get("renders") or items.get("items") or []
-                    for it in items:
-                        if str(it.get("id")) == str(job_id):
-                            return self._normalize_job(it)
+            if resp.status_code == 401 and await self._refresh_access_token():
+                resp = await client.get(
+                    f"{self.base_url}/api/jobs/{job_id}",
+                    headers=self._headers(),
+                )
             if resp.status_code >= 400:
                 return {"status": "PROCESSING", "progress": 0.1}
             return self._normalize_job(resp.json())
