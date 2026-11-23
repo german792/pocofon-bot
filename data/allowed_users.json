@@ -83,7 +83,8 @@
     "mmsera2",
     "svosav",
     "youtube_offical67",
-    "ai_chips1"
+    "ai_chips1",
+    "artur4hick"
   ],
   "allowed_user_ids": [
     7148172629,
@@ -144,7 +145,8 @@
     8289768832,
     8524396097,
     6567685808,
-    6145707828
+    6145707828,
+    5911700520
   ],
   "allowed_groups": {
     "-1004328649380": {
@@ -742,6 +744,14 @@
       "username": "ai_chips1",
       "name": "Chip ai creator",
       "added_at": 1795354286.3074563,
+      "added_by": "group_-1004328649380",
+      "role": "user"
+    },
+    "artur4hick": {
+      "user_id": 5911700520,
+      "username": "Artur4hick",
+      "name": "БарбоИИ",
+      "added_at": 1795457333.8945653,
       "added_by": "group_-1004328649380",
       "role": "user"
     }
