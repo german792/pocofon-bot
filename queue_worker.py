@@ -18,6 +18,7 @@ from api_client import (
 )
 from loremotion_client import LoreMotionClient
 from gencpu_client import GenCPUClient
+from ark_client import ArkClient
 from config import MODELS, BASE_DIR, DEFAULT_MODEL, MAX_CONCURRENT_JOBS, calculate_credit_cost
 import image_utils
 import history_manager
@@ -196,10 +197,12 @@ class GenerationQueue:
         davinci_client: Optional[DaVinciClient] = None,
         loremotion_client: Optional[LoreMotionClient] = None,
         gencpu_client: Optional[GenCPUClient] = None,
+        ark_client: Optional[ArkClient] = None,
     ):
         self.bot = bot
         self.loremotion_client = loremotion_client or LoreMotionClient()
         self.gencpu_client = gencpu_client or GenCPUClient()
+        self.ark_client = ark_client or ArkClient()
         self.api_client = api_client
         self.v2_client = v2_client
         self.grok_client = grok_client
@@ -356,6 +359,8 @@ class GenerationQueue:
                 self.queue.task_done()
 
     def _get_client_for_backend(self, backend: str):
+        if backend in ("ark_video", "ark_image", "ark_text"):
+            return self.ark_client
         if backend in ("loremotion", "loremotion_image"):
             return self.loremotion_client
         if backend in ("gencpu", "gencpu_image"):
@@ -420,8 +425,22 @@ class GenerationQueue:
             total_elapsed,
         )
 
+        # --- BRANCH 0: TEXT / LLM GENERATION ---
+        if backend == "ark_text":
+            reply_text = str(media_url or "").strip()
+            if len(reply_text) > 3600:
+                reply_text = reply_text[:3597] + "..."
+            user_line = f"{ce('astro', '👤')} {job.user_name}\n" if job.user_name else ""
+            msg_html = (
+                f"{ce('idea', '💬')} <b>{html.escape(str(model_name))}</b>  ·  {ce('shot', '⚡')} {total_elapsed} с\n"
+                f"{user_line}\n"
+                f"{html.escape(reply_text)}"
+            )
+            await self._update_status(job, msg_html)
+            return
+
         # --- BRANCH 1: IMAGE GENERATION ---
-        if backend in ("promptwise_image", "davinci_image", "qwen_image", "loremotion_image", "gencpu_image"):
+        if backend in ("promptwise_image", "davinci_image", "qwen_image", "loremotion_image", "gencpu_image", "ark_image"):
             ts = int(asyncio.get_event_loop().time())
             temp_file = VIDEOS_DIR / f"{job.model_key}_{job.user_id}_{ts}.png"
             raw_file = VIDEOS_DIR / f"raw_{job.model_key}_{job.user_id}_{ts}.png"
@@ -811,7 +830,49 @@ class GenerationQueue:
         all_refs = job.get_all_ref_images()
 
         try:
-            if backend in ("loremotion", "loremotion_image"):
+            if backend == "ark_text":
+                start_ts = asyncio.get_event_loop().time()
+                prepared_refs = [
+                    image_utils.prepare_user_image(b, "1:1") for b in all_refs if b
+                ]
+                reply_text = await self.ark_client.create_chat_completion(
+                    model_info=model_info,
+                    prompt=job.prompt,
+                    ref_images=prepared_refs,
+                )
+                elapsed = max(1, int(asyncio.get_event_loop().time() - start_ts))
+                return reply_text, "", elapsed, "ark_text"
+
+            elif backend == "ark_image":
+                start_ts = asyncio.get_event_loop().time()
+                prepared_refs = [
+                    image_utils.prepare_user_image(b, job.ratio or "1:1") for b in all_refs if b
+                ]
+                img_url = await self.ark_client.create_image_url(
+                    model_info=model_info,
+                    prompt=job.prompt,
+                    ratio=job.ratio or "1:1",
+                    ref_images=prepared_refs,
+                )
+                elapsed = max(1, int(asyncio.get_event_loop().time() - start_ts))
+                return img_url, "", elapsed, "ark_image"
+
+            elif backend == "ark_video":
+                prepared_refs = [
+                    image_utils.prepare_user_image(b, job.ratio or "16:9") for b in all_refs if b
+                ]
+                task_id = await self.ark_client.create_video_task(
+                    model_info=model_info,
+                    prompt=job.prompt,
+                    duration=job.duration if job.duration > 0 else 5,
+                    resolution=job.resolution,
+                    ratio=job.ratio,
+                    generate_audio=job.generate_audio,
+                    ref_images=prepared_refs,
+                    ref_mode=job.ref_mode,
+                )
+
+            elif backend in ("loremotion", "loremotion_image"):
                 prepared_refs = [
                     image_utils.prepare_user_image(b, job.ratio or ("1:1" if backend == "loremotion_image" else "16:9"))
                     for b in all_refs if b

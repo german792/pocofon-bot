@@ -39,9 +39,11 @@ from config import (
     MODELS,
     VIDEO_MODEL_KEYS,
     IMAGE_MODEL_KEYS,
+    TEXT_MODEL_KEYS,
     get_model_grid_label,
     DEFAULT_MODEL,
     DEFAULT_IMAGE_MODEL,
+    DEFAULT_TEXT_MODEL,
     DEFAULT_DURATION,
     DEFAULT_RESOLUTION,
     DEFAULT_IMAGE_RESOLUTION,
@@ -69,6 +71,7 @@ from config import (
 )
 from loremotion_client import LoreMotionClient
 from gencpu_client import GenCPUClient
+from ark_client import ArkClient
 from queue_worker import GenerationQueue, GenerationJob
 from watermark_utils import extract_frame_from_video, extract_audio_from_video, overlay_grid_video
 
@@ -83,7 +86,7 @@ router.message.middleware(user_access.AccessControlMiddleware())
 router.callback_query.middleware(user_access.AccessControlMiddleware())
 
 # Marker of the code version (visible in the menu) to confirm the latest bot.py is deployed
-BUILD_ID = "poco-v11-free-2026-11-23"
+BUILD_ID = "poco-v12-ark-2026-11-23"
 
 
 class UserInputState(StatesGroup):
@@ -440,6 +443,8 @@ def tabs_rows(active: str, owner_id: int) -> List[List[InlineKeyboardButton]]:
         _tab_btn("video", "Видео", "rocket", "🎬", active, owner_id),
         _tab_btn("image", "Фото", "wand", "🖼", active, owner_id),
     ]
+    if TEXT_MODEL_KEYS:
+        row1.append(_tab_btn("text", "Текст", "idea", "💬", active, owner_id))
     if MOTION_MODEL_KEYS:
         row1.append(_tab_btn("motion", "Motion", "dance", "🕺", active, owner_id))
     rows = [row1]
@@ -458,12 +463,40 @@ def tabs_row(active: str, owner_id: int) -> List[InlineKeyboardButton]:
     return tabs_rows(active, owner_id)[0]
 
 
+def build_text_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeyboardMarkup:
+    """Build interactive keyboard for Text / LLM models."""
+    cur_model = draft.get("model_key", DEFAULT_TEXT_MODEL)
+    if cur_model not in TEXT_MODEL_KEYS:
+        cur_model = DEFAULT_TEXT_MODEL
+        draft["model_key"] = cur_model
+    rows: List[List[InlineKeyboardButton]] = [*tabs_rows("text", owner_id)]
+    for i in range(0, len(TEXT_MODEL_KEYS), 3):
+        row = []
+        for mk in TEXT_MODEL_KEYS[i:i + 3]:
+            lbl = get_model_grid_label(mk)
+            mark = "✓ " if mk == cur_model else ""
+            row.append(
+                InlineKeyboardButton(
+                    text=f"{mark}{lbl}",
+                    callback_data=f"set_model:{mk}:{owner_id}",
+                )
+            )
+        rows.append(row)
+    rows.append([
+        cbtn("Отправить запрос", callback_data=f"start_gen:{owner_id}", icon_key="rocket", fallback_emoji="🚀", style="success"),
+        cbtn("Отмена", callback_data=f"cancel_gen:{owner_id}", icon_key="cancel", fallback_emoji="❌", style="danger"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def build_settings_keyboard(draft: Dict[str, Any], owner_id: int) -> InlineKeyboardMarkup:
-    """Build dynamic interactive inline keyboard for Video, Photo, Motion, Voice, or Music."""
+    """Build dynamic interactive inline keyboard for Video, Photo, Text, Motion, Voice, or Music."""
     sync_draft_references(draft)
     menu_mode = draft.get("menu_mode", "video")
     if menu_mode == "image":
         return build_image_settings_keyboard(draft, owner_id)
+    if menu_mode == "text":
+        return build_text_settings_keyboard(draft, owner_id)
     if menu_mode == "motion":
         return build_motion_settings_keyboard(draft, owner_id)
     if menu_mode == "voice":
@@ -1126,11 +1159,29 @@ def get_user_display_name(user) -> str:
     return full_name
 
 
+def format_text_draft_text(draft: Dict[str, Any]) -> str:
+    cur_model = draft.get("model_key", DEFAULT_TEXT_MODEL)
+    if cur_model not in TEXT_MODEL_KEYS:
+        cur_model = DEFAULT_TEXT_MODEL
+        draft["model_key"] = cur_model
+    minfo = MODELS.get(cur_model, MODELS[DEFAULT_TEXT_MODEL])
+    prompt_preview = html.escape(str(draft.get("prompt") or "")[:300])
+    return (
+        f"{ce('idea', '💬')} <b>Текстовый запрос</b>\n\n"
+        f"<b>Модель:</b> {html.escape(minfo['name'])}\n"
+        f"<b>Запрос:</b> <i>{prompt_preview}</i>\n\n"
+        f"{ce('down', '👇')} <i>Выберите модель и нажмите «Отправить запрос»:</i>\n"
+        f"<code>build: {BUILD_ID}</code>"
+    )
+
+
 def format_draft_text(draft: Dict[str, Any]) -> str:
     sync_draft_references(draft)
     menu_mode = draft.get("menu_mode", "video")
     if menu_mode == "image":
         return format_image_draft_text(draft)
+    if menu_mode == "text":
+        return format_text_draft_text(draft)
     if menu_mode == "motion":
         return format_motion_draft_text(draft)
     if menu_mode == "voice":
@@ -5088,6 +5139,8 @@ async def on_switch_menu_tab(call: CallbackQuery):
     prefs = get_user_prefs(owner_id)
     if target_mode == "image":
         draft["model_key"] = prefs.get("image_model_key", DEFAULT_IMAGE_MODEL)
+    elif target_mode == "text":
+        draft["model_key"] = draft.get("model_key") if draft.get("model_key") in TEXT_MODEL_KEYS else DEFAULT_TEXT_MODEL
     elif target_mode == "motion":
         draft["model_key"] = draft.get("model_key") if draft.get("model_key") in MOTION_MODEL_KEYS else MOTION_MODEL_KEY
         draft.setdefault("resolution", "720p")
@@ -6172,10 +6225,12 @@ async def main():
 
     loremotion_client = LoreMotionClient()
     gencpu_client = GenCPUClient()
+    ark_client = ArkClient()
     queue = GenerationQueue(
         bot=bot,
         loremotion_client=loremotion_client,
         gencpu_client=gencpu_client,
+        ark_client=ark_client,
     )
 
     dp["queue"] = queue

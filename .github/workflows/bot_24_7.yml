@@ -52,6 +52,7 @@ jobs:
       - name: Run POCO AI Bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN || secrets.TOKEN }}
+          ARK_API_KEY: ${{ secrets.ARK_API_KEY }}
           LOREMOTION_TOKEN: ${{ secrets.LOREMOTION_TOKEN }}
           LOREMOTION_REFRESH_TOKEN: ${{ secrets.LOREMOTION_REFRESH_TOKEN }}
           GENCPU_TOKEN: ${{ secrets.GENCPU_TOKEN }}
